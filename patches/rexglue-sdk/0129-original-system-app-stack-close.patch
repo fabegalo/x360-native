@@ -1,0 +1,72 @@
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -25,6 +25,7 @@
+   struct SystemUiSession {
+     u32 module = 0, user = 0;
+     bool visible = false, input_enabled = false, close_requested = false, resume_requested = false;
++    bool close_stack_requested = false;
+   };
+   // One foreground system application. Rendering and guest destruction belong
+   // to the selected original UI host, outside these locks and export calls.
+@@ -53,10 +54,11 @@
+     system_ui_.input_enabled = enable;
+     return true;
+   }
+-  bool RequestSystemUiClose() {
++  bool RequestSystemUiClose(bool entire_stack = false) {
+     std::lock_guard lock(system_apps_mutex_);
+     if (!system_ui_.module) return false;
+     system_ui_.close_requested = true;
++    system_ui_.close_stack_requested |= entire_stack;
+     return true;
+   }
+   bool RequestSystemUiResume(u32 module) {
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -489,7 +489,7 @@
+ u32 XamAppUnloadSelf_entry() { return CurrentXAM().GetSystemUI().RequestSystemUiClose() ? 0 : 1627; }
+ u32 XamAppUnloadStack_entry(u32 flags) {
+   if (flags) return 87;
+-  return XamAppUnloadSelf_entry();
++  return CurrentXAM().GetSystemUI().RequestSystemUiClose(true) ? 0 : 1627;
+ }
+ u32 XamEnableSystemAppInput_entry(u32 user, u32 enable) {
+   return CurrentXAM().GetSystemUI().EnableSystemUiInput(user, enable != 0) ? 0 : 1627;
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1341,3 +1341,32 @@
+   CHECK(loader.exit_request == rex::xam::XAMLoaderState::ExitRequest::Firmware);
+   CHECK(loader.firmware_routine == 5);
+ }
++
++
++REX_TEST_CASE("original app stack close remains distinct from self close until the owner unloads", "[kernel][xam][system-ui-session]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    CHECK(c.XAM("XamAppUnloadStack", {0}) == 1627);
++    REQUIRE(ui.RegisterSystemApp({5, 2, 0x1234, 0}) == 0);
++    REQUIRE(ui.BeginSystemUi(5, 2, 0));
++    REQUIRE(ui.SetSystemUiVisible(5));
++    CHECK(c.XAM("XamAppUnloadStack", {1}) == 87);
++    CHECK_FALSE(ui.GetSystemUiSession().close_requested);
++    CHECK(c.XAM("XamAppUnloadSelf") == 0);
++    CHECK(ui.GetSystemUiSession().close_requested);
++    CHECK_FALSE(ui.GetSystemUiSession().close_stack_requested);
++    CHECK(c.XAM("XamAppUnloadStack", {0}) == 0);
++    CHECK(ui.GetSystemUiSession().close_stack_requested);
++    CHECK(ui.GetSystemUiSession().visible);
++    CHECK(c.XAM("XamAppUnloadSelf") == 0);
++    CHECK(ui.GetSystemUiSession().close_stack_requested);
++    CHECK_FALSE(ui.EndSystemUi(6));
++    REQUIRE(ui.EndSystemUi(5));
++    CHECK_FALSE(ui.GetSystemUiSession().close_stack_requested);
++    REQUIRE(ui.BeginSystemUi(5, 2, 0));
++    CHECK_FALSE(ui.GetSystemUiSession().close_requested);
++    CHECK_FALSE(ui.GetSystemUiSession().close_stack_requested);
++    REQUIRE(ui.EndSystemUi(5));
++  });
++}

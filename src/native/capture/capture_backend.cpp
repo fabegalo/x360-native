@@ -1,53 +1,40 @@
 #include "capture_backend.h"
 #include "../commands/memexport.h"
-#include <rex/graphics/pipeline/shader/shader.h>
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/util/draw.h>
-#include <rex/graphics/flags.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include <gpu/xenos/pipeline/shader/shader.h>
+#include <rex/xenos/texture.h>
+#include <rex/xenos/register.h>
+#include <gpu/xenos/draw_state.h>
+#include <gpu/xenos/xenos_settings.h>
+#include <rex/logging/log_category.h>
 #include <rex/chrono/frame_layout.h>
-#include <rex/ui/presenter.h>
-#include <fmt/format.h>
+#include <gpu/xenos/host/presenter.h>
+#include <format>
 #include <xxhash.h>
-#include <fmt/format.h>
+#include <format>
 #include <algorithm>
 #include "../../supervisor/fs_io.h"
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+namespace draw_util = rex::gpu::draw_state;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
 using capture::Record;
 namespace {
 double Ms(std::chrono::steady_clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); }
 // Only allocated guest physical pages are read: garbage fetch constants of
 // unused bindings must not make the capture touch memory the title lacks.
-bool Accessible(rex::memory::Memory& memory, uint32_t address, uint32_t length) {
-  if (!length || uint64_t(address) + length > capture::kPhysicalSize) return false;
-  for (uint64_t page = address & ~uint64_t(4095); page < uint64_t(address) + length; page += 4096) {
-    bool allocated = false;
-    for (uint32_t base : {0xE0000000u, 0xA0000000u, 0xC0000000u}) {
-      auto* heap = memory.LookupHeap(base);
-      const uint32_t origin = memory.GetPhysicalAddress(base);
-      if (page < origin || page >= uint64_t(origin) + heap->heap_size()) continue;
-      uint32_t protect = 0;
-      if (heap->QueryProtect(base + uint32_t(page - origin), &protect) && protect) { allocated = true; break; }
-    }
-    if (!allocated) return false;
-  }
-  return true;
-}
 void TextureRanges(const RegisterFile& regs, const Shader* shader, std::vector<std::pair<uint32_t, uint32_t>>& out) {
   if (!shader) return;
-  for (const auto& binding : shader->texture_bindings()) {
+  for (const auto& binding : shader->GetTextureBindings()) {
     const auto fetch = regs.GetTextureFetch(binding.fetch_constant);
     if (fetch.type != FetchConstantType::kTexture) continue;
     uint32_t width, height, depth, base, mip, low, high;
-    texture_util::GetSubresourcesFromFetchConstant(fetch, &width, &height, &depth, &base, &mip, &low, &high);
+    rex::xenos::GetSubresourcesFromFetchConstant(fetch, &width, &height, &depth, &base, &mip, &low, &high);
     uint32_t guest_pitch = fetch.pitch;
     if (fetch.dimension == DataDimension::k1D)
-      texture_util::RemapWide1DTexture(width, height, guest_pitch, high);
-    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, guest_pitch, width + 1, height + 1,
+      rex::xenos::RemapWide1DTexture(width, height, guest_pitch, high);
+    const auto layout = rex::xenos::GetGuestTextureLayout(fetch.dimension, guest_pitch, width + 1, height + 1,
         depth + 1, fetch.tiled, fetch.format, fetch.packed_mips, true, high);
     if (base) out.emplace_back(base << 12, layout.base.level_data_extent_bytes);
     if (mip && high) out.emplace_back(mip << 12, layout.mips_total_extent_bytes);
@@ -67,10 +54,10 @@ std::string FrameStatsCsvHeader() {
 std::string FrameStatsCsvRow(const FrameStats& f) {
   const auto& c = f.counters;
   // Unmeasured counters are empty fields, never zero readings.
-  auto measured = [&](double value, bool valid) { return valid ? fmt::format("{:.3f}", value) : std::string(); };
+  auto measured = [&](double value, bool valid) { return valid ? std::format("{:.3f}", value) : std::string(); };
   // Outside the renderer and this decorator: PM4 decoding and waiting for the title.
   const double outside = std::max(0.0, f.frame_ms - f.backend_ms - f.capture_ms - f.profile_ms);
-  return fmt::format("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{},{:.3f},{},{:.3f},{},{},{:.3f},{},{:.3f},{},{:.3f},{:.3f},{},{},{},{},{}",
+  return std::format("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{},{:.3f},{},{:.3f},{},{},{:.3f},{},{:.3f},{},{:.3f},{:.3f},{},{},{},{},{}",
       f.frame, f.frame_ms, f.backend_ms, outside, f.capture_ms, f.profile_ms, f.draws, f.draw_ms, f.resolves,
       f.resolve_ms, f.guest_syncs, f.packet_reads, f.sync_ms, f.sample_reads, f.sample_ms, f.shaders, f.shader_ms,
       f.present_ms, c.submissions, measured(double(c.fence_waits), c.measured),
@@ -79,12 +66,12 @@ std::string FrameStatsCsvRow(const FrameStats& f) {
 }
 
 std::unique_ptr<ScanoutBackend> CaptureBackend::Wrap(std::unique_ptr<ScanoutBackend> inner,
-    rex::memory::Memory& memory, Options options) {
+    rex::IPhysicalMemory& memory, const XenosSettings& settings, Options options) {
   if (options.capture.empty() && options.profile.empty()) return inner;
-  return std::make_unique<CaptureBackend>(std::move(inner), memory, std::move(options));
+  return std::make_unique<CaptureBackend>(std::move(inner), memory, settings, std::move(options));
 }
-CaptureBackend::CaptureBackend(std::unique_ptr<ScanoutBackend> inner, rex::memory::Memory& memory, Options options)
-    : inner_(std::move(inner)), memory_(memory), options_(std::move(options)) {
+CaptureBackend::CaptureBackend(std::unique_ptr<ScanoutBackend> inner, rex::IPhysicalMemory& memory, const XenosSettings& settings, Options options)
+    : inner_(std::move(inner)), memory_(memory), settings_(settings), options_(std::move(options)) {
   if (!options_.profile.empty()) {
     if (options_.profile.has_parent_path()) x360n::io::create_directories(options_.profile.parent_path());
     profile_ = std::fopen(x360n::io::Host(options_.profile).string().c_str(), "w");
@@ -110,7 +97,7 @@ CaptureBackend::~CaptureBackend() {
   }
   if (profile_) std::fclose(profile_);
 }
-bool HashImage(const rex::ui::RawImage& image, capture::Hash& out) {
+bool HashImage(const rex::gpu::RawImage& image, capture::Hash& out) {
   return capture::HashRgbxImage(image.data.data(), image.data.size(), image.width, image.height, image.stride, out);
 }
 CaptureBackend::CaptureWork::~CaptureWork() {
@@ -200,7 +187,7 @@ void CaptureBackend::EmitRange(uint32_t address, uint32_t length) {
     auto owned = gpu_pages_.find(uint32_t(page / capture::kPageSize));
     if (owned == gpu_pages_.end()) continue;
     if (owned->second.hashed) {
-      const auto bytes = memory_.TranslatePhysical(uint32_t(page));
+      const auto bytes = memory_.GetReadOnlyPhysicalSpan({uint32_t(page), capture::kPageSize}).value().data();
       if (capture::HashBytes(bytes, capture::kPageSize) != owned->second.hash) {
         gpu_pages_.erase(owned);
         continue;
@@ -219,8 +206,8 @@ void CaptureBackend::MarkGpuWritten(uint32_t address, uint32_t length) {
 void CaptureBackend::EmitRun(uint32_t address, uint32_t length) {
   const auto key = std::make_pair(address, length);
   auto found = emitted_ranges_.find(key);
-  if (found == emitted_ranges_.end() && !Accessible(memory_, address, length)) return;
-  const uint8_t* bytes = memory_.TranslatePhysical(address);
+  if (found == emitted_ranges_.end() && !memory_.IsPhysicalRangeAllocated({address, length})) return;
+  const auto* bytes = memory_.GetReadOnlyPhysicalSpan({address, length}).value().data();
   const auto hash = capture::HashBytes(bytes, length);
   // Unchanged since it was last recorded: the replay already holds these bytes.
   if (found != emitted_ranges_.end() && found->second == hash) return;
@@ -233,8 +220,10 @@ void CaptureBackend::EmitDrawInputs(const RegisterFile& regs, Shader* vs, Shader
                                     DrawPurpose purpose) {
   std::vector<std::pair<uint32_t, uint32_t>> ranges;
   if (indices) ranges.emplace_back(indices->guest_base, indices->length);
-  if (vs) for (const auto& binding : vs->vertex_bindings()) {
-    auto fetch = regs.GetVertexFetch(binding.fetch_constant);
+  if (vs) for (uint32_t fetch_constant = 0; fetch_constant < 96; ++fetch_constant) {
+    if (!(vs->GetConstantRegisterMap().vertex_fetch_bitmap[fetch_constant / 32] &
+          (uint32_t(1) << (fetch_constant % 32)))) continue;
+    auto fetch = regs.GetVertexFetch(fetch_constant);
     fetch.address &= 0x07FFFFFF;
     if (fetch.type == FetchConstantType::kVertex) ranges.emplace_back(fetch.address << 2, fetch.size << 2);
   }
@@ -245,7 +234,7 @@ void CaptureBackend::EmitDrawInputs(const RegisterFile& regs, Shader* vs, Shader
   const bool vertex_exports = purpose == DrawPurpose::kGuest || purpose == DrawPurpose::kVisibilityWithVertexExports;
   std::vector<MemExportRange> exports;
   for (Shader* shader : {vs, ps}) {
-    if (!shader || !shader->memexport_eM_written() || (shader == vs && !vertex_exports)) continue;
+    if (!shader || !shader->GetMemExportEMWritten() || (shader == vs && !vertex_exports)) continue;
     auto [known, inserted] = memexport_known_.try_emplace(shader, false);
     if (inserted) known->second = MemExportAddressesKnown(*shader);
     AddMemExportRanges(regs, *shader, known->second, exports);
@@ -257,7 +246,7 @@ void CaptureBackend::EmitDrawInputs(const RegisterFile& regs, Shader* vs, Shader
     }
 }
 
-void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
+void CaptureBackend::Present(rex::gpu::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
     const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect effect) {
   if (recording()) {
     CaptureWork work(*this);
@@ -285,26 +274,26 @@ void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture
     }
     record.lut.assign(lut, lut + (t.rgb10 ? 128 * 3 : 256));
     // Results after the backend published them for presentation.
-    if (Accessible(memory_, t.address, t.bytes))
-      record.frontbuffer = capture::HashBytes(memory_.TranslatePhysical(t.address), t.bytes);
+    if (memory_.IsPhysicalRangeAllocated({t.address, t.bytes}))
+      record.frontbuffer = capture::HashBytes(memory_.GetReadOnlyPhysicalSpan({t.address, t.bytes}).value().data(), t.bytes);
     std::sort(written_ranges_.begin(), written_ranges_.end());
     written_ranges_.erase(std::unique(written_ranges_.begin(), written_ranges_.end()), written_ranges_.end());
     for (const auto& [address, length] : written_ranges_)
-      if (Accessible(memory_, address, length))
-        record.written.push_back({address, length, capture::HashBytes(memory_.TranslatePhysical(address), length)});
+      if (memory_.IsPhysicalRangeAllocated({address, length}))
+        record.written.push_back({address, length, capture::HashBytes(memory_.GetReadOnlyPhysicalSpan({address, length}).value().data(), length)});
     written_ranges_.clear();
     // GPU results of this and earlier frames as published now: a later
     // difference means the CPU wrote the page.
     for (auto& [page, state] : gpu_pages_)
-      if (Accessible(memory_, page * capture::kPageSize, capture::kPageSize))
-        state = {true, capture::HashBytes(memory_.TranslatePhysical(page * capture::kPageSize), capture::kPageSize)};
+      if (memory_.IsPhysicalRangeAllocated({page * capture::kPageSize, capture::kPageSize}))
+        state = {true, capture::HashBytes(memory_.GetReadOnlyPhysicalSpan({page * capture::kPageSize, capture::kPageSize}).value().data(), capture::kPageSize)};
     // The composed output (gamma, overlay, post effect) of this present.
     // A frame without it cannot be checked visually: the capture is rejected.
-    rex::ui::RawImage image;
+    rex::gpu::RawImage image;
     if (!presenter.CaptureGuestOutput(image)) {
       AbortRecording("the presenter returned no composed image for the frame");
     } else if (!HashImage(image, record.output)) {
-      AbortRecording(fmt::format("the presenter returned an invalid {}x{} image (stride {}, {} bytes)", image.width,
+      AbortRecording(std::format("the presenter returned an invalid {}x{} image (stride {}, {} bytes)", image.width,
                                  image.height, image.stride, image.data.size()));
     } else {
       record.output_width = image.width;
@@ -368,7 +357,7 @@ Shader* CaptureBackend::LoadShader(ShaderType type, const uint32_t* data, uint32
     shaders_.emplace(shader, ShaderInfo{next_shader_++, uint32_t(type), std::vector<uint32_t>(data, data + count)});
   return shader;
 }
-void CaptureBackend::Draw(const RegisterFile& regs, rex::memory::Memory& memory, Shader* vs, Shader* ps,
+void CaptureBackend::Draw(const RegisterFile& regs, rex::IPhysicalMemory& memory, Shader* vs, Shader* ps,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   if (recording()) {
     CaptureWork work(*this);
@@ -383,15 +372,15 @@ void CaptureBackend::Draw(const RegisterFile& regs, rex::memory::Memory& memory,
   Scope scope{*this, frame_.draw_ms};
   inner_->Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
 }
-void CaptureBackend::Resolve(const RegisterFile& regs, rex::memory::Memory& memory) {
+void CaptureBackend::Resolve(const RegisterFile& regs, rex::IPhysicalMemory& memory) {
   if (recording()) {
     CaptureWork work(*this);
     EmitRegisters(regs);
     auto rect = regs.GetVertexFetch(0);
     rect.address &= 0x07FFFFFF;
     if (rect.type == FetchConstantType::kVertex) EmitRange(rect.address << 2, std::max<uint32_t>(rect.size << 2, 24u));
-    draw_util::ResolveInfo info;
-    if (draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info, false, GetConfiguredEdramTileCount()) && info.copy_dest_extent_length) {
+    draw_util::ResolveRequest info;
+    if (draw_util::GetResolveInfo(settings_, regs, memory, 1, 1, false, false, info, false, options_.edram_tile_count) && info.copy_dest_extent_length) {
       const uint32_t begin = info.copy_dest_base & ~4095u;
       const uint64_t end = (uint64_t(info.copy_dest_extent_start) + info.copy_dest_extent_length + 4095) & ~uint64_t(4095);
       // Bytes of the destination pages the resolve does not write still reach the mirror.

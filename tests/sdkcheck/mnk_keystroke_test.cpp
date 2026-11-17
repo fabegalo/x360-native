@@ -1,67 +1,76 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/cvar.h>
-#include <rex/input/mnk/mnk_input_driver.h>
-#include <rex/ui/virtual_key.h>
-
-REXCVAR_DECLARE(bool, mnk_mode);
-using namespace rex::input;
-using rex::X_RESULT;
-using rex::ui::VirtualKey;
+#include "ui/ui_harness.h"
+#include <rex/hid/input_system.h>
+#include <tuple>
+#include <vector>
+using rex::VirtualKey;
 
 TEST_CASE("MnK delivers configured pad button transitions to keystroke consumers", "[sdk][mnk-keystroke]") {
-  const bool saved = REXCVAR_GET(mnk_mode);
-  struct Restore { bool value; ~Restore() { REXCVAR_SET(mnk_mode, value); } } restore{saved};
-  REXCVAR_SET(mnk_mode, true);
-  mnk::MnkInputDriver driver(nullptr, 0);
-  std::vector<DeviceInfo> devices;
-  driver.EnumerateDevices(devices);
-  REQUIRE(devices.size() == 1);
-  const auto id = devices[0].id;
+  rex::test_ui::UIApp app;
+  app.input_drivers = "none";
+  REQUIRE(app.Start());
+  auto& input = app.GetInput();
+  REQUIRE(input.GetSettings().mnk_mode.Set(true));
+  std::vector<std::tuple<rex::SettingBase*, std::string, rex::SettingLayer>> saved;
+  rex::ScopeGuard restore([&] {
+    for (const auto& [setting, value, layer] : saved) {
+      CHECK(setting->Reset());
+      if (layer != rex::SettingLayer::kDefault) CHECK(setting->SetText(layer, value));
+    }
+  });
+  for (auto* setting : REX_SETTINGS().Enumerate("hid"))
+    if (setting->GetName().find("keybind_") != std::string::npos) {
+      saved.emplace_back(setting, setting->GetText(), setting->GetLayer());
+      REQUIRE(setting->SetText(rex::SettingLayer::kRuntime, ""));
+    }
+  // Set the original test's bindings explicitly, independently of other fixtures.
+  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kRuntime, "hid.keybind_a", "Space,Semicolon"));
+  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kRuntime, "hid.keybind_b", rex::VirtualKeyToString(VirtualKey::kBack)));
+  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kRuntime, "hid.keybind_dpad_down", "Shift+Down"));
   auto key = [&](VirtualKey vk, bool down) {
-    rex::ui::KeyEvent e(nullptr, vk, 1, false, false, false, false, false);
-    if (down) driver.OnKeyDown(e); else driver.OnKeyUp(e);
+    rex::test_ui::DeliverKey(down ? rex::InputEvent::Type::kKeyDown : rex::InputEvent::Type::kKeyUp, vk);
+    app.Pump();
   };
   auto expect = [&](VirtualKey vk, uint16_t flags) {
-    X_INPUT_KEYSTROKE stroke{};
-    REQUIRE(driver.GetDeviceKeystroke(id, 0, &stroke) == X_ERROR_SUCCESS);
-    CHECK(stroke.virtual_key == uint16_t(vk));
-    CHECK(stroke.flags == flags);
+    CAPTURE(uint16_t(vk), flags);
+    auto stroke = input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad);
+    REQUIRE(stroke);
+    CHECK(stroke->virtual_key == uint16_t(vk));
+    CHECK(stroke->flags == flags);
   };
-  auto empty = [&]() {
-    X_INPUT_KEYSTROKE stroke{};
-    CHECK(driver.GetDeviceKeystroke(id, 0, &stroke) == X_ERROR_EMPTY);
-  };
+  auto empty = [&]() { CHECK_FALSE(input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad)); };
   // A short press/release between guest polls must not disappear.
   key(VirtualKey::kSpace, true);
   key(VirtualKey::kSpace, false);
-  expect(VirtualKey::kXInputPadA, X_INPUT_KEYSTROKE_KEYDOWN);
-  expect(VirtualKey::kXInputPadA, X_INPUT_KEYSTROKE_KEYUP);
+  expect(VirtualKey::kXInputPadA, 1);
+  expect(VirtualKey::kXInputPadA, 2);
   empty();
   // Alternate bindings must not release A while its other key is held.
   key(VirtualKey::kSpace, true);
-  expect(VirtualKey::kXInputPadA, X_INPUT_KEYSTROKE_KEYDOWN);
+  expect(VirtualKey::kXInputPadA, 1);
   key(VirtualKey::kOem1, true);
   empty();
   key(VirtualKey::kSpace, false);
   empty();
   key(VirtualKey::kOem1, false);
-  expect(VirtualKey::kXInputPadA, X_INPUT_KEYSTROKE_KEYUP);
+  expect(VirtualKey::kXInputPadA, 2);
   // Changing a modifier changes the configured chord, including its release.
   key(VirtualKey::kDown, true);
   empty();
   key(VirtualKey::kShift, true);
-  expect(VirtualKey::kXInputPadDpadDown, X_INPUT_KEYSTROKE_KEYDOWN);
+  expect(VirtualKey::kXInputPadDPadDown, 1);
   key(VirtualKey::kShift, false);
-  expect(VirtualKey::kXInputPadDpadDown, X_INPUT_KEYSTROKE_KEYUP);
+  expect(VirtualKey::kXInputPadDPadDown, 2);
   key(VirtualKey::kDown, false);
   key(VirtualKey::kBack, true);
-  expect(VirtualKey::kXInputPadB, X_INPUT_KEYSTROKE_KEYDOWN);
-  rex::ui::UISetupEvent focus;
-  driver.OnLostFocus(focus);
-  expect(VirtualKey::kXInputPadB, X_INPUT_KEYSTROKE_KEYUP);
+  expect(VirtualKey::kXInputPadB, 1);
+  rex::test_ui::DeliverFocus(false); app.Pump();
+  expect(VirtualKey::kXInputPadB, 2);
   key(VirtualKey::kSpace, true);
   empty();
-  driver.OnGotFocus(focus);
+  rex::test_ui::DeliverFocus(true); app.Pump();
   key(VirtualKey::kSpace, true);
-  expect(VirtualKey::kXInputPadA, X_INPUT_KEYSTROKE_KEYDOWN);
+  expect(VirtualKey::kXInputPadA, 1);
+  restore.Reset();
+  app.Shutdown();
 }

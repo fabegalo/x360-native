@@ -3,16 +3,18 @@
 #include "../textures/texture.h"
 #include "../textures/texture_block.h"
 #include "../textures/texture_load.h"
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/logging.h>
+#include <rex/xenos/texture.h>
+#include <rex/logging/log_category.h>
 #include <xxhash.h>
 #include <cstring>
 #include <stdexcept>
 #include <cfloat>
 #include <bit>
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
 namespace {
 void Require(bool v, const char* t) { if (!v) throw std::runtime_error(std::string("Native texture: ") + t); }
 DXGI_FORMAT Format(TextureFormat f, bool sign) {
@@ -57,7 +59,7 @@ D3D12_TEXTURE_ADDRESS_MODE Clamp(ClampMode c) {
     default: throw std::runtime_error("Native texture clamp mode not implemented"); }
 }
 }
-D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memory, DxbcShader& shader) {
+D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex::IPhysicalMemory& memory, DXBCShader& shader) {
   Timer timer(stats_enabled_, texture_ns_);
   TextureTables tables;
   const auto& textures = shader.GetTextureBindingsAfterTranslation();
@@ -75,14 +77,14 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // (type 0 is one only under --gpu_allow_invalid_fetch_constants), or has
       // no data, gives an invalid binding: its view is null (zeros) and the
       // draw still runs. Rate-limited, never silent.
-      bool valid = TextureFetchSampled(f);
+      bool valid = TextureFetchSampled(f, settings_.allow_invalid_fetch_constants.Get());
       if (!valid && invalid_texture_fetches_++ < 8)
         REXLOG_WARN("Native: texture fetch {} has type {} ({:08X} {:08X} {:08X} {:08X} {:08X} {:08X}); view is null as in the pinned texture cache",
             binding.fetch_constant, uint32_t(f.type), f.dword_0, f.dword_1, f.dword_2, f.dword_3, f.dword_4, f.dword_5);
       uint32_t wm = 0, hm = 0, dm = 0, base = 0, mip = 0, min_level = 0, max_level = 0;
       uint32_t guest_pitch = f.pitch;
       if (valid) {
-        texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &min_level, &max_level);
+        rex::xenos::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &min_level, &max_level);
         valid = base || mip || (f.swizzle & 0b110110110110) == 0b100100100100;
         if (valid && f.dimension == DataDimension::k1D && (f.tiled || f.packed_mips)) {
           REXLOG_ERROR("Native: invalid 1D texture fetch {} (width {}, tiled {}, packed mips {}); view is null as in the pinned texture cache",
@@ -91,14 +93,14 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         }
       }
       if (valid && f.dimension == DataDimension::k1D)
-        texture_util::RemapWide1DTexture(wm, hm, guest_pitch, max_level);
+        rex::xenos::RemapWide1DTexture(wm, hm, guest_pitch, max_level);
       if (valid && f.dimension == DataDimension::k3D && f.stacked) throw std::runtime_error("Native texture dimension=" + std::to_string(uint32_t(f.dimension)) + " stacked=" + std::to_string(f.stacked) + " type=" + std::to_string(uint32_t(f.type)) + " format=" + std::to_string(uint32_t(f.format)) + " binding=" + std::to_string(binding.fetch_constant));
       Require(!valid || !f.border_size, "border texture storage not implemented");
       // Pinned D3D12 compatibility: 2D views accept 1D/2D/3D storage (3D as
       // its first slice), 3D-or-stacked views only 3D, cube views only cubes.
       // The translated shader selects the view by the fetch dimension at run
       // time, and per component between signed and unsigned results.
-      if (!valid || !TextureViewActive(f, binding.dimension, binding.is_signed)) {
+      if (!valid || !TextureViewActive(f, binding.dimension, binding.is_signed, settings_.allow_invalid_fetch_constants.Get())) {
         D3D12_SHADER_RESOURCE_VIEW_DESC unused{}; unused.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         unused.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         if (binding.dimension == FetchOpDimension::k3DOrStacked) {
@@ -214,7 +216,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       if (entry) {
         // Watch before the mirror upload: a CPU write after this point marks
         // the texture outdated again, so no write between upload and use is lost.
-        auto lock = GuestMemoryMirror::Lock();
+        auto lock = mirror_->Lock();
         std::atomic_ref(entry->outdated).store(false, std::memory_order_relaxed);
         if (base_bytes && !entry->watches[0]) entry->watches[0] = mirror_->Watch(base << 12, base_bytes, TextureWatch, this, entry, 0);
         if (mip_bytes && !entry->watches[1]) entry->watches[1] = mirror_->Watch(mip << 12, mip_bytes, TextureWatch, this, entry, 1);
@@ -226,7 +228,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       if (!base_bytes && !mip_bytes) {
         // A constant-only swizzle needs a valid view, with no guest data upload.
       } else if (scaled_texture) {
-        const unsigned pixel_log2 = std::countr_zero(scale_format->bytes_per_block());
+        const unsigned pixel_log2 = std::countr_zero(scale_format->GetBytesPerBlock());
         if (base_bytes) ReplicateScaled(base << 12, base_bytes, pixel_log2, true);
         if (mip_bytes) ReplicateScaled(mip << 12, mip_bytes, pixel_log2, true);
         const ScaledSource source{base << 12, base_bytes, mip << 12, mip_bytes};
@@ -239,9 +241,9 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         // Draw synchronized every CPU-converted range with incomplete resolves first.
         Require(!GuestWritesOverlap(base << 12, base_bytes) && (!mip_bytes || !GuestWritesOverlap(mip << 12, mip_bytes)),
             "texture read overlaps an incomplete resolve");
-        std::span<const uint8_t> base_source(memory.TranslatePhysical<const uint8_t*>(base << 12), base_bytes);
+        std::span<const uint8_t> base_source(reinterpret_cast<const uint8_t*>(memory.GetReadOnlyPhysicalSpan({base << 12, base_bytes}).value().data()), base_bytes);
         std::span<const uint8_t> mip_source;
-        if (mip_bytes) mip_source = {memory.TranslatePhysical<const uint8_t*>(mip << 12), mip_bytes};
+        if (mip_bytes) mip_source = {reinterpret_cast<const uint8_t*>(memory.GetReadOnlyPhysicalSpan({mip << 12, mip_bytes}).value().data()), mip_bytes};
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(levels * array_size);
         uint64_t bytes;
         device_->GetCopyableFootprints(&d, 0, levels * array_size, 0, footprints.data(), nullptr, nullptr, &bytes);
@@ -275,14 +277,14 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
           mag == TextureFilter::kLinear ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT,
           mip == TextureFilter::kLinear ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT, D3D12_FILTER_REDUCTION_TYPE_STANDARD);
       ClampMode cx, cy, cz;
-      texture_util::GetClampModesForDimension(f, cx, cy, cz);
+      rex::xenos::GetClampModesForDimension(f, cx, cy, cz);
       s.AddressU = Clamp(cx); s.AddressV = Clamp(cy); s.AddressW = Clamp(cz);
-      auto aniso = NativeAnisotropy(std::min(b.aniso_filter == AnisoFilter::kUseFetchConst ? f.aniso_filter : b.aniso_filter, AnisoFilter::kMax_16_1));
+      auto aniso = NativeAnisotropy(std::min(b.aniso_filter == AnisoFilter::kUseFetchConst ? f.aniso_filter : b.aniso_filter, AnisoFilter::kMax161));
       s.MaxAnisotropy = 1;
       if (aniso != AnisoFilter::kDisabled) { s.Filter = D3D12_FILTER_ANISOTROPIC; s.MaxAnisotropy = 1u << (uint32_t(aniso) - 1); }
       s.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
       uint32_t lo, hi;
-      texture_util::GetSubresourcesFromFetchConstant(f, nullptr, nullptr, nullptr, nullptr, nullptr, &lo, &hi);
+      rex::xenos::GetSubresourcesFromFetchConstant(f, nullptr, nullptr, nullptr, nullptr, nullptr, &lo, &hi);
       // The highest level is bounded by the bound resource itself.
       s.MinLOD = float(lo); s.MaxLOD = mip == TextureFilter::kBaseMap ? s.MinLOD + (aniso == AnisoFilter::kDisabled ? 0.25f : 0.0f) : FLT_MAX;
       const bool border = s.AddressU == D3D12_TEXTURE_ADDRESS_MODE_BORDER || s.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER ||
@@ -338,13 +340,13 @@ void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root) {
   if (tables.indices) cmd_.SetGraphicsRootConstantBufferView(root, tables.indices);
 }
 void D3D12Render::TextureWatch(void*, void* data, uint64_t argument, bool) {
-  // Under GuestMemoryMirror::Lock(); the fired watch is already retired.
+  // Under mirror_->Lock(); the fired watch is already retired.
   auto* entry = static_cast<CachedTexture*>(data);
   std::atomic_ref(entry->outdated).store(true, std::memory_order_relaxed);
   entry->watches[argument] = nullptr;
 }
 void D3D12Render::Unwatch(CachedTexture& entry) {
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = mirror_->Lock();
   for (auto& watch : entry.watches) { mirror_->Unwatch(watch); watch = nullptr; }
 }
 void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* texture, const ScaledSource* scaled) {

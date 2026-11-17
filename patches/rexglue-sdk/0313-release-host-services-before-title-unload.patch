@@ -1,0 +1,140 @@
+diff --git a/include/rex/kernel/title_runtime.h b/include/rex/kernel/title_runtime.h
+--- a/include/rex/kernel/title_runtime.h
++++ b/include/rex/kernel/title_runtime.h
+@@ -166,6 +166,16 @@
+    */
+   [[nodiscard]] rex::ScopeGuard OnTitleExit(rex::MoveOnlyFunction<void(TitleExitReason)> callback);
+ 
++  /**
++   * Registers one title-owned host cleanup after Load, on the UI thread. Teardown invokes it once after guest
++   * threads stop and before services, modules or memory release, including a failed Launch.
++   * It must not launch guest code or recursively unload. A new registration replaces the old;
++   * destroying an older guard does not remove its replacement. Keep the guard within this runtime.
++   * Use this runtime directly in the callback; process runtime lookup is already unavailable.
++   */
++  [[nodiscard]] rex::ScopeGuard OnTitleUnload(rex::MoveOnlyFunction<void()> callback);
++
++
+   GuestMemory& GetGuestMemory() const;
+ 
+   kernel::IModuleRegistry& GetModuleRegistry();
+diff --git a/src/kernel/title_runtime.cpp b/src/kernel/title_runtime.cpp
+--- a/src/kernel/title_runtime.cpp
++++ b/src/kernel/title_runtime.cpp
+@@ -111,6 +111,10 @@
+   return state_->OnTitleExit(std::move(callback));
+ }
+ 
++rex::ScopeGuard TitleRuntime::OnTitleUnload(rex::MoveOnlyFunction<void()> callback) {
++  return state_->OnTitleUnload(std::move(callback));
++}
++
+ GuestMemory& TitleRuntime::GetGuestMemory() const {
+   return state_->GetGuestMemory();
+ }
+diff --git a/src/kernel/title_state.h b/src/kernel/title_state.h
+--- a/src/kernel/title_state.h
++++ b/src/kernel/title_state.h
+@@ -303,6 +303,7 @@
+    * @return A guard that removes the callback.
+    */
+   [[nodiscard]] rex::ScopeGuard OnTitleExit(rex::MoveOnlyFunction<void(TitleExitReason)> callback);
++  [[nodiscard]] rex::ScopeGuard OnTitleUnload(rex::MoveOnlyFunction<void()> callback);
+ 
+   /** Reports that the title exited. Only the first report reaches the callback. */
+   void ReportTitleExit(TitleExitReason reason);
+@@ -436,6 +437,8 @@
+ 
+   std::mutex title_exit_mutex_;
+   rex::MoveOnlyFunction<void(TitleExitReason)> title_exit_callback_;
++  rex::MoveOnlyFunction<void()> title_unload_callback_;
++  u64 title_unload_serial_ = 0;
+   u64 title_exit_serial_ = 0;
+   bool title_exit_reported_ = false;
+   std::atomic<bool> title_launched_{false};
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -454,31 +454,39 @@
+     return;
+   }
+   StopThreads();
+-  chrono::FrameTiming::Reset();
+-  ExchangePersistedDisplay({});
+-  system_commands_.callback.store(nullptr);
+-  DetachSystems();
+-  DestroySubsystems();
+-  EndServing();
+-  function_dispatcher_.reset();
+-  if (file_system_) {
+-    file_system_->Clear();
+-    file_system_.reset();
+-  }
+-  delete guest_memory_;
+-  guest_memory_ = nullptr;
+-  heap.Shutdown();
+-  fiber_count = 0;
+-  audio_submit_logs = 0;
+-  memory_.reset();
+-  setup_complete_ = false;
+-  terminating_title_.store(false, std::memory_order_release);
+-  terminate_claimed_.store(false, std::memory_order_release);
++  rex::ScopeGuard teardown([this] {
++    chrono::FrameTiming::Reset();
++    ExchangePersistedDisplay({});
++    system_commands_.callback.store(nullptr);
++    DetachSystems();
++    DestroySubsystems();
++    EndServing();
++    function_dispatcher_.reset();
++    if (file_system_) {
++      file_system_->Clear();
++      file_system_.reset();
++    }
++    delete guest_memory_;
++    guest_memory_ = nullptr;
++    heap.Shutdown();
++    fiber_count = 0;
++    audio_submit_logs = 0;
++    memory_.reset();
++    setup_complete_ = false;
++    terminating_title_.store(false, std::memory_order_release);
++    terminate_claimed_.store(false, std::memory_order_release);
++    {
++      std::lock_guard lock(title_exit_mutex_);
++      title_exit_callback_ = nullptr;
++      title_exit_reported_ = false;
++    }
++  });
++  rex::MoveOnlyFunction<void()> release;
+   {
+     std::lock_guard lock(title_exit_mutex_);
+-    title_exit_callback_ = nullptr;
+-    title_exit_reported_ = false;
+-  }
++    release = std::move(title_unload_callback_);
++  }
++  if (release) release();
+ }
+ 
+ void TitleState::SetAudioPaused(bool paused) {
+@@ -584,6 +592,19 @@
+     if (title_exit_serial_ == serial) {
+       title_exit_callback_ = nullptr;
+     }
++  });
++}
++
++rex::ScopeGuard TitleState::OnTitleUnload(rex::MoveOnlyFunction<void()> callback) {
++  u64 serial;
++  {
++    std::lock_guard lock(title_exit_mutex_);
++    title_unload_callback_ = std::move(callback);
++    serial = ++title_unload_serial_;
++  }
++  return rex::ScopeGuard([this, serial] {
++    std::lock_guard lock(title_exit_mutex_);
++    if (title_unload_serial_ == serial) title_unload_callback_ = nullptr;
+   });
+ }
+ 

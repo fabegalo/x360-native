@@ -1,24 +1,111 @@
---- a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
-+++ b/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
-@@ -19,6 +19,7 @@
- #include <fmt/format.h>
- 
- #include <rex/assert.h>
-+#include <rex/graphics/flags.h>
- #include <rex/graphics/pipeline/shader/spirv_translator.h>
- #include <rex/math.h>
- 
-@@ -1044,8 +1045,12 @@ void SpirvShaderTranslator::ProcessTextureFetchInstruction(
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
+@@ -890,8 +890,12 @@
        coordinates[coordinate_component_index] = coordinates_operand;
      }
      spv::Id texture_resolution_scaled = spv::NoResult;
+-    u32 revert_resolution_scale_axes = static_cast<u32>(draw_resolution_scale_x_ > 1) |
+-                                       (static_cast<u32>(draw_resolution_scale_y_ > 1) << 1);
 +    // As the DXBC translator: draw_resolution_scaled_texture_offsets selects
 +    // host-texel offsets (and scaled sizes) for resolution-scaled textures.
-     uint32_t revert_resolution_scale_axes =
--        uint32_t(draw_resolution_scale_x_ > 1) | (uint32_t(draw_resolution_scale_y_ > 1) << 1);
-+        REXCVAR_GET(draw_resolution_scaled_texture_offsets)
-+            ? uint32_t(draw_resolution_scale_x_ > 1) | (uint32_t(draw_resolution_scale_y_ > 1) << 1)
++    u32 revert_resolution_scale_axes =
++        scaled_texture_offsets_
++            ? static_cast<u32>(draw_resolution_scale_x_ > 1) | (static_cast<u32>(draw_resolution_scale_y_ > 1) << 1)
 +            : 0;
      spv::Id const_texture_resolution_scale[] = {spv::NoResult, spv::NoResult};
      spv::Id const_texture_resolution_scale_reciprocal[] = {spv::NoResult, spv::NoResult};
      if (revert_resolution_scale_axes) {
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -375,13 +375,15 @@
+ 
+   SPIRVShaderTranslator(const Features& features, bool native_2x_msaa_with_attachments,
+                         bool native_2x_msaa_no_attachments, bool edram_fragment_shader_interlock,
+-                        u32 draw_resolution_scale_x = 1, u32 draw_resolution_scale_y = 1)
++                        u32 draw_resolution_scale_x = 1, u32 draw_resolution_scale_y = 1,
++                        bool scaled_texture_offsets = true)
+       : features_(features),
+         native_2x_msaa_with_attachments_(native_2x_msaa_with_attachments),
+         native_2x_msaa_no_attachments_(native_2x_msaa_no_attachments),
+         edram_fragment_shader_interlock_(edram_fragment_shader_interlock),
+         draw_resolution_scale_x_(draw_resolution_scale_x ? draw_resolution_scale_x : 1),
+-        draw_resolution_scale_y_(draw_resolution_scale_y ? draw_resolution_scale_y : 1) {}
++        draw_resolution_scale_y_(draw_resolution_scale_y ? draw_resolution_scale_y : 1),
++        scaled_texture_offsets_(scaled_texture_offsets) {}
+ 
+   u64 GetDefaultVertexShaderModification(u32 dynamic_addressable_register_count,
+                                          Shader::HostVertexShaderType host_vertex_shader_type =
+@@ -991,6 +993,7 @@
+   bool edram_fragment_shader_interlock_;
+   u32 draw_resolution_scale_x_;
+   u32 draw_resolution_scale_y_;
++  const bool scaled_texture_offsets_;
+ 
+   bool is_depth_only_fragment_shader_ = false;
+ 
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -34,6 +34,8 @@
+   REX_SETTING(i32, query_occlusion_fake_sample_count, 1000,
+               "Fake sample count for occlusion queries", Range{1, 100000});
+   REX_SETTING(bool, allow_invalid_fetch_constants, false, "Allow invalid fetch constants");
++  REX_SETTING(bool, draw_resolution_scaled_texture_offsets, true,
++              "Scale texture offsets with draw resolution");
+   REX_SETTING(std::string, dump_shaders, "", "Path to dump shaders to");
+   REX_SETTING(std::string, swap_post_effect, "none", "Swap post effect",
+               Allowed("none", "fxaa", "fxaa_extreme"), kRestart);
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_settings.h b/src/gpu/xenos/host/d3d12/d3d12_settings.h
+--- a/src/gpu/xenos/host/d3d12/d3d12_settings.h
++++ b/src/gpu/xenos/host/d3d12/d3d12_settings.h
+@@ -45,8 +45,6 @@
+               "graphics cards");
+   REX_SETTING(bool, dxbc_switch, true, "Use switch statements in DXBC");
+   REX_SETTING(bool, dxbc_source_map, false, "Generate source maps for DXBC");
+-  REX_SETTING(bool, draw_resolution_scaled_texture_offsets, true,
+-              "Scale texture offsets with draw resolution");
+   REX_SETTING(bool, native_stencil_value_output_intel, false,
+               "Native stencil value output for Intel");
+   REX_SETTING(std::string, render_target_path, "", "Render target implementation path",
+diff --git a/src/gpu/xenos/d3d12/pipeline_cache.cpp b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+--- a/src/gpu/xenos/d3d12/pipeline_cache.cpp
++++ b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+@@ -79,7 +79,7 @@
+   options.source_map = settings.dxbc_source_map.Get();
+   options.use_switch = settings.dxbc_switch.Get();
+   options.fuzzy_alpha_epsilon = settings.use_fuzzy_alpha_epsilon.Get();
+-  options.scaled_texture_offsets = settings.draw_resolution_scaled_texture_offsets.Get();
++  options.scaled_texture_offsets = command_processor_.GetXenosSettings().draw_resolution_scaled_texture_offsets.Get();
+   return options;
+ }
+ 
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -111,7 +111,8 @@
+       render_target_cache_.IsMSAA2xAttachmentsSupported(),
+       render_target_cache_.IsMSAA2xNoAttachmentsSupported(), edram_fragment_shader_interlock,
+       render_target_cache_.GetDrawResolutionScaleX(),
+-      render_target_cache_.GetDrawResolutionScaleY());
++      render_target_cache_.GetDrawResolutionScaleY(),
++      command_processor_.GetXenosSettings().draw_resolution_scaled_texture_offsets.Get());
+ 
+   if (edram_fragment_shader_interlock) {
+     std::vector<u8> depth_only_fragment_shader_code =
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -121,8 +121,9 @@
+     {"xenos.use_fuzzy_alpha_epsilon", "gpu.d3d12.use_fuzzy_alpha_epsilon"},
+     {"xenos.dxbc_switch", "gpu.d3d12.dxbc_switch"},
+     {"xenos.dxbc_source_map", "gpu.d3d12.dxbc_source_map"},
+-    {"xenos.draw_resolution_scaled_texture_offsets",
+-     "gpu.d3d12.draw_resolution_scaled_texture_offsets"},
++    {"xenos.draw_resolution_scaled_texture_offsets", "gpu.xenos.draw_resolution_scaled_texture_offsets"},
++    {"draw_resolution_scaled_texture_offsets", "gpu.xenos.draw_resolution_scaled_texture_offsets"},
++    {"gpu.d3d12.draw_resolution_scaled_texture_offsets", "gpu.xenos.draw_resolution_scaled_texture_offsets"},
+     {"vulkan.require_geometry_shader", "gpu.vulkan.require_geometry_shader"},
+     {"vulkan.require_fill_mode_non_solid", "gpu.vulkan.require_fill_mode_non_solid"},
+     {"vulkan.log_debug_messages", "gpu.vulkan.log_debug_messages"},

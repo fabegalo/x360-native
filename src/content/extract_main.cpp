@@ -7,18 +7,18 @@
 #include <filesystem>
 #include <iostream>
 #include <string_view>
-#include <rex/system/util/xdbf_utils.h>
+#include <rex/filesystem/file_system_factory.h>
 namespace {
 // Writes <destination>/title.txt (UTF-8) and title.png from the XEX's own SPA,
 // each only when present. Exit 0 with no files when the title carries none.
 int TitleArt(const std::filesystem::path& xex, const std::filesystem::path& destination) {
   if (!x360n::io::create_directory(destination)) throw std::runtime_error("destination already exists");
   const auto spa = x360n::content::ReadXexTitleResource(xex);
-  const rex::system::util::XdbfGameData db(spa.data(), spa.size());
-  if (!db.is_valid()) return 0;
-  if (const auto name = db.title(); !name.empty())
+  const auto db = x360n::content::FileSystem().OpenXDBF(spa.data(), spa.size());
+  if (!db->IsValid()) return 0;
+  if (const auto name = db->GetTitle(); !name.empty())
     x360n::io::ofstream(destination / "title.txt", std::ios::binary) << name;
-  if (const auto icon = db.icon(); icon && icon.size)
+  if (const auto icon = db->GetIcon(); icon && icon.size)
     x360n::io::ofstream(destination / "title.png", std::ios::binary)
         .write(reinterpret_cast<const char*>(icon.buffer), std::streamsize(icon.size));
   return 0;

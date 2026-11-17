@@ -5,13 +5,20 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/util/draw.h>
-#include <rex/system/xmemory.h>
-
-using namespace rex::graphics;
+#include <catch2/catch_test_macros.hpp>
+#include <rex/xenos/register.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/title_runtime.h>
+#include "gpu/xenos/draw_state.h"
+#include "gpu/xenos/xenos_settings.h"
+#include "kernel/title_context.h"
+#include "kernel/title_state.h"
+#include "kernel/kernel_fixture.h"
+using namespace rex::xenos;
+namespace xenos = rex::xenos;
+namespace draw_util = rex::gpu::draw_state;
 template <typename T> void Set(RegisterFile &regs, T value) {
-  regs[T::register_index] = value.value;
+  regs[T::kRegisterIndex] = value.value;
 }
 
 // Direct3D float -> SNORM16 conversion of the host render target.
@@ -20,14 +27,10 @@ static int32_t Snorm16(float value) {
   return int32_t(std::lround(value * 32767.0f));
 }
 
-int main() {
-  int failures = 0, checks = 0;
-  auto check = [&](bool ok, const char *name) {
-    ++checks;
-    if (!ok) {
-      ++failures;
-      std::cerr << "FAIL " << name << '\n';
-    }
+TEST_CASE("Fixed16 resolves preserve every s5.10 integer", "[sdk][gpu][resolve-dest]") {
+  auto check = [](bool ok, const char* description) {
+    INFO(description);
+    CHECK(ok);
   };
 
   // Exponent bias -10 (integer outputs, as the title writes) and 0 (outputs in
@@ -60,14 +63,16 @@ int main() {
             4.0f,
         "fixed16 without full-range SNORM keeps 2^bias");
 
-  rex::memory::Memory memory;
-  if (!memory.Initialize()) return 2;
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto& memory = *rex::kernel::StateOf(caller.GetRuntime()).GetAddressSpace();
+  rex::kernel::TitleContext physical(caller.GetRuntime());
+  struct TestSettings : rex::gpu::XenosSettings {} settings;
   constexpr uint32_t address = 0x01000000;
-  if (!memory.LookupHeap(0xA1000000)
-           ->AllocFixed(0xA1000000, 4096, 4096,
-                        rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-                        rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite))
-    return 3;
+  REQUIRE(memory.LookupHeap(0xA1000000)->AllocFixed(0xA1000000,4096,4096,
+      rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+      rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite));
+
   float vertices[] = {0, 0, 16, 0, 0, 16};
   std::memcpy(memory.TranslatePhysical(address), vertices, sizeof(vertices));
 
@@ -102,15 +107,16 @@ int main() {
   for (const auto &c : cases) {
     RegisterFile regs;
     std::memset(regs.values, 0, sizeof(regs.values));
-    xenos::xe_gpu_vertex_fetch_t fetch{};
+
+    xenos::VertexFetch fetch{};
     fetch.type = xenos::FetchConstantType::kVertex;
     fetch.address = address / 4;
     fetch.size = 6;
-    std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch));
+    std::memcpy(&regs[std::to_underlying(xenos::Register::SHADER_CONSTANT_FETCH_00_0)], &fetch, sizeof(fetch));
     reg::RB_SURFACE_INFO surface{};
     surface.surface_pitch = 128;
     // Averaging needs more than one sample; 1x selections collapse to sample 0.
-    surface.msaa_samples = c.sample_select >= 4 ? xenos::MsaaSamples::k2X : xenos::MsaaSamples::k1X;
+    surface.msaa_samples = c.sample_select >= 4 ? xenos::MSAASamples::k2X : xenos::MSAASamples::k1X;
     Set(regs, surface);
     reg::PA_SC_WINDOW_SCISSOR_TL tl{};
     tl.window_offset_disable = 1;
@@ -124,7 +130,7 @@ int main() {
     reg::RB_COLOR_INFO color{};
     color.color_format = c.source;
     color.color_exp_bias = -10;
-    regs[reg::RB_COLOR_INFO::rt_register_indices[0]] = color.value;
+    regs[reg::RB_COLOR_INFO::kRTRegisterIndices[0]] = color.value;
     reg::RB_COPY_DEST_INFO dest{};
     dest.copy_dest_format = c.dest;
     dest.copy_dest_number = c.number;
@@ -138,14 +144,13 @@ int main() {
     control.copy_command = xenos::CopyCommand::kRaw;
     control.copy_sample_select = xenos::CopySampleSelect(c.sample_select);
     Set(regs, control);
-    draw_util::ResolveInfo info;
+    draw_util::ResolveRequest info;
     std::memset(&info, 0xCD, sizeof(info));
-    const bool ok = draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info, c.storage);
+    const bool ok = draw_util::GetResolveInfo(settings, regs, physical, 1, 1, false, false, info, c.storage);
     check(ok && info.coordinate_info.width_div_8 && info.height_div_8, "resolve is valid");
     draw_util::ResolveCopyShaderConstants constants;
     uint32_t groups_x = 0, groups_y = 0;
     check(info.GetCopyShader(1, 1, constants, groups_x, groups_y) == c.expected, c.name);
   }
-  std::cout << checks << " checks, " << failures << " failures\n";
-  return failures ? 1 : 0;
+  });
 }

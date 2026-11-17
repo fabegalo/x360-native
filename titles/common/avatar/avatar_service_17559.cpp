@@ -8,20 +8,20 @@
 // profile: the supervisor verifies them (preparation.toml [avatar], SHA-256) and
 // passes their paths; a title never searches for or shares another version's XAM.
 // The code runs in that dashboard's single XAM image, shared with its Guide.
-#include <rex/cvar.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/devices/host_path_entry.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/logging.h>
+#include <rex/filesystem/file_system.h>
+#include <rex/logging/log_category.h>
 #include <rex/memory.h>
+#include <rex/string/text.h>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
-#include <rex/runtime.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xex_module.h>
+#include <rex/ppc/hook.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/object/module_object.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/thread_registry.h>
 
 #include <algorithm>
 #include <cstring>
@@ -35,21 +35,22 @@
 #include "xam17559_static_init.h"
 #include "../../../src/supervisor/fs_io.h"
 
-REXCVAR_DEFINE_BOOL(x360n_avatar_service, true, "x360n",
-                    "Use the original 17559 avatar catalog and AOT algorithms");
-REXCVAR_DEFINE_STRING(x360n_avatar_xam_17559, "", "Supervisor",
-                      "Original xam.xex 2.0.17559.0 of the session dashboard, verified "
-                      "by the supervisor");
-REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "Supervisor",
-                      "Original AvatarAssetPack.toc of the session dashboard 17559, "
-                      "verified by the supervisor");
-REXCVAR_DECLARE(std::string, x360n_dashboard_version);
-
 namespace {
 using namespace x360n::avatar;
 std::mutex service_mutex;
-auto* Runtime() { return rex::Runtime::instance(); }
-auto* Memory() { return Runtime()->memory(); }
+auto* Runtime() { return REX_RUNTIME(); }
+auto* Memory() {
+  auto* thread = rex::kernel::ThreadState::Get();
+  REX_CHECK(thread && thread->GetRuntime() == Runtime(), "Original avatar service requires its title thread");
+  return thread->GetAddressSpace();
+}
+auto* Functions() {
+  const auto executable = Runtime()->GetModuleRegistry().GetExecutable();
+  REX_CHECK(executable, "Original avatar executable is unavailable");
+  auto module = Runtime()->GetObjectTable().Get<rex::kernel::ModuleObject>(*executable);
+  REX_CHECK(module && module->processor_module, "Original avatar executable image is unavailable");
+  return module->processor_module->GetFunctionDispatcher();
+}
 uint8_t* Host(uint32_t p) { return Memory()->TranslateVirtual<uint8_t*>(p); }
 uint32_t Read(uint32_t p) {
   return rex::memory::load_and_swap<uint32_t>(Host(p));
@@ -59,8 +60,9 @@ void Put(uint32_t p, uint32_t v) {
 }
 uint32_t Call(uint32_t fn, std::initializer_list<uint64_t> args) {
   std::vector<uint64_t> a(args);
-  return uint32_t(Runtime()->function_dispatcher()->Execute(
-      rex::runtime::ThreadState::Get(), fn, a.data(), a.size()));
+  auto* thread = rex::kernel::ThreadState::Get();
+  if (!Functions()->Run(thread, fn, a)) return 0xDEADBABE;
+  return thread->GetContext()->r3.u32;
 }
 struct Allocation {
   uint32_t p;
@@ -97,8 +99,9 @@ uint32_t Complete(uint32_t overlap, uint32_t hr) {
   if (!overlap) return hr;
   // XAM message APIs return an HRESULT for submission (0 when accepted).
   // XOVERLAPPED.InternalLow is Win32; ExtendedError is the operation HRESULT.
-  Runtime()->kernel_state()->CompleteOverlappedImmediateEx(
-      overlap, hr ? 1627 : 0, hr, 0);
+  auto* dispatcher = REX_INTERFACE(rex::kernel::IOverlappedDispatcher);
+  REX_CHECK(dispatcher, "Original avatar completion service unavailable");
+  dispatcher->Complete(overlap, {.result = hr ? 1627u : 0u, .extended_error = hr, .length = 0});
   return 0;
 }
 template <class F>
@@ -107,7 +110,7 @@ void Invoke(PPCContext& ctx, const char* name, F fn) {
   PPCContext saved = ctx;
   const auto hr = fn();
   ctx = saved;
-  ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
+  ctx.fpscr.RestoreGuestBits(saved.fpscr.csr);
   ctx.r3.u64 = hr;
   REXLOG_INFO("avatar-service: {} -> {:08X}", name, hr);
 }
@@ -120,7 +123,7 @@ bool RunAvatarStaticInitializers() {
   for (size_t i = 0; i < kXam17559AvatarInitializers.size(); ++i) {
     const auto fn = Read(kXam17559AvatarInitializerTable + uint32_t(4 * i));
     if (fn != kXam17559AvatarInitializers[i] ||
-        !Runtime()->function_dispatcher()->GetFunction(fn)) {
+        !Functions()->GetFunction(fn)) {
       REXLOG_ERROR("avatar-service: initializer {} is {:08X}, expected {:08X}", i,
                    fn, kXam17559AvatarInitializers[i]);
       return false;
@@ -132,59 +135,58 @@ bool RunAvatarStaticInitializers() {
 
 uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
                     uint32_t callbacks, uint32_t buffer, uint32_t size) {
-  if (!REXCVAR_GET(x360n_avatar_service)) return kAssetsFailure;
+  if (!x360n::GetLaunchSettings().avatar_service.Get()) return kAssetsFailure;
   if (service || version != 4 || coord != 1 || processor > 5 || !callbacks ||
       !buffer || (buffer & 15) || size < 0x300000)
     return kAssetsInvalid;
-  // Supervisor arguments are UTF-8; never reinterpret them in the ANSI code page.
-  auto utf8_path = [](const std::string& s) {
-    return std::filesystem::path(std::u8string(s.begin(), s.end()));
-  };
-  const auto xam = utf8_path(REXCVAR_GET(x360n_avatar_xam_17559));
-  const auto path = utf8_path(REXCVAR_GET(x360n_avatar_catalog_17559));
+  const auto xam = rex::string::to_path(x360n::GetLaunchSettings().avatar_xam_17559.Get());
+  const auto path = rex::string::to_path(x360n::GetLaunchSettings().avatar_catalog_17559.Get());
   if (xam.empty() || path.empty() ||
-      REXCVAR_GET(x360n_dashboard_version) != "2.0.17559.0") {
+      x360n::GetLaunchSettings().dashboard_version.Get() != "2.0.17559.0") {
     // No search for files and no other version's XAM: only the session
     // dashboard 17559 provides them (supervisor, preparation.toml [avatar]).
     REXLOG_ERROR(
         "avatar-service: the session did not provide the Retail 2.0.17559.0 "
         "xam.xex and AvatarAssetPack.toc (session dashboard '{}'); start the "
         "title from the dashboard 17559 session",
-        REXCVAR_GET(x360n_dashboard_version));
+        x360n::GetLaunchSettings().dashboard_version.Get());
     return 0x80070002;
   }
-  auto* fs = Runtime()->kernel_state()->file_system();
+  auto* fs = &Runtime()->GetFileSystem();
   // One original XAM image per process, as on the console. The session
   // dashboard's system UI host binds it (its own verified AOT, also used by
   // the Guide); a second copy cannot occupy 0x815F0000 next to it. Accept it
   // only if it is the very file the supervisor verified for this service.
   const auto& shared = x360n::SystemXamModulePath();
-  auto* entry = shared.empty() ? nullptr
-      : dynamic_cast<rex::filesystem::HostPathEntry*>(fs->ResolvePath(shared));
+  const auto entry = fs->ResolveHostPath(shared);
   std::error_code same_error;
-  if (!entry || !x360n::io::equivalent(entry->host_path(), xam, same_error)) {
+  if (!entry || !x360n::io::equivalent(*entry, xam, same_error)) {
     REXLOG_ERROR(
         "avatar-service: the session dashboard 17559 system UI host provides no "
         "XAM image matching {} ('{}')",
-        REXCVAR_GET(x360n_avatar_xam_17559), shared);
+        x360n::GetLaunchSettings().avatar_xam_17559.Get(), shared);
     return 0x80070002;
   }
   if (!mounted) {
-    auto assets = std::make_unique<rex::filesystem::HostPathDevice>(
-        "\\Device\\X360nAvatarCatalog",
-        path.parent_path(), true);
-    if (!assets->Initialize() || !fs->RegisterDevice(std::move(assets)))
-      return kAssetsFailure;
+    rex::filesystem::MountEntry catalog_mount;
+    catalog_mount.path = "\\Device\\X360nAvatarCatalog";
+    catalog_mount.source = path.parent_path(); // Default host-directory mount is read only.
+    if (!fs->Mount(catalog_mount)) return kAssetsFailure;
     mounted = true;
   }
-  auto module = Runtime()->kernel_state()->LoadUserModule(shared, false);
-  if (!module || module->xex_module()->base_address() != 0x815F0000 ||
-      module->xex_module()->image_size() != 0x610000)
-    return kAssetsFailure;
+  const auto loaded = Runtime()->GetModuleRegistry().LoadUserModule(shared, false);
+  if (!loaded) return kAssetsFailure;
+  {
+    auto module = Runtime()->GetObjectTable().Get<rex::kernel::ModuleObject>(*loaded);
+    if (!module || !module->processor_module ||
+        module->processor_module->GetBaseAddress() != 0x815F0000 ||
+        module->processor_module->GetImageSize() != 0x610000)
+      return kAssetsFailure;
+  }
   REXLOG_INFO("avatar-service: using the session XAM image {}", shared);
   if (!RunAvatarStaticInitializers()) return kAssetsFailure;
   for (uint32_t i = 0; i < 5; ++i)
-    if (!Runtime()->function_dispatcher()->GetFunction(Read(callbacks + 4 * i)))
+    if (!Functions()->GetFunction(Read(callbacks + 4 * i)))
       return kAssetsInvalid;
   x360n::io::ifstream in(path, std::ios::binary);
   std::string error;
@@ -289,7 +291,7 @@ uint32_t Animation(uint32_t idptr, uint32_t flags, uint32_t output) {
 }
 }  // namespace
 
-extern "C" REX_FUNC(__imp__XamAvatarInitialize) {
+REX_HOOK_RAW(__imp__XamAvatarInitialize) {
   const uint32_t version = ctx.r3.u32, coord = ctx.r4.u32,
                  processor = ctx.r5.u32, callbacks = ctx.r6.u32,
                  buffer = ctx.r7.u32, size = ctx.r8.u32;
@@ -297,14 +299,14 @@ extern "C" REX_FUNC(__imp__XamAvatarInitialize) {
     return Initialize(version, coord, processor, callbacks, buffer, size);
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarShutdown) {
+REX_HOOK_RAW(__imp__XamAvatarShutdown) {
   Invoke(ctx, "Shutdown", [&] {
     delete service;
     service = nullptr;
     return 0u;
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarGetMetadataRandom) {
+REX_HOOK_RAW(__imp__XamAvatarGetMetadataRandom) {
   const auto body = ctx.r3.u32, count = ctx.r4.u32, output = ctx.r5.u32,
              overlap = ctx.r6.u32;
   Invoke(ctx, "GetMetadataRandom", [&] {
@@ -321,7 +323,7 @@ extern "C" REX_FUNC(__imp__XamAvatarGetMetadataRandom) {
 }
 // GetManifestLocalUser/SetManifest: avatar_profile_manifest.cpp (shared with the MiniCreator).
 
-extern "C" REX_FUNC(__imp__XamAvatarManifestGetBodyType) {
+REX_HOOK_RAW(__imp__XamAvatarManifestGetBodyType) {
   const auto metadata = ctx.r3.u32;
   Invoke(ctx, "ManifestGetBodyType", [&] {
     return metadata ? BodyType(std::span<const uint8_t, kMetadataSize>(
@@ -329,7 +331,7 @@ extern "C" REX_FUNC(__imp__XamAvatarManifestGetBodyType) {
                     : 0u;
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarGetAssetsResultSize) {
+REX_HOOK_RAW(__imp__XamAvatarGetAssetsResultSize) {
   const auto mask = ctx.r3.u32, result = ctx.r4.u32, gpu = ctx.r5.u32;
   Invoke(ctx, "GetAssetsResultSize", [&] {
     if (!mask || (mask & ~0x1FFFu) || !result || !gpu) return kAssetsInvalid;
@@ -339,7 +341,7 @@ extern "C" REX_FUNC(__imp__XamAvatarGetAssetsResultSize) {
     return 0u;
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarGetAssets) {
+REX_HOOK_RAW(__imp__XamAvatarGetAssets) {
   const auto metadata = ctx.r3.u32, mask = ctx.r4.u32, flags = ctx.r5.u32,
              result = ctx.r6.u32, gpu = ctx.r7.u32, overlap = ctx.r8.u32;
   Invoke(ctx, "GetAssets", [&] {
@@ -365,7 +367,7 @@ extern "C" REX_FUNC(__imp__XamAvatarGetAssets) {
     return Complete(overlap, hr);
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarGenerateMipMaps) {
+REX_HOOK_RAW(__imp__XamAvatarGenerateMipMaps) {
   const auto result = ctx.r3.u32, size = ctx.r5.u32, output = ctx.r6.u32,
              overlap = ctx.r7.u32;
   Invoke(ctx, "GenerateMipMaps", [&] {
@@ -374,7 +376,7 @@ extern "C" REX_FUNC(__imp__XamAvatarGenerateMipMaps) {
     return Complete(overlap, MipMaps(result, size, output));
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarLoadAnimation) {
+REX_HOOK_RAW(__imp__XamAvatarLoadAnimation) {
   const auto id = ctx.r3.u32, flags = ctx.r4.u32, output = ctx.r5.u32,
              overlap = ctx.r6.u32;
   Invoke(ctx, "LoadAnimation", [&] {
@@ -383,6 +385,6 @@ extern "C" REX_FUNC(__imp__XamAvatarLoadAnimation) {
     return Complete(overlap, Animation(id, flags, output));
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarSetCustomAsset) {
+REX_HOOK_RAW(__imp__XamAvatarSetCustomAsset) {
   Invoke(ctx, "SetCustomAsset", [] { return 0x80004001u; });
 }

@@ -1,19 +1,44 @@
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 5692ee3..405e46e 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -470,7 +470,13 @@ REX_EXPORT_STUB(__imp__XamGetCachedTitleNameEx);
+diff --git a/src/xam/xam_msg.cpp b/src/xam/xam_msg.cpp
+--- a/src/xam/xam_msg.cpp
++++ b/src/xam/xam_msg.cpp
+@@ -125,6 +125,13 @@
+   return result;
+ }
+ 
++// Original 17559 demand outputs are optional; no online-auth demand is queued locally.
++u32 XamGetCurrentDemand_entry(MappedU32 user, MappedU32 type) {
++  if (user) *user = 0;
++  if (type) *type = 0;
++  return 0;
++}
++
+ }  // namespace xam
+ }  // namespace rex
+ 
+@@ -135,3 +142,5 @@
+ REX_XAM_BODY(__imp__XMsgCancelIORequest, rex::xam::XMsgCancelIORequest_entry)
+ REX_XAM_BODY(__imp__XMsgCompleteIORequest, rex::xam::XMsgCompleteIORequest_entry)
+ REX_XAM_BODY(__imp__XamGetOverlappedResult, rex::xam::XamGetOverlappedResult_entry)
++
++REX_XAM_BODY(__imp__XamGetCurrentDemand, rex::xam::XamGetCurrentDemand_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -436,7 +436,7 @@
  REX_EXPORT_STUB(__imp__XamGetClosedCaptioningSettings);
  REX_EXPORT_STUB(__imp__XamGetClosedCaptioningState);
  REX_EXPORT_STUB(__imp__XamGetConsoleFriendlyName);
 -REX_EXPORT_STUB(__imp__XamGetCurrentDemand);
-+extern "C" REX_FUNC(__imp__XamGetCurrentDemand) {
-+  // 17559 81994C40 returns whether a demand is queued and writes the optional
-+  // user/type outputs. The local runtime has no queued online-auth demand.
-+  if (ctx.r3.u32) rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32, 0);
-+  if (ctx.r4.u32) rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32, 0);
-+  ctx.r3.u64 = 0;
-+}
++
  REX_EXPORT_STUB(__imp__XamGetCurrentSystemOnlineManifestRevision);
  REX_EXPORT_STUB(__imp__XamGetDashBackstackData);
  REX_EXPORT_STUB(__imp__XamGetDashBackstackNodesCount);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -312,3 +312,5 @@
+ REX_XAM_FORWARD(__imp__XamGetUserNeedTFA)
+ 
+ REX_XAM_FORWARD(__imp__XamUserGetUserFlags)
++
++REX_XAM_FORWARD(__imp__XamGetCurrentDemand)

@@ -1,17 +1,14 @@
 // 0246: real Xenos shaders and GPU before/after snapshots. The delayed path
 // must preserve CPU writes to stream bytes that the shader never exported.
 #include "../native/probe_main.h"
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/kernel/init.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/system/mmio_handler.h>
-#include <rex/graphics/graphics_system.h>
-#include <rex/graphics/registers.h>
-#include <rex/graphics/format/ucode.h>
-#include <rex/cvar.h>
-#if REX_HAS_VULKAN
-#include <rex/ui/vulkan/provider.h>
+#include "../../src/gpu_probe_app.h"
+#include "../tools/tool_sdk.h"
+#include <rex/xenos/register.h>
+#include <rex/xenos/packet.h>
+#include <rex/xenos/ucode.h>
+#include "gpu/xenos/xenos_graphics_driver_base.h"
+#if X360N_PROBE_HAS_VULKAN
+#include "gpu/xenos/host/vulkan/vulkan_provider.h"
 #endif
 #include <algorithm>
 #include <array>
@@ -23,9 +20,9 @@
 #include <thread>
 #include <vector>
 
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
-using rex::X_STATUS;
+using namespace rex::gpu;
+using namespace rex::xenos;
+
 namespace {
 void Require(bool value, const char* what) {
   if (!value) throw std::runtime_error(what);
@@ -48,7 +45,7 @@ std::vector<uint32_t> ExportShader() {
       (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8)};
 }
 
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
 // Publish a CPU write after real GPU submission but before its CPU readback.
 // No production test hook and no fake Vulkan results: call the original driver.
 struct ConcurrentCpuWrite {
@@ -74,9 +71,9 @@ struct ConcurrentCpuWrite {
     }
     return result;
   }
-  static void Install(GraphicsSystem& gpu) {
-    auto& device = *static_cast<rex::ui::vulkan::VulkanProvider*>(gpu.provider())->vulkan_device();
-    auto& functions = const_cast<rex::ui::vulkan::VulkanDevice::Functions&>(device.functions());
+  static void Install(XenosGraphicsDriverBase& gpu) {
+    auto& device = *static_cast<rex::gpu::vulkan::VulkanProvider*>(gpu.GetProvider())->GetVulkanDevice();
+    auto& functions = const_cast<rex::gpu::vulkan::VulkanDevice::Functions&>(device.GetFunctions());
     original = functions.vkQueueSubmit;
     original_create = functions.vkCreateBuffer;
     functions.vkQueueSubmit = Submit;
@@ -85,19 +82,17 @@ struct ConcurrentCpuWrite {
 };
 #endif
 
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+void Run(XenosGraphicsDriverBase& gpu, rex::kernel::GuestAddressSpace& memory,
          bool fast, bool concurrent) {
-  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
-  const auto outputs = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto outputs = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(ring && outputs && done, "probe allocations");
   std::memset(memory.TranslateVirtual(outputs), 0xCD, 4096);
   std::memset(memory.TranslateVirtual(done), 0, 4);
   auto* output_base = memory.TranslateVirtual<uint8_t*>(outputs);
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 13);
-  auto* mmio = memory.LookupVirtualMappedRange(0x7FC80714);
-  Require(mmio != nullptr, "GPU doorbell");
   uint32_t cursor = 0;
   uint32_t first_draw_readback_allocations = 0;
   const std::array<float, 4> data{1.25f, -2.5f, 4.0f, .75f};
@@ -110,21 +105,21 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     auto set = [&](uint32_t index, uint32_t value) { words.insert(words.end(), {index, value}); };
     auto fp = [&](uint32_t index, float value) { set(index, std::bit_cast<uint32_t>(value)); };
     reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 2; program.ps_num_reg = 1;
-    set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
-    set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
-    set(XE_GPU_REG_SQ_VS_CONST, 0x000FF000);
-    set(XE_GPU_REG_SQ_PS_CONST, 0x000FF100);
-    xe_gpu_memexport_stream_t stream{};
+    set(uint32_t(Register::SQ_PROGRAM_CNTL), program.value);
+    set(uint32_t(Register::VGT_MAX_VTX_INDX), 0xFFFFFF);
+    set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kNoOperation));
+    set(uint32_t(Register::SQ_VS_CONST), 0x000FF000);
+    set(uint32_t(Register::SQ_PS_CONST), 0x000FF100);
+    MemExportStream stream{};
     stream.base_address = memory.GetPhysicalAddress(outputs + output_offset) >> 2;
     stream.const_0x1 = 1; stream.const_0x4b000000 = 0x4B000000;
     stream.format = ColorFormat::k_32_32_32_32_FLOAT;
     stream.num_format = SurfaceNumberFormat::kFloat;
     stream.const_0x4b0 = 0x4B0; stream.index_count = 16; stream.const_0x96 = 0x96;
     for (unsigned c = 0; c < 4; ++c) {
-      set(XE_GPU_REG_SHADER_CONSTANT_000_X + c, reinterpret_cast<const uint32_t*>(&stream)[c]);
-      fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 4 + c, c == 1 ? 1.0f : 0.0f);
-      fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 8 + c, data[c]);
+      set(uint32_t(Register::SHADER_CONSTANT_000_X) + c, reinterpret_cast<const uint32_t*>(&stream)[c]);
+      fp(uint32_t(Register::SHADER_CONSTANT_000_X) + 4 + c, c == 1 ? 1.0f : 0.0f);
+      fp(uint32_t(Register::SHADER_CONSTANT_000_X) + 8 + c, data[c]);
     }
     const auto shader = ExportShader();
     words.insert(words.end(), {Packet(PM4_IM_LOAD_IMMEDIATE, uint32_t(shader.size() + 2)),
@@ -142,18 +137,18 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       ++cursor;
     }
     if (iteration) std::memset(output + 128, 0xA5, 32);
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
     if (concurrent && iteration == 0) ConcurrentCpuWrite::pending.store(output + 128);
 #else
     Require(!concurrent, "concurrent fixture requires Vulkan");
 #endif
-    mmio->write(nullptr, mmio->callback_context, 0x7FC80714, cursor);
+    gpu.WriteRegister(uint32_t(Register::CP_RB_WPTR),cursor);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (*marker != iteration + 1 && std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     Require(*marker == iteration + 1, "MEMEXPORT draw completion timeout");
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
     if (!iteration && concurrent && !fast) {
       // Includes lazily created occlusion-query staging. Subsequent streams
       // must reuse the MEMEXPORT staging allocated for the first draw.
@@ -171,7 +166,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       Require(preserved, "MEMEXPORT readback overwrote CPU bytes not exported by the shader");
     }
   }
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
   if (concurrent) Require(ConcurrentCpuWrite::calls.load() == 1, "concurrent CPU fixture did not run");
   if (concurrent && !fast) {
     std::cout << "readback allocations first=" << first_draw_readback_allocations
@@ -197,28 +192,28 @@ X360N_PROBE_MAIN {
     Require(!concurrent || vulkan, "concurrent fixture requires Vulkan");
     const std::filesystem::path output(argv[1]);
     std::filesystem::create_directories(output);
-    rex::InitLogging((output / "runtime.log").string().c_str());
-    rex::Runtime runtime(output, output / "user");
-    rex::RuntimeConfig config;
-    config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    auto gpu = rex::system::LoadGpuPlugin("xenos", vulkan ? "vulkan" : "d3d12");
-    Require(bool(gpu), "Xenos plugin load");
-    rex::cvar::SetFlagByName("async_shader_compilation", "false");
-    rex::cvar::SetFlagByName("readback_memexport", "true");
-    rex::cvar::SetFlagByName("readback_memexport_fast", fast ? "true" : "false");
-    if (!vulkan) rex::cvar::SetFlagByName("d3d12_debug", "true");
-    Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
-    Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) ==
-                X_STATUS_SUCCESS, "guest GPU setup");
-    struct Shutdown { rex::system::IGraphicsSystem* gpu;
-      ~Shutdown() { if (gpu) gpu->Shutdown(); }
-    } shutdown{gpu.get()};
-#if REX_HAS_VULKAN
-    if (concurrent) ConcurrentCpuWrite::Install(*static_cast<GraphicsSystem*>(gpu.get()));
+    std::vector<std::string> options{
+      "--gpu.xenos.async_shader_compilation=false","--gpu.xenos.readback_memexport=true",
+      std::string("--gpu.xenos.readback_memexport_fast=")+(fast?"true":"false")};
+    if(!vulkan)options.push_back("--gpu.d3d12.debug=true");
+    const std::string api=vulkan?"vulkan":"d3d12";
+    x360n::GPUProbeApp app(output,"rexgpu-xenos-"+api,api);
+    const auto initialized=app.Init(rex::CLIArgList::Parse(options));
+    if(!initialized)throw std::runtime_error(initialized.error().GetDescription());
+    auto& graphics=static_cast<rex::gpu::IGraphicsDriver&>(app.GetProbeDriver());
+    auto* gpu=static_cast<XenosGraphicsDriverBase*>(graphics.AsXenos());
+    Require(gpu && app.GetProbeDriver().GetName()==api,"exact Xenos driver selection");
+    Require(bool(graphics.SetSurface({})),"presentation setup");
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    Require(bool(runtime.GetTitlePaths().game_root.Set(output)) &&
+        bool(runtime.GetTitlePaths().entry.Set(std::string{})) && bool(runtime.Load()),"runtime setup");
+    Require(bool(graphics.AttachTitle(rex::TitleInfo{},runtime.GetPhysicalMemory(),
+        runtime.GetPhysicalWriteWatch(),runtime.GetGuestInterrupts())),"guest GPU setup");
+    rex::ScopeGuard detach([&]{graphics.DetachTitle();});
+#if X360N_PROBE_HAS_VULKAN
+    if(concurrent)ConcurrentCpuWrite::Install(*gpu);
 #endif
-    Run(*gpu, *runtime.memory(), fast, concurrent);
-    gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    Run(*gpu,rex::kernel::GetAddressSpace(runtime),fast,concurrent);
     std::cout << "PASS real GPU MEMEXPORT snapshots preserve unwritten CPU bytes\n";
     return 0;
   } catch (const std::exception& error) {

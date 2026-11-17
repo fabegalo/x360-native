@@ -26,10 +26,10 @@ if($Language -eq 10){throw 'Reserved console language ID'}
 if([bool]$SystemUiHost -ne [bool]$SystemUiRoot){throw 'Supply both original system UI host and root'}
 if(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($exe)) -ErrorAction SilentlyContinue){throw 'Title already running'}
 New-Item -ItemType Directory -Path $out | Out-Null
-$arguments=@('--gpu_plugin=xenos',"--user_language=$Language","--user_country=$Country",
+$arguments=@('--gpu.driver=d3d12',"--kernel.user_language=$Language","--kernel.user_country=$Country",
  "--game_data_root=$game","--user_data_root=$user","--cache_root=$user/cache",
  "--x360n_profile_root=$user","--x360n_guest_capture=$out/frames",
- "--x360n_guest_capture_seconds=$Seconds","--log_file=$out/rex.log")
+ "--x360n_guest_capture_seconds=$Seconds","--log.file=$out/rex.log")
 if($Dashboard){$arguments+=@('--dash17559_boot_intro=false',"--dash17559_guide_probe_seconds=$GuideAfter")}
 if($SystemUiHost){
  $arguments+=@("--x360n_system_ui_host=$((Resolve-Path $SystemUiHost).Path)",

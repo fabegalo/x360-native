@@ -86,11 +86,11 @@ int main() {
   for (unsigned msaa : {0u, 1u, 2u})
     for (unsigned selection = 0; selection < 7; ++selection) {
       auto selected = draw_util::SanitizeCopySampleSelect(
-          xenos::CopySampleSelect(selection), xenos::MsaaSamples(msaa), false);
-      draw_util::ResolveInfo info{};
+          xenos::CopySampleSelect(selection), xenos::MSAASamples(msaa), false);
+      draw_util::ResolveRequest info{};
       info.color_edram_info.format =
           unsigned(xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA);
-      info.color_edram_info.msaa_samples = xenos::MsaaSamples(msaa);
+      info.color_edram_info.msaa_samples = xenos::MSAASamples(msaa);
       info.color_edram_info.pitch_tiles = 2;
       info.coordinate_info.width_div_8 = 4;
       info.height_div_8 = 1;

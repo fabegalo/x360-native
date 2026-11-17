@@ -1,14 +1,64 @@
-diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
-index be4b662..c16f4a3 100644
---- a/src/kernel/xam/xam_content.cpp
-+++ b/src/kernel/xam/xam_content.cpp
-@@ -144,6 +144,9 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
-     content_data = *content_data_ptr.as<XCONTENT_DATA*>();
-   } else if (content_data_size == sizeof(XCONTENT_AGGREGATE_DATA)) {
-     content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
-+    // Internal records name their owner. Zero is shared content, not the
-+    // current profile (original XAM 17559 path builder 0x8167F690).
-+    if (content_data.xuid == uint64_t(0)) xuid = 0;
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -12,6 +12,7 @@
+ #include "xam/xam_state.h"
+ #include <cstring>
+ #include <vector>
++#include <rex/filesystem/file_system.h>
+ 
+ #include <rex/kernel/types/content.h>
+ #include <rex/memory/mapped_ptr.h>
+@@ -152,6 +153,8 @@
+     content_data = *content_data_ptr.As<kernel::XCONTENT_DATA*>();
+   } else if (content_data_size == sizeof(kernel::XCONTENT_AGGREGATE_DATA)) {
+     content_data = *content_data_ptr.As<kernel::XCONTENT_AGGREGATE_DATA*>();
++    // Aggregate records carry their owner; zero is shared content, not the active profile.
++    if (content_data.xuid == u64{0}) xuid = 0;
    } else {
-     assert_always();
-     return X_ERROR_INVALID_PARAMETER;
+     REX_ASSERT_ALWAYS();
+     return kernel::X_ERROR_INVALID_PARAMETER;
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1064,3 +1064,40 @@
+     CHECK(caller.XAM("XamContentGetAttributesInternal", {0, output, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
+   });
+ }
++
++
++REX_TEST_CASE("internal shared content retains owner zero with a signed-in local profile", "[kernel][xam][aggregate-content]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++    REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++    const auto package = root / "0000000000000000" / "584108B7" / "00010000" / "shared";
++    std::filesystem::create_directories(package);
++    std::ofstream(package / "marker", std::ios::binary).write("SHARED", 6);
++  });
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    auto& xam = rex::xam::CurrentXAM();
++    REQUIRE(xam.GetUserProfile().CreateLocal("Local User") == 0);
++    REQUIRE(xam.GetUserProfile().SetLocalSession(xam.GetUserProfile().GetXUID()) == 0);
++    const auto input = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + input);
++    *data = {};
++    data->device_id = 1;
++    data->title_id = 0x584108B7;
++    data->content_type = static_cast<rex::kernel::XContentType>(0x10000);
++    data->SetFileName("shared");
++    const auto root_name = caller.AllocString("shared-test");
++    REQUIRE(caller.XAM("XamContentCreateInternal", {root_name, input, 3, 0, 0, 0, 0, 0}) == 0);
++    auto& files = rex::xam::CurrentTitle().file_system;
++    rex::filesystem::OpenOptions options;
++    options.access = rex::filesystem::Access::kReadAccess;
++    auto opened = files.Open("shared-test:\\marker", options);
++    REQUIRE(opened.has_value());
++    std::array<u8, 6> marker{};
++    REQUIRE(opened->file->Read(marker, 0).has_value());
++    CHECK(std::string(marker.begin(), marker.end()) == "SHARED");
++    opened->file.reset();
++    CHECK(caller.XAM("XamContentClose", {root_name, 0}) == 0);
++    CHECK_FALSE(files.Stat("shared-test:\\marker").has_value());
++    CHECK(xam.GetUserProfile().GetSigninState() == 1);
++  });
++}

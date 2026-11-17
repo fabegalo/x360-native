@@ -1,12 +1,12 @@
 # 0274: compile the unmodified pinned Canary report alongside the SDK port.
 add_executable(x360n_query_state_checks ../query_state_test.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/graphics_system.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
-target_link_libraries(x360n_query_state_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/command_processor.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_graphics_driver_base.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/shared_memory.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
+target_link_libraries(x360n_query_state_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_query_state_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_query_state_checks)
 add_test(NAME sdkcheck.canary-query-state COMMAND x360n_query_state_checks)
@@ -19,9 +19,9 @@ endif()
 set(_zpd_reference_include ${CMAKE_CURRENT_BINARY_DIR}/canary-zpd-reference)
 file(MAKE_DIRECTORY ${_zpd_reference_include}/xenia/gpu)
 file(CONFIGURE OUTPUT ${_zpd_reference_include}/xenia/gpu/xenos.h
-    CONTENT "#include <rex/graphics/xenos.h>\n" @ONLY)
+    CONTENT "#include <rex/xenos/state.h>\n" @ONLY)
 add_executable(x360n_zpd_report_checks ../zpd_report_test.cpp)
-target_link_libraries(x360n_zpd_report_checks PRIVATE rexruntime)
+target_link_libraries(x360n_zpd_report_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_zpd_report_checks PRIVATE
     ${X360_REXGLUE_DIR}/include ${_zpd_reference_include})
 x360n_stage_runtime_dlls(x360n_zpd_report_checks)
@@ -30,8 +30,8 @@ set_tests_properties(sdkcheck.canary-zpd-report PROPERTIES LABELS project TIMEOU
 
 # 0268: the texture offset option is shared, including Vulkan-only hosts.
 add_executable(x360n_scaled_texture_offsets_flag_checks ../scaled_texture_offsets_flag.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
-target_link_libraries(x360n_scaled_texture_offsets_flag_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
+target_link_libraries(x360n_scaled_texture_offsets_flag_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_scaled_texture_offsets_flag_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_scaled_texture_offsets_flag_checks)
 add_test(NAME sdkcheck.scaled-texture-offsets-flag COMMAND x360n_scaled_texture_offsets_flag_checks)
@@ -39,13 +39,13 @@ set_tests_properties(sdkcheck.scaled-texture-offsets-flag PROPERTIES LABELS proj
 
 # Real PM4/shared-memory services, without a GPU, window or game.
 add_executable(x360n_register_memory_checks ../register_memory_coherence_probe.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/graphics_system.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
-target_link_libraries(x360n_register_memory_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/command_processor.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_graphics_driver_base.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/shared_memory.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
+target_link_libraries(x360n_register_memory_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_register_memory_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_register_memory_checks)
 add_test(NAME sdkcheck.register-memory-coherence COMMAND x360n_register_memory_checks)
@@ -53,15 +53,18 @@ set_tests_properties(sdkcheck.register-memory-coherence PROPERTIES LABELS projec
 
 # 0235: resident requests must not acquire the guest-fault critical region.
 add_executable(x360n_resident_memory_checks ../resident_memory_probe.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp)
-target_link_libraries(x360n_resident_memory_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/shared_memory.cpp)
+target_link_libraries(x360n_resident_memory_checks PRIVATE ${X360N_SDK_LIBRARIES})
+target_link_libraries(x360n_resident_memory_checks PRIVATE rexcodegen)
+target_compile_definitions(x360n_resident_memory_checks PRIVATE REX_GPU_XENOS_STATIC)
+target_include_directories(x360n_resident_memory_checks PRIVATE ${X360_REXGLUE_DIR}/src)
 x360n_stage_runtime_dlls(x360n_resident_memory_checks)
 add_test(NAME sdkcheck.resident-memory COMMAND x360n_resident_memory_checks)
 set_tests_properties(sdkcheck.resident-memory PROPERTIES LABELS project TIMEOUT 30)
 
 add_executable(x360n_resolve_readback_identity_checks ../resolve_readback_identity_probe.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp)
-target_link_libraries(x360n_resolve_readback_identity_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp)
+target_link_libraries(x360n_resolve_readback_identity_checks PRIVATE ${X360N_SDK_LIBRARIES})
 x360n_stage_runtime_dlls(x360n_resolve_readback_identity_checks)
 add_test(NAME sdkcheck.resolve-readback-identity COMMAND x360n_resolve_readback_identity_checks)
 set_tests_properties(sdkcheck.resolve-readback-identity PROPERTIES LABELS project TIMEOUT 30)
@@ -72,7 +75,7 @@ add_test(NAME sdkcheck.Vulkan-upload-ordering COMMAND x360n_vulkan_upload_orderi
 set_tests_properties(sdkcheck.Vulkan-upload-ordering PROPERTIES LABELS project TIMEOUT 30)
 
 add_executable(x360n_frame_timing_checks frame_timing.cpp)
-target_link_libraries(x360n_frame_timing_checks PRIVATE rexruntime)
+target_link_libraries(x360n_frame_timing_checks PRIVATE ${X360N_SDK_LIBRARIES})
 x360n_stage_runtime_dlls(x360n_frame_timing_checks)
 add_test(NAME sdkcheck.Native-FrameTiming COMMAND x360n_frame_timing_checks)
 set_tests_properties(sdkcheck.Native-FrameTiming PROPERTIES LABELS project TIMEOUT 10)
@@ -89,22 +92,23 @@ if(REXGLUE_USE_VULKAN)
       COMMAND ${_upload_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_vulkan_upload_probe.py
           ${X360_REXGLUE_DIR} ${_upload_probe_inc}
       DEPENDS ../generate_vulkan_upload_probe.py
-          ${X360_REXGLUE_DIR}/src/graphics/vulkan/texture_cache.cpp
-          ${X360_REXGLUE_DIR}/src/graphics/vulkan/command_processor.cpp
-          ${X360_REXGLUE_DIR}/src/graphics/vulkan/deferred_command_buffer.cpp
+          ${X360_REXGLUE_DIR}/src/gpu/xenos/vulkan/texture_cache.cpp
+          ${X360_REXGLUE_DIR}/src/gpu/xenos/vulkan/command_processor.cpp
+          ${X360_REXGLUE_DIR}/src/gpu/xenos/vulkan/deferred_command_buffer.cpp
       VERBATIM)
   add_executable(x360n_vulkan_repeat_upload_checks ../vulkan_repeat_upload_probe.cpp ${_upload_probe_inc})
   target_include_directories(x360n_vulkan_repeat_upload_checks PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+      ${X360_REXGLUE_DIR}/src
       ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_vulkan_repeat_upload_checks PRIVATE rexruntime Vulkan::Headers)
+  target_link_libraries(x360n_vulkan_repeat_upload_checks PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers)
   x360n_stage_runtime_dlls(x360n_vulkan_repeat_upload_checks)
   add_test(NAME sdkcheck.Vulkan-repeat-upload COMMAND x360n_vulkan_repeat_upload_checks)
   set_tests_properties(sdkcheck.Vulkan-repeat-upload PROPERTIES LABELS project TIMEOUT 30)
 
-  set(_spirv_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  set(_spirv_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
   add_executable(x360n_spirv_interlock_checks spirv_interlock.cpp spirv_rectangle.cpp
-      ${_spirv_gpu}/util/draw.cpp ${_spirv_gpu}/registers.cpp
-      ${_spirv_gpu}/flags.cpp ${_spirv_gpu}/format/ucode.cpp
+      ${_spirv_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+      ${_spirv_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
       ${_spirv_gpu}/pipeline/shader/shader.cpp
       ${_spirv_gpu}/pipeline/shader/translator.cpp
       ${_spirv_gpu}/pipeline/shader/translator_disasm.cpp
@@ -115,7 +119,7 @@ if(REXGLUE_USE_VULKAN)
       ${_spirv_gpu}/pipeline/shader/spirv_translator_fetch.cpp
       ${_spirv_gpu}/pipeline/shader/spirv_translator_memexport.cpp
       ${_spirv_gpu}/pipeline/shader/spirv_translator_rb.cpp)
-  target_link_libraries(x360n_spirv_interlock_checks PRIVATE rexruntime xxHash::xxhash
+  target_link_libraries(x360n_spirv_interlock_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash
       Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   target_include_directories(x360n_spirv_interlock_checks PRIVATE
       ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
@@ -128,11 +132,11 @@ endif()
 
 # patch 0185: EDRAM fixed16 s5.10 pack/unpack in ROV (DXBC) and FSI (SPIR-V).
 if(REXGLUE_USE_VULKAN AND WIN32)
-  set(_fixed16_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  set(_fixed16_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
   add_executable(x360n_edram_fixed16_checks edram_fixed16.cpp
-      ${_fixed16_gpu}/util/draw.cpp ${_fixed16_gpu}/register_file.cpp ${_fixed16_gpu}/registers.cpp
-      ${_fixed16_gpu}/flags.cpp ${_fixed16_gpu}/format/ucode.cpp
-      ${_fixed16_gpu}/pipeline/render_target/cache.cpp ${_fixed16_gpu}/util/draw_extent_estimator.cpp ${_fixed16_gpu}/pipeline/shader/interpreter.cpp
+      ${_fixed16_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+      ${_fixed16_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
+      ${_fixed16_gpu}/pipeline/render_target/cache.cpp ${_fixed16_gpu}/draw_extent_estimator.cpp ${_fixed16_gpu}/pipeline/shader/interpreter.cpp
       ${_fixed16_gpu}/pipeline/shader/shader.cpp
       ${_fixed16_gpu}/pipeline/shader/translator.cpp
       ${_fixed16_gpu}/pipeline/shader/translator_disasm.cpp
@@ -150,7 +154,7 @@ if(REXGLUE_USE_VULKAN AND WIN32)
       ${_fixed16_gpu}/pipeline/shader/spirv_translator_memexport.cpp
       ${_fixed16_gpu}/pipeline/shader/spirv_translator_rb.cpp
       ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
-  target_link_libraries(x360n_edram_fixed16_checks PRIVATE rexruntime xxHash::xxhash
+  target_link_libraries(x360n_edram_fixed16_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash
       Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   target_include_directories(x360n_edram_fixed16_checks PRIVATE
       ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
@@ -161,10 +165,10 @@ endif()
 
 # patch 0188: Canary SPIR-V stacked texture and 2x-as-4x sample mask fixes.
 if(REXGLUE_USE_VULKAN)
-  set(_canary_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  set(_canary_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
   add_executable(x360n_spirv_canary_checks spirv_canary.cpp
-      ${_canary_gpu}/util/draw.cpp ${_canary_gpu}/registers.cpp
-      ${_canary_gpu}/flags.cpp ${_canary_gpu}/format/ucode.cpp
+      ${_canary_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+      ${_canary_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
       ${_canary_gpu}/pipeline/shader/shader.cpp
       ${_canary_gpu}/pipeline/shader/translator.cpp
       ${_canary_gpu}/pipeline/shader/translator_disasm.cpp
@@ -175,7 +179,7 @@ if(REXGLUE_USE_VULKAN)
       ${_canary_gpu}/pipeline/shader/spirv_translator_fetch.cpp
       ${_canary_gpu}/pipeline/shader/spirv_translator_memexport.cpp
       ${_canary_gpu}/pipeline/shader/spirv_translator_rb.cpp)
-  target_link_libraries(x360n_spirv_canary_checks PRIVATE rexruntime xxHash::xxhash
+  target_link_libraries(x360n_spirv_canary_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash
       Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   target_include_directories(x360n_spirv_canary_checks PRIVATE
       ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
@@ -186,11 +190,11 @@ endif()
 
 # patch 0189: Canary DXBC stacked texture layer clamp.
 if(WIN32)
-  set(_dxbc_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  set(_dxbc_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
   add_executable(x360n_dxbc_canary_checks dxbc_canary.cpp unorm8_gpu.cpp
-      ${_dxbc_gpu}/util/draw.cpp ${_dxbc_gpu}/register_file.cpp ${_dxbc_gpu}/registers.cpp
-      ${_dxbc_gpu}/flags.cpp ${_dxbc_gpu}/format/ucode.cpp
-      ${_dxbc_gpu}/pipeline/render_target/cache.cpp ${_dxbc_gpu}/util/draw_extent_estimator.cpp
+      ${_dxbc_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+      ${_dxbc_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
+      ${_dxbc_gpu}/pipeline/render_target/cache.cpp ${_dxbc_gpu}/draw_extent_estimator.cpp
       ${_dxbc_gpu}/pipeline/shader/interpreter.cpp
       ${_dxbc_gpu}/pipeline/shader/shader.cpp
       ${_dxbc_gpu}/pipeline/shader/translator.cpp
@@ -202,7 +206,7 @@ if(WIN32)
       ${_dxbc_gpu}/pipeline/shader/dxbc_translator_memexport.cpp
       ${_dxbc_gpu}/pipeline/shader/dxbc_translator_om.cpp
       ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
-  target_link_libraries(x360n_dxbc_canary_checks PRIVATE rexruntime xxHash::xxhash d3d12 dxgi)
+  target_link_libraries(x360n_dxbc_canary_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash d3d12 dxgi)
   target_include_directories(x360n_dxbc_canary_checks PRIVATE
       ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   x360n_stage_runtime_dlls(x360n_dxbc_canary_checks)
@@ -212,29 +216,29 @@ endif()
 
 # patch 0190: Canary PM4_WAIT_IB_PFD_COMPLETE handling.
 add_executable(x360n_canary_pm4_checks ../canary_pm4_probe.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/graphics_system.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
-target_link_libraries(x360n_canary_pm4_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/command_processor.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_graphics_driver_base.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/shared_memory.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
+target_link_libraries(x360n_canary_pm4_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_canary_pm4_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_canary_pm4_checks)
 add_test(NAME sdkcheck.canary-pm4 COMMAND x360n_canary_pm4_checks)
 set_tests_properties(sdkcheck.canary-pm4 PROPERTIES LABELS project TIMEOUT 30)
 
 # patch 0195: Canary ROV/FSI depth and color alias bits.
-set(_alias_gpu ${X360_REXGLUE_DIR}/src/graphics)
+set(_alias_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
 add_executable(x360n_edram_alias_checks edram_alias.cpp
-    ${_alias_gpu}/util/draw.cpp ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp
-    ${_alias_gpu}/flags.cpp ${_alias_gpu}/format/ucode.cpp
-    ${_alias_gpu}/pipeline/render_target/cache.cpp ${_alias_gpu}/util/draw_extent_estimator.cpp
+    ${_alias_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+    ${_alias_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
+    ${_alias_gpu}/pipeline/render_target/cache.cpp ${_alias_gpu}/draw_extent_estimator.cpp
     ${_alias_gpu}/pipeline/shader/interpreter.cpp
     ${_alias_gpu}/pipeline/shader/shader.cpp
     ${_alias_gpu}/pipeline/shader/translator.cpp
     ${_alias_gpu}/pipeline/shader/translator_disasm.cpp)
-target_link_libraries(x360n_edram_alias_checks PRIVATE rexruntime xxHash::xxhash)
+target_link_libraries(x360n_edram_alias_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash)
 target_include_directories(x360n_edram_alias_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_edram_alias_checks)
 add_test(NAME sdkcheck.canary-edram-alias COMMAND x360n_edram_alias_checks)
@@ -250,19 +254,19 @@ else()
 endif()
 add_custom_command(OUTPUT ${_gamma_math}
     COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_gamma_math_probe.py
-      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli ${_gamma_math}
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/shaders/resolve_sources/resolve.xesli ${_gamma_math}
     DEPENDS ../generate_gamma_math_probe.py
-      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli
-      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/pixel_formats.xesli
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/shaders/resolve_sources/resolve.xesli
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/shaders/resolve_sources/pixel_formats.xesli
     VERBATIM)
 add_executable(x360n_gamma_resolve_checks ../gamma_resolve_cpu.cpp ${_gamma_math}
-    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/draw_state.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
 target_include_directories(x360n_gamma_resolve_checks PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-target_link_libraries(x360n_gamma_resolve_checks PRIVATE rexruntime)
+target_link_libraries(x360n_gamma_resolve_checks PRIVATE ${X360N_SDK_LIBRARIES})
 x360n_stage_runtime_dlls(x360n_gamma_resolve_checks)
 add_test(NAME sdkcheck.canary-gamma-resolve COMMAND x360n_gamma_resolve_checks)
 set_tests_properties(sdkcheck.canary-gamma-resolve PROPERTIES LABELS project TIMEOUT 30)
@@ -273,7 +277,7 @@ if(REXGLUE_USE_VULKAN AND WIN32)
   add_executable(x360n_gamma_resolve_gpu_checks ../gamma_resolve_gpu.cpp)
   target_include_directories(x360n_gamma_resolve_gpu_checks PRIVATE
       ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_gamma_resolve_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi)
+  target_link_libraries(x360n_gamma_resolve_gpu_checks PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers d3d12 dxgi)
   x360n_stage_runtime_dlls(x360n_gamma_resolve_gpu_checks)
   # Opt-in headless GPU test; each fence is bounded to five seconds.
 endif()
@@ -281,14 +285,14 @@ endif()
 set(_scaled_address_math ${CMAKE_CURRENT_BINARY_DIR}/scaled_resolve_address_math.h)
 add_custom_command(OUTPUT ${_scaled_address_math}
     COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_scaled_resolve_address_probe.py
-        ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
+        ${X360_REXGLUE_DIR}/src/gpu/xenos/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
         ${_scaled_address_math}
     DEPENDS ../generate_scaled_resolve_address_probe.py
-        ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
+        ${X360_REXGLUE_DIR}/src/gpu/xenos/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
     VERBATIM)
 add_executable(x360n_scaled_resolve_address_checks ../scaled_resolve_address_cpu.cpp ${_scaled_address_math})
 target_include_directories(x360n_scaled_resolve_address_checks PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(x360n_scaled_resolve_address_checks PRIVATE rexruntime)
+target_link_libraries(x360n_scaled_resolve_address_checks PRIVATE ${X360N_SDK_LIBRARIES})
 x360n_stage_runtime_dlls(x360n_scaled_resolve_address_checks)
 add_test(NAME sdkcheck.scaled-resolve-address COMMAND x360n_scaled_resolve_address_checks)
 set_tests_properties(sdkcheck.scaled-resolve-address PROPERTIES LABELS project TIMEOUT 30)
@@ -313,31 +317,31 @@ endif()
 # 0198: execute common renderer ownership and coordinate transforms.
 add_executable(x360n_primitive_canary_checks ../primitive_canary.cpp
     ${_alias_gpu}/primitive_processor.cpp ${_alias_gpu}/shared_memory.cpp
-    ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp ${_alias_gpu}/flags.cpp)
-target_link_libraries(x360n_primitive_canary_checks PRIVATE rexruntime xxHash::xxhash)
+    ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp ${_alias_gpu}/xenos_settings.h)
+target_link_libraries(x360n_primitive_canary_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash)
 target_include_directories(x360n_primitive_canary_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_primitive_canary_checks)
 add_test(NAME sdkcheck.canary-primitives COMMAND x360n_primitive_canary_checks)
 set_tests_properties(sdkcheck.canary-primitives PROPERTIES LABELS project TIMEOUT 30)
 
 add_executable(x360n_scalar_precision_cpu ../scalar_precision_cpu.cpp
-    ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp ${_alias_gpu}/flags.cpp
-    ${_alias_gpu}/format/ucode.cpp ${_alias_gpu}/pipeline/shader/interpreter.cpp
+    ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp ${_alias_gpu}/xenos_settings.h
+    ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp ${_alias_gpu}/pipeline/shader/interpreter.cpp
     ${_alias_gpu}/pipeline/shader/shader.cpp ${_alias_gpu}/pipeline/shader/translator.cpp
     ${_alias_gpu}/pipeline/shader/translator_disasm.cpp)
-target_link_libraries(x360n_scalar_precision_cpu PRIVATE rexruntime xxHash::xxhash)
+target_link_libraries(x360n_scalar_precision_cpu PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash)
 target_include_directories(x360n_scalar_precision_cpu PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_scalar_precision_cpu)
 add_test(NAME sdkcheck.scalar-precision-cpu COMMAND x360n_scalar_precision_cpu)
 set_tests_properties(sdkcheck.scalar-precision-cpu PROPERTIES LABELS project TIMEOUT 30)
 
 add_executable(x360n_edram_window_checks edram_window_offsets.cpp
-    ${_alias_gpu}/util/draw.cpp ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp
-    ${_alias_gpu}/flags.cpp ${_alias_gpu}/format/ucode.cpp
-    ${_alias_gpu}/pipeline/render_target/cache.cpp ${_alias_gpu}/util/draw_extent_estimator.cpp
+    ${_alias_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp
+    ${_alias_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/src/xenos/ucode.cpp
+    ${_alias_gpu}/pipeline/render_target/cache.cpp ${_alias_gpu}/draw_extent_estimator.cpp
     ${_alias_gpu}/pipeline/shader/interpreter.cpp ${_alias_gpu}/pipeline/shader/shader.cpp
     ${_alias_gpu}/pipeline/shader/translator.cpp ${_alias_gpu}/pipeline/shader/translator_disasm.cpp)
-target_link_libraries(x360n_edram_window_checks PRIVATE rexruntime xxHash::xxhash)
+target_link_libraries(x360n_edram_window_checks PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash)
 target_include_directories(x360n_edram_window_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_edram_window_checks)
 add_test(NAME sdkcheck.canary-edram-window COMMAND x360n_edram_window_checks)
@@ -345,11 +349,11 @@ set_tests_properties(sdkcheck.canary-edram-window PROPERTIES LABELS project TIME
 
 # 0197: shared Xenos sample positions and viewport sample-fraction scaling.
 add_executable(x360n_canary_msaa_checks ../canary_msaa_probe.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
-target_link_libraries(x360n_canary_msaa_checks PRIVATE rexruntime)
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/draw_state.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+    ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
+target_link_libraries(x360n_canary_msaa_checks PRIVATE ${X360N_SDK_LIBRARIES})
 target_include_directories(x360n_canary_msaa_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 x360n_stage_runtime_dlls(x360n_canary_msaa_checks)
 add_test(NAME sdkcheck.canary-msaa COMMAND x360n_canary_msaa_checks)
@@ -357,23 +361,23 @@ set_tests_properties(sdkcheck.canary-msaa PROPERTIES LABELS project TIMEOUT 30)
 
 if(REXGLUE_USE_VULKAN AND WIN32)
   add_executable(x360n_msaa_gpu_checks ../msaa_gpu_probe.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/draw_state.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
   target_include_directories(x360n_msaa_gpu_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_msaa_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi)
+  target_link_libraries(x360n_msaa_gpu_checks PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers d3d12 dxgi)
   x360n_stage_runtime_dlls(x360n_msaa_gpu_checks)
   # Opt-in: run manually when a bounded synthetic GPU test is authorized.
   add_executable(x360n_edram_window_gpu_checks ../edram_window_gpu.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/draw_state.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h
       ${X360_REXGLUE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
   target_include_directories(x360n_edram_window_gpu_checks PRIVATE
       ${X360_REXGLUE_DIR}/thirdparty/renderdoc ${X360_REXGLUE_DIR}/thirdparty/glslang)
-  target_link_libraries(x360n_edram_window_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi
+  target_link_libraries(x360n_edram_window_gpu_checks PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers d3d12 dxgi
       glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   x360n_stage_runtime_dlls(x360n_edram_window_gpu_checks)
   # Manual opt-in, each GPU fence has a five-second timeout.
@@ -383,13 +387,13 @@ endif()
 # with the legacy command on devices lacking any required feature.
 if(REXGLUE_USE_VULKAN)
   set(_depth_bias_sources
-      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
-      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/draw_state.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/../../xenos/register.cpp
+      ${X360_REXGLUE_DIR}/src/gpu/xenos/xenos_settings.h)
   add_executable(x360n_vulkan_depth_bias_tests ../vulkan_depth_bias_test.cpp ${_depth_bias_sources})
   target_include_directories(x360n_vulkan_depth_bias_tests PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_vulkan_depth_bias_tests PRIVATE rexruntime Vulkan::Headers Catch2::Catch2WithMain)
+  target_link_libraries(x360n_vulkan_depth_bias_tests PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers Catch2::Catch2WithMain)
   x360n_stage_runtime_dlls(x360n_vulkan_depth_bias_tests)
   add_test(NAME sdkcheck.vulkan-depth-bias COMMAND x360n_vulkan_depth_bias_tests)
   set_tests_properties(sdkcheck.vulkan-depth-bias PROPERTIES LABELS project TIMEOUT 30)
@@ -399,7 +403,35 @@ if(REXGLUE_USE_VULKAN)
       ${_depth_bias_sources} ${X360_REXGLUE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
   target_include_directories(x360n_vulkan_depth_bias_gpu PRIVATE
       ${X360_REXGLUE_DIR}/thirdparty/renderdoc ${X360_REXGLUE_DIR}/thirdparty/glslang)
-  target_link_libraries(x360n_vulkan_depth_bias_gpu PRIVATE rexruntime Vulkan::Headers
+  target_link_libraries(x360n_vulkan_depth_bias_gpu PRIVATE ${X360N_SDK_LIBRARIES} Vulkan::Headers
       glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   x360n_stage_runtime_dlls(x360n_vulkan_depth_bias_gpu)
+endif()
+
+# These regressions compile SDK renderer internals moved below src in v0.11.
+get_property(_g3_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_g3_target IN LISTS _g3_targets)
+  get_target_property(_g3_type ${_g3_target} TYPE)
+  if(_g3_type STREQUAL "EXECUTABLE")
+    target_include_directories(${_g3_target} PRIVATE ${X360_REXGLUE_DIR}/src
+        ${X360_REXGLUE_DIR}/tests ${X360_REXGLUE_DIR}/tests/unit)
+    target_compile_definitions(${_g3_target} PRIVATE REX_GPU_XENOS_STATIC)
+    target_link_libraries(${_g3_target} PRIVATE rexgpu-xenos-base xxHash::xxhash)
+  endif()
+endforeach()
+foreach(_g3_catch x360n_resolve_readback_identity_checks x360n_vulkan_upload_ordering_checks
+    x360n_edram_alias_checks x360n_edram_window_checks x360n_canary_msaa_checks)
+  target_link_libraries(${_g3_catch} PRIVATE Catch2::Catch2WithMain)
+endforeach()
+target_compile_definitions(x360n_edram_window_checks PRIVATE X360N_EDRAM_WINDOW_CATCH)
+
+# These API probes link the same Vulkan host implementation as the renderer.
+if(REXGLUE_USE_VULKAN AND WIN32)
+  get_target_property(_api_probe_vk_host rexgpu-native SOURCES)
+  list(FILTER _api_probe_vk_host INCLUDE REGEX "/host/vulkan/")
+  foreach(_api_probe x360n_msaa_gpu_checks x360n_edram_window_gpu_checks
+      x360n_gamma_resolve_gpu_checks x360n_vulkan_depth_bias_gpu)
+    target_sources(${_api_probe} PRIVATE ${_api_probe_vk_host})
+    target_link_libraries(${_api_probe} PRIVATE rex-vma)
+  endforeach()
 endif()

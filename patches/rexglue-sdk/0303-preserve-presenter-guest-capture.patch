@@ -1,0 +1,471 @@
+diff --git a/src/gpu/xenos/host/presenter.h b/src/gpu/xenos/host/presenter.h
+--- a/src/gpu/xenos/host/presenter.h
++++ b/src/gpu/xenos/host/presenter.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <bit>
+ #include <array>
+ #include <atomic>
+ #include <chrono>
+@@ -68,8 +69,19 @@
+  * Only the UI thread manages the painting connection to the Surface. The refreshing thread may
+  * mark the connection outdated and request painting, but must never reconnect itself.
+  */
++/** Composed guest output in RGBX8; the final row need not carry stride padding. */
++struct RawImage {
++  u32 width = 0;
++  u32 height = 0;
++  size_t stride = 0;
++  std::vector<u8> data;
++};
++
+ class REX_GPU_XENOS_API Presenter : public gpu::IPresenter {
+  public:
++  /** Reads back the composed guest output after its queued work completes. */
++  virtual bool CaptureGuestOutput(RawImage& image_out) = 0;
++
+   /**
+    * Called on host GPU loss.
+    *
+@@ -156,6 +168,23 @@
+   void RequestOverlayPaint() override;
+ 
+  protected:
++  static uint32_t Packed10bpcRGBTo8bpcBytes(uint32_t rgb10) {
++      // Conversion almost according to the Direct3D 10+ rules (unorm > float >
++      // unorm), but with one multiplication rather than separate division and
++      // multiplication - the results are the same for unorm10 to unorm8.
++      if constexpr (std::endian::native == std::endian::big) {
++        return (uint32_t(float(rgb10 & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 24) |
++               (uint32_t(float((rgb10 >> 10) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 16) |
++               (uint32_t(float((rgb10 >> 20) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 8) |
++               uint32_t(0xFF);
++      }
++      return uint32_t(float(rgb10 & 0x3FF) * (255.0f / 1023.0f) + 0.5f) |
++             (uint32_t(float((rgb10 >> 10) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 8) |
++             (uint32_t(float((rgb10 >> 20) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 16) |
++             (uint32_t(0xFF) << 24);
++    }
++  
++
+   /**
+    * Sets the host and surface from the Window the presenter is attached to.
+    *
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.h b/src/gpu/xenos/host/d3d12/d3d12_presenter.h
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.h
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.h
+@@ -49,6 +49,8 @@
+   struct Key {};
+ 
+  public:
++  bool CaptureGuestOutput(RawImage& image_out) override;
++
+   explicit D3D12Presenter(Key, HostGPULossCallback host_gpu_loss_callback,
+                           const XenosGraphicsDriverBase& driver, const D3D12Provider& provider)
+       : Presenter(std::move(host_gpu_loss_callback), driver), provider_(provider) {}
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+@@ -744,4 +744,135 @@
+   return InitializeCommonSurfaceIndependent();
+ }
+ 
++bool D3D12Presenter::CaptureGuestOutput(RawImage& image_out) {
++  Microsoft::WRL::ComPtr<ID3D12Resource> guest_output_resource;
++  {
++    uint32_t guest_output_mailbox_index;
++    std::unique_lock<std::mutex> guest_output_consumer_lock(
++        ConsumeGuestOutput(guest_output_mailbox_index, nullptr, nullptr));
++    if (guest_output_mailbox_index != UINT32_MAX) {
++      guest_output_resource = guest_output_resources_[guest_output_mailbox_index].second;
++    }
++    // Incremented the reference count of the guest output resource - safe to
++    // leave the consumer critical section now.
++  }
++  if (!guest_output_resource) {
++    return false;
++  }
++
++  ID3D12Device* device = provider_.GetDevice();
++
++  D3D12_RESOURCE_DESC texture_desc = guest_output_resource->GetDesc();
++  D3D12_TEXTURE_COPY_LOCATION copy_dest;
++  UINT64 copy_dest_size;
++  device->GetCopyableFootprints(&texture_desc, 0, 1, 0, &copy_dest.PlacedFootprint, nullptr,
++                                nullptr, &copy_dest_size);
++
++  D3D12_RESOURCE_DESC buffer_desc;
++  objects::FillBufferResourceDesc(buffer_desc, copy_dest_size, D3D12_RESOURCE_FLAG_NONE);
++  Microsoft::WRL::ComPtr<ID3D12Resource> buffer;
++  // Create zeroed not to leak data in the row padding.
++  if (FAILED(device->CreateCommittedResource(&objects::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
++                                             &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
++                                             IID_PPV_ARGS(&buffer)))) {
++    REXLOG_ERROR("D3D12Presenter: Failed to create the guest output capture buffer");
++    return false;
++  }
++
++  {
++    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> command_allocator;
++    if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
++                                              IID_PPV_ARGS(&command_allocator)))) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to create the guest output capturing command "
++          "allocator");
++      return false;
++    }
++    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list;
++    if (FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, command_allocator.Get(),
++                                         nullptr, IID_PPV_ARGS(&command_list)))) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to create the guest output capturing command "
++          "list");
++      return false;
++    }
++
++    D3D12_RESOURCE_BARRIER barrier;
++    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
++    barrier.Transition.pResource = guest_output_resource.Get();
++    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++    barrier.Transition.StateBefore = kGuestOutputInternalState;
++    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
++    if constexpr (kGuestOutputInternalState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
++      command_list->ResourceBarrier(1, &barrier);
++    }
++    copy_dest.pResource = buffer.Get();
++    copy_dest.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
++    D3D12_TEXTURE_COPY_LOCATION copy_source;
++    copy_source.pResource = guest_output_resource.Get();
++    copy_source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++    copy_source.SubresourceIndex = 0;
++    command_list->CopyTextureRegion(&copy_dest, 0, 0, 0, &copy_source, nullptr);
++    if constexpr (kGuestOutputInternalState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
++      std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
++      command_list->ResourceBarrier(1, &barrier);
++    }
++    if (FAILED(command_list->Close())) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to close the guest output capturing command "
++          "list");
++      return false;
++    }
++
++    ID3D12CommandQueue* direct_queue = provider_.GetDirectQueue();
++
++    // Make sure that if any work is submitted, any `return` will cause an await
++    // before releasing the command allocator / list and the resource the RAII
++    // way in the destruction of the submission tracker - so create after the
++    // objects referenced in the submission - but don't submit anything if
++    // failed to initialize the fence.
++    D3D12SubmissionTracker submission_tracker;
++    if (!submission_tracker.Initialize(device, direct_queue)) {
++      return false;
++    }
++    ID3D12CommandList* execute_command_list = command_list.Get();
++    direct_queue->ExecuteCommandLists(1, &execute_command_list);
++    if (!submission_tracker.NextSubmission()) {
++      REXLOG_ERROR("D3D12Presenter: Failed to signal the guest output capturing fence");
++      return false;
++    }
++    if (!submission_tracker.AwaitAllSubmissionsCompletion()) {
++      REXLOG_ERROR("D3D12Presenter: Failed to await the guest output capturing fence");
++      return false;
++    }
++  }
++
++  D3D12_RANGE read_range;
++  read_range.Begin = copy_dest.PlacedFootprint.Offset;
++  read_range.End = copy_dest_size;
++  void* mapping;
++  if (FAILED(buffer->Map(0, &read_range, &mapping))) {
++    REXLOG_ERROR("D3D12Presenter: Failed to map the guest output capture buffer");
++    return false;
++  }
++  image_out.width = uint32_t(texture_desc.Width);
++  image_out.height = uint32_t(texture_desc.Height);
++  image_out.stride = sizeof(uint32_t) * image_out.width;
++  image_out.data.resize(image_out.stride * image_out.height);
++  uint32_t* image_out_pixels = reinterpret_cast<uint32_t*>(image_out.data.data());
++  for (uint32_t y = 0; y < image_out.height; ++y) {
++    uint32_t* dest_row = &image_out_pixels[size_t(image_out.width) * y];
++    const uint32_t* source_row = reinterpret_cast<const uint32_t*>(
++        reinterpret_cast<const uint8_t*>(mapping) + copy_dest.PlacedFootprint.Offset +
++        size_t(copy_dest.PlacedFootprint.Footprint.RowPitch) * y);
++    for (uint32_t x = 0; x < image_out.width; ++x) {
++      dest_row[x] = Packed10bpcRGBTo8bpcBytes(source_row[x]);
++    }
++  }
++  // Unmapping will be done implicitly when the resource goes out of scope and
++  // gets destroyed.
++  return true;
++}
++
+ }  // namespace rex::gpu::d3d12
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.h b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+@@ -65,6 +65,8 @@
+   struct Key {};
+ 
+  public:
++  bool CaptureGuestOutput(RawImage& image_out) override;
++
+   explicit VulkanPresenter(Key, HostGPULossCallback host_gpu_loss_callback,
+                            const XenosGraphicsDriverBase& driver, const VulkanSettings& settings,
+                            const VulkanDevice* vulkan_device, const UISamplerSet* ui_samplers)
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -1651,6 +1651,211 @@
+   return pipeline;
+ }
+ 
++bool VulkanPresenter::CaptureGuestOutput(RawImage& image_out) {
++  std::shared_ptr<GuestOutputImage> guest_output_image;
++  {
++    uint32_t guest_output_mailbox_index;
++    std::unique_lock<std::mutex> guest_output_consumer_lock(
++        ConsumeGuestOutput(guest_output_mailbox_index, nullptr, nullptr));
++    if (guest_output_mailbox_index != UINT32_MAX) {
++      REX_ASSERT(guest_output_images_[guest_output_mailbox_index].ever_successfully_refreshed);
++      guest_output_image = guest_output_images_[guest_output_mailbox_index].image;
++    }
++    // Incremented the reference count of the guest output image - safe to leave
++    // the consumer critical section now.
++  }
++  if (!guest_output_image) {
++    return false;
++  }
++
++  VkExtent2D image_extent = guest_output_image->GetExtent();
++  size_t pixel_count = size_t(image_extent.width) * image_extent.height;
++  VkDeviceSize buffer_size = VkDeviceSize(sizeof(uint32_t) * pixel_count);
++  VkBuffer buffer;
++  VkDeviceMemory buffer_memory;
++  if (!objects::CreateDedicatedAllocationBuffer(
++          vulkan_device_, buffer_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++          objects::MemoryPurpose::kReadback, buffer, buffer_memory)) {
++    REXLOG_ERROR("VulkanPresenter: Failed to create the guest output capture buffer");
++    return false;
++  }
++
++  const VulkanDevice::Functions& dfn = vulkan_device_->GetFunctions();
++  const VkDevice device = vulkan_device_->GetDevice();
++
++  {
++    VkCommandPoolCreateInfo command_pool_create_info;
++    command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
++    command_pool_create_info.pNext = nullptr;
++    command_pool_create_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
++    command_pool_create_info.queueFamilyIndex = vulkan_device_->GetQueueFamilyGraphicsCompute();
++    VkCommandPool command_pool;
++    if (dfn.vkCreateCommandPool(device, &command_pool_create_info, nullptr, &command_pool) !=
++        VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to create the guest output capturing "
++          "command pool");
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkCommandBufferAllocateInfo command_buffer_allocate_info;
++    command_buffer_allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
++    command_buffer_allocate_info.pNext = nullptr;
++    command_buffer_allocate_info.commandPool = command_pool;
++    command_buffer_allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    command_buffer_allocate_info.commandBufferCount = 1;
++    VkCommandBuffer command_buffer;
++    if (dfn.vkAllocateCommandBuffers(device, &command_buffer_allocate_info, &command_buffer) !=
++        VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to allocate the guest output capturing "
++          "command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkCommandBufferBeginInfo command_buffer_begin_info;
++    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++    command_buffer_begin_info.pNext = nullptr;
++    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    command_buffer_begin_info.pInheritanceInfo = nullptr;
++    if (dfn.vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info) != VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to begin recording the guest output "
++          "capturing command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkImageMemoryBarrier image_memory_barrier;
++    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
++    image_memory_barrier.pNext = nullptr;
++    image_memory_barrier.srcAccessMask = kGuestOutputInternalAccessMask;
++    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++    image_memory_barrier.oldLayout = kGuestOutputInternalLayout;
++    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++    image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    image_memory_barrier.image = guest_output_image->GetImage();
++    image_memory_barrier.subresourceRange = objects::BuildSubresourceRange();
++    dfn.vkCmdPipelineBarrier(command_buffer, kGuestOutputInternalStageMask,
++                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
++                             &image_memory_barrier);
++
++    VkBufferImageCopy buffer_image_copy = {};
++    buffer_image_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++    buffer_image_copy.imageSubresource.layerCount = 1;
++    buffer_image_copy.imageExtent.width = image_extent.width;
++    buffer_image_copy.imageExtent.height = image_extent.height;
++    buffer_image_copy.imageExtent.depth = 1;
++    dfn.vkCmdCopyImageToBuffer(command_buffer, guest_output_image->GetImage(),
++                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &buffer_image_copy);
++
++    // A fence doesn't guarantee host visibility and availability.
++    VkBufferMemoryBarrier buffer_memory_barrier;
++    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
++    buffer_memory_barrier.pNext = nullptr;
++    buffer_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++    buffer_memory_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++    buffer_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    buffer_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    buffer_memory_barrier.buffer = buffer;
++    buffer_memory_barrier.offset = 0;
++    buffer_memory_barrier.size = VK_WHOLE_SIZE;
++    std::swap(image_memory_barrier.srcAccessMask, image_memory_barrier.dstAccessMask);
++    std::swap(image_memory_barrier.oldLayout, image_memory_barrier.newLayout);
++    dfn.vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                             VK_PIPELINE_STAGE_HOST_BIT | kGuestOutputInternalStageMask, 0, 0,
++                             nullptr, 1, &buffer_memory_barrier, 1, &image_memory_barrier);
++
++    if (dfn.vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to end recording the guest output capturing "
++          "command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkSubmitInfo submit_info = {};
++    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++    submit_info.commandBufferCount = 1;
++    submit_info.pCommandBuffers = &command_buffer;
++    VulkanSubmissionTracker submission_tracker(vulkan_device_);
++    {
++      VulkanSubmissionTracker::FenceAcquisition fence_acqusition(
++          submission_tracker.AcquireFenceToAdvanceSubmission());
++      if (!fence_acqusition.GetFence()) {
++        REXLOG_ERROR(
++            "VulkanPresenter: Failed to acquire a fence for guest output "
++            "capturing");
++        fence_acqusition.SubmissionFailedOrDiscarded();
++        dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++        dfn.vkDestroyBuffer(device, buffer, nullptr);
++        dfn.vkFreeMemory(device, buffer_memory, nullptr);
++        return false;
++      }
++      VkResult submit_result;
++      {
++        const VulkanDevice::Queue::Acquisition queue_acquisition =
++            vulkan_device_->AcquireQueue(vulkan_device_->GetQueueFamilyGraphicsCompute(), 0);
++        submit_result =
++            dfn.vkQueueSubmit(queue_acquisition.GetQueue(), 1, &submit_info, fence_acqusition.GetFence());
++      }
++      if (submit_result != VK_SUCCESS) {
++        REXLOG_ERROR(
++            "VulkanPresenter: Failed to submit the guest output capturing "
++            "command buffer");
++        fence_acqusition.SubmissionFailedOrDiscarded();
++        dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++        dfn.vkDestroyBuffer(device, buffer, nullptr);
++        dfn.vkFreeMemory(device, buffer_memory, nullptr);
++        return false;
++      }
++    }
++    if (!submission_tracker.AwaitAllSubmissionsCompletion()) {
++      REXLOG_ERROR("VulkanPresenter: Failed to await the guest output capturing fence");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++  }
++
++  // Don't need the buffer anymore, just its memory.
++  dfn.vkDestroyBuffer(device, buffer, nullptr);
++
++  void* mapping;
++  if (dfn.vkMapMemory(device, buffer_memory, 0, VK_WHOLE_SIZE, 0, &mapping) != VK_SUCCESS) {
++    REXLOG_ERROR("VulkanPresenter: Failed to map the guest output capture memory");
++    dfn.vkFreeMemory(device, buffer_memory, nullptr);
++    return false;
++  }
++
++  image_out.width = image_extent.width;
++  image_out.height = image_extent.height;
++  image_out.stride = sizeof(uint32_t) * image_extent.width;
++  image_out.data.resize(size_t(buffer_size));
++  uint32_t* image_out_pixels = reinterpret_cast<uint32_t*>(image_out.data.data());
++  for (size_t i = 0; i < pixel_count; ++i) {
++    image_out_pixels[i] = Packed10bpcRGBTo8bpcBytes(reinterpret_cast<const uint32_t*>(mapping)[i]);
++  }
++
++  // Unmapping will be done by freeing.
++  dfn.vkFreeMemory(device, buffer_memory, nullptr);
++
++  return true;
++}
++
+ }  // namespace vulkan
+ }  // namespace gpu
+ }  // namespace rex
+diff --git a/include/rex/gpu/graphics_system.h b/include/rex/gpu/graphics_system.h
+--- a/include/rex/gpu/graphics_system.h
++++ b/include/rex/gpu/graphics_system.h
+@@ -51,7 +51,7 @@
+  * Vd calls and GPU register accesses to a Xenos driver. With no driver a project that presents
+  * itself calls ReportFrame and UISystem::DrawOverlays from its own present.
+  */
+-REX_DECLARE_INTERFACE(IGraphicsSystem, 4)
++REX_DECLARE_INTERFACE(IGraphicsSystem, 5)
+   virtual GraphicsSettings& GetSettings() = 0;
+ 
+   /** Presents an original system texture with its RGB16 LUT; false when unavailable. */
+diff --git a/tests/unit/gpu/xenos_base_test.cpp b/tests/unit/gpu/xenos_base_test.cpp
+--- a/tests/unit/gpu/xenos_base_test.cpp
++++ b/tests/unit/gpu/xenos_base_test.cpp
+@@ -285,3 +285,22 @@
+   driver.DetachTitle();
+   driver.Shutdown();
+ }
++
++#include "gpu/xenos/host/presenter.h"
++namespace {
++class CaptureColorConversion : public rex::gpu::Presenter {
++ public:
++  using Presenter::Packed10bpcRGBTo8bpcBytes;
++};
++}
++REX_TEST_CASE("guest output capture preserves every RGB10 channel without dithering", "[gpu][presenter-capture]") {
++  for (rex::u32 channel = 0; channel < 3; ++channel) {
++    for (rex::u32 value = 0; value < 1024; ++value) {
++      const auto rgba = CaptureColorConversion::Packed10bpcRGBTo8bpcBytes(value << (channel * 10));
++      const auto bytes = std::bit_cast<std::array<rex::u8, 4>>(rgba);
++      for (rex::u32 component = 0; component < 3; ++component)
++        CHECK(bytes[component] == (component == channel ? (value * 255 + 511) / 1023 : 0));
++      CHECK(bytes[3] == 255);
++    }
++  }
++}

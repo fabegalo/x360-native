@@ -1,121 +1,112 @@
-Subject: fix(codegen): preserve emission owners and late callable edges
-
-diff --git a/include/rex/codegen/function_graph.h b/include/rex/codegen/function_graph.h
---- a/include/rex/codegen/function_graph.h
-+++ b/include/rex/codegen/function_graph.h
-@@ -189,6 +189,8 @@
-   // isCallInstruction: true for bl (expects return), false for b (no return)
-   // Returns how the target should be treated during code generation.
-   TargetKind classifyTarget(uint32_t target, uint32_t callerAddr, bool isCallInstruction) const;
-+  // Emission knows the exact owner, including discontiguous or shared blocks.
-+  TargetKind classifyTarget(uint32_t target, const FunctionNode& caller, bool isCallInstruction) const;
+diff --git a/src/codegen/function_graph.h b/src/codegen/function_graph.h
+--- a/src/codegen/function_graph.h
++++ b/src/codegen/function_graph.h
+@@ -177,6 +177,7 @@
+    * @return How the target is treated during code generation
+    */
+   TargetType ClassifyTarget(u32 target, u32 caller_addr, bool is_call_instruction) const;
++  TargetType ClassifyTarget(u32 target, const FunctionNode& caller, bool is_call_instruction) const;
  
   private:
-   std::vector<CodeBuffer> codeBuffers_;
+   /** The containers, held behind a pointer so moving the graph moves one pointer. */
 diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
 --- a/src/codegen/function_graph.cpp
 +++ b/src/codegen/function_graph.cpp
-@@ -1257,8 +1257,15 @@
- 
- TargetKind FunctionGraph::classifyTarget(uint32_t target, uint32_t callerAddr,
-                                          bool isCallInstruction) const {
--  // Find the caller's function
--  const FunctionNode* callerFn = getFunctionContaining(callerAddr);
-+  if (const auto* caller = getFunctionContaining(callerAddr))
-+    return classifyTarget(target, *caller, isCallInstruction);
-+  return isImport(target) ? TargetKind::Import
-+                         : isEntryPoint(target) ? TargetKind::Function : TargetKind::Unknown;
+@@ -1477,7 +1477,15 @@
+  */
+ TargetType FunctionGraph::ClassifyTarget(u32 target, u32 caller_addr,
+                                          bool is_call_instruction) const {
+-  const FunctionNode* caller_fn = GetFunctionContaining(caller_addr);
++  if (const auto* caller = GetFunctionContaining(caller_addr))
++    return ClassifyTarget(target, *caller, is_call_instruction);
++  return IsImport(target) ? TargetType::kImport
++                         : IsEntryPoint(target) ? TargetType::kFunction : TargetType::kUnknown;
 +}
 +
-+TargetKind FunctionGraph::classifyTarget(uint32_t target, const FunctionNode& caller,
-+                                         bool isCallInstruction) const {
-+  const auto* callerFn = &caller;
++TargetType FunctionGraph::ClassifyTarget(u32 target, const FunctionNode& caller,
++                                        bool is_call_instruction) const {
++  const FunctionNode* caller_fn = &caller;
  
-   // Case 1: Target is an import - always a call/tail-call
-   if (isImport(target)) {
+   if (IsImport(target)) {
+     return TargetType::kImport;
 diff --git a/src/codegen/phase_merge.cpp b/src/codegen/phase_merge.cpp
 --- a/src/codegen/phase_merge.cpp
 +++ b/src/codegen/phase_merge.cpp
-@@ -17,6 +17,8 @@
+@@ -10,6 +10,8 @@
+  */
  
- #include "codegen_logging.h"
- #include <rex/memory/utils.h>
-+#include <ppc.h>
+ #include "pipeline.h"
++#include "decoded_binary.h"
 +#include <algorithm>
  
- using rex::memory::load_and_swap;
- 
-@@ -44,6 +46,31 @@
+ #include <rex/logging/log_category.h>
+ #include "codegen_categories.h"
+@@ -37,6 +39,26 @@
      }
-     return load_and_swap<uint32_t>(section->data + offset);
+     return memory::load<be_u32>(section->data + offset);
    });
 +
-+  // Gap discovery can publish a callable entry after an earlier scan followed
-+  // that address as a local label. Such branches have no unresolved jump.
-+  // Reconcile only final, known entries; never guess a target or new boundary.
-+  for (const auto& [entry, node] : graph.functions()) {
-+    for (const auto& block : node->blocks()) {
-+      const auto* data = binary.translate(block.base);
-+      if (!data) continue;
-+      for (uint32_t offset = 0; offset < block.size; offset += 4) {
-+        const auto word = load_and_swap<uint32_t>(data + offset);
-+        const auto op = PPC_OP(word);
-+        if (op != PPC_OP_B && op != PPC_OP_BC) continue;
-+        const auto site = block.base + offset;
-+        const int32_t displacement = op == PPC_OP_B ? PPC_BI(word) : PPC_BD(word);
-+        const uint32_t target = PPC_BA(word) ? uint32_t(displacement) : site + displacement;
-+        const bool call = PPC_BL(word);
-+        if ((!call && target == entry) || !graph.isEntryPoint(target)) continue;
-+        const auto hasSite = [site](const auto& edges) {
-+          return std::any_of(edges.begin(), edges.end(), [site](const auto& edge) { return edge.site == site; });
++  // A late callable entry may have been followed earlier as an internal label.
++  // Reconcile known entries only, using the SDK's already decoded instructions.
++  for (const auto& [entry, node] : graph.GetFunctions()) {
++    for (const auto& block : node->GetBlocks()) {
++      for (const auto* insn : ctx.GetDecoded().GetRange(block.base, block.GetEnd())) {
++        if (!insn->branch_target) continue;
++        const u32 target = *insn->branch_target;
++        const bool call = insn->IsCall();
++        if ((!call && target == entry) || !graph.IsEntryPoint(target)) continue;
++        const auto has_site = [site = insn->address](const auto& edges) {
++          return std::any_of(edges.begin(), edges.end(),
++                             [site](const auto& edge) { return edge.site == site; });
 +        };
-+        if (hasSite(node->calls()) || hasSite(node->tailCalls())) continue;
-+        graph.addUnresolvedJumpToFunction(entry, site, target, call, op == PPC_OP_BC);
++        if (has_site(node->GetCalls()) || has_site(node->GetTailCalls())) continue;
++        graph.AddUnresolvedJumpToFunction(entry, insn->address, target, call,
++                                          insn->format == detail::InstrFormat::kB);
 +      }
 +    }
 +  }
  
    size_t iteration = 0;
-   size_t totalResolved = 0;
-diff --git a/src/codegen/builders/control_flow.cpp b/src/codegen/builders/control_flow.cpp
---- a/src/codegen/builders/control_flow.cpp
-+++ b/src/codegen/builders/control_flow.cpp
-@@ -29,7 +29,7 @@
+   size_t total_resolved = 0;
+diff --git a/src/codegen/builder/control_flow.cpp b/src/codegen/builder/control_flow.cpp
+--- a/src/codegen/builder/control_flow.cpp
++++ b/src/codegen/builder/control_flow.cpp
+@@ -41,7 +41,7 @@
+ bool Build<PPC_INST_B>(BuilderContext& ctx) {
+   u32 target = ctx.insn.operands[0];
  
-   // Use graph to classify the target - handles thunks that branch to nearby functions
-   // false = branch instruction (not a call), so own-base means loop back
--  auto kind = ctx.graph().classifyTarget(target, ctx.base, false);
-+  auto kind = ctx.graph().classifyTarget(target, ctx.fn, false);
+-  auto type = ctx.GetGraph().ClassifyTarget(target, ctx.base, false);
++  auto type = ctx.GetGraph().ClassifyTarget(target, ctx.fn, false);
  
-   switch (kind) {
-     case TargetKind::InternalLabel:
-@@ -67,7 +67,7 @@
+   switch (type) {
+     case TargetType::kInternalLabel:
+@@ -74,7 +74,7 @@
+ bool Build<PPC_INST_BL>(BuilderContext& ctx) {
+   u32 target = ctx.insn.operands[0];
  
-   // Use graph to classify the target
-   // true = call instruction, so own-base means recursive call (not loop back)
--  auto kind = ctx.graph().classifyTarget(target, ctx.base, true);
-+  auto kind = ctx.graph().classifyTarget(target, ctx.fn, true);
+-  auto type = ctx.GetGraph().ClassifyTarget(target, ctx.base, true);
++  auto type = ctx.GetGraph().ClassifyTarget(target, ctx.fn, true);
  
-   switch (kind) {
-     case TargetKind::InternalLabel:
-@@ -144,7 +144,7 @@
+   if (!ctx.GetConfig().skip_lr || type == TargetType::kImport)
+     ctx.Println("\tctx.lr = 0x{:X};", ctx.base + 4);
+@@ -141,7 +141,7 @@
          continue;
        }
  
--      auto kind = ctx.graph().classifyTarget(label, ctx.base, false);
-+      auto kind = ctx.graph().classifyTarget(label, ctx.fn, false);
-       switch (kind) {
-         case TargetKind::InternalLabel:
-           ctx.println("\t\tgoto loc_{:X};", label);
-diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
---- a/src/codegen/builders/context.cpp
-+++ b/src/codegen/builders/context.cpp
-@@ -283,7 +283,7 @@
+-      auto type = ctx.GetGraph().ClassifyTarget(label, ctx.base, false);
++      auto type = ctx.GetGraph().ClassifyTarget(label, ctx.fn, false);
+       switch (type) {
+         case TargetType::kInternalLabel:
+           ctx.Println("\t\tgoto loc_{:X};", label);
+diff --git a/src/codegen/builder/context.cpp b/src/codegen/builder/context.cpp
+--- a/src/codegen/builder/context.cpp
++++ b/src/codegen/builder/context.cpp
+@@ -352,7 +352,7 @@
+ void BuilderContext::EmitConditionalBranch(bool negate, std::string_view cond) {
+   u32 target = insn.operands[1];
  
-   // Use classifyTarget for consistent branch classification
-   // false = branch instruction (not a call), so own-base means loop back
--  auto kind = graph().classifyTarget(target, base, false);
-+  auto kind = graph().classifyTarget(target, fn, false);
+-  auto type = GetGraph().ClassifyTarget(target, base, false);
++  auto type = GetGraph().ClassifyTarget(target, fn, false);
  
-   switch (kind) {
-     case TargetKind::InternalLabel:
+   switch (type) {
+     case TargetType::kInternalLabel:

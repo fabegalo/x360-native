@@ -1,3 +1,4 @@
+#include <print>
 // Portions adapted from ReXGlue/Xenia, under BSD-3-Clause:
 // Copyright (c) 2021 Ben Vanik; Copyright (c) 2026 Tom Clay.
 // See licenses/rexglue-sdk.txt and THIRD_PARTY_NOTICES.md.
@@ -42,9 +43,10 @@
 #include <system_error>
 #include <vector>
 
-#include <fmt/format.h>
-#include <rex/system/lzx.h>
-#include <rex/system/util/xex2_info.h>
+#include <format>
+#include "extraction.h"
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/kernel/types/xex.h>
 
 #include "sha256.h"
 #include "fs_io.h"
@@ -76,7 +78,7 @@ constexpr const char* kKeyNames[] = {"xex2-retail", "xex2-devkit", "xex1-retail"
 std::vector<MasterKey> LoadKeys(const fs::path& path) {
   io::ifstream in(path);
   if (!in)
-    throw Error{fmt::format(
+    throw Error{std::format(
         "key file '{}' not found. It is local and ignored by Git: create it with one line "
         "per key, '<name> <32 hex digits>' (names xex2-retail, xex2-devkit, xex1-retail, "
         "xex1-devkit), or pass --keys <file> or set X360N_XEX_KEYS",
@@ -89,14 +91,14 @@ std::vector<MasterKey> LoadKeys(const fs::path& path) {
     std::string name, hex, extra;
     if (!(fields >> name)) continue;
     if (!(fields >> hex) || (fields >> extra))
-      throw Error{fmt::format("key file '{}' line {}: expected '<name> <32 hex digits>'",
+      throw Error{std::format("key file '{}' line {}: expected '<name> <32 hex digits>'",
                               path.string(), n)};
     if (std::find_if(std::begin(kKeyNames), std::end(kKeyNames),
                      [&](const char* k) { return name == k; }) == std::end(kKeyNames))
-      throw Error{fmt::format("key file '{}' line {}: unknown key name '{}'", path.string(), n, name)};
+      throw Error{std::format("key file '{}' line {}: unknown key name '{}'", path.string(), n, name)};
     for (const auto& k : keys)
       if (k.name == name)
-        throw Error{fmt::format("key file '{}' line {}: '{}' given twice", path.string(), n, name)};
+        throw Error{std::format("key file '{}' line {}: '{}' given twice", path.string(), n, name)};
     MasterKey k{name, {}};
     auto nibble = [](char c) {
       return c >= '0' && c <= '9' ? c - '0'
@@ -111,33 +113,33 @@ std::vector<MasterKey> LoadKeys(const fs::path& path) {
       if (ok) k.key[i] = uint8_t(hi << 4 | lo);
     }
     if (!ok)
-      throw Error{fmt::format("key file '{}' line {}: '{}' is not 32 hex digits", path.string(), n,
+      throw Error{std::format("key file '{}' line {}: '{}' is not 32 hex digits", path.string(), n,
                               name)};
     keys.push_back(std::move(k));
   }
-  if (keys.empty()) throw Error{fmt::format("key file '{}' holds no key", path.string())};
+  if (keys.empty()) throw Error{std::format("key file '{}' holds no key", path.string())};
   return keys;
 }
 
 uint32_t Be32(const Bytes& b, size_t o) {
-  if (o > b.size() || b.size() - o < 4) throw Error{fmt::format("read past end at 0x{:X}", o)};
+  if (o > b.size() || b.size() - o < 4) throw Error{std::format("read past end at 0x{:X}", o)};
   return (uint32_t(b[o]) << 24) | (uint32_t(b[o + 1]) << 16) | (uint32_t(b[o + 2]) << 8) | b[o + 3];
 }
 uint16_t Be16(const Bytes& b, size_t o) {
-  if (o > b.size() || b.size() - o < 2) throw Error{fmt::format("read past end at 0x{:X}", o)};
+  if (o > b.size() || b.size() - o < 2) throw Error{std::format("read past end at 0x{:X}", o)};
   return uint16_t((b[o] << 8) | b[o + 1]);
 }
 const uint8_t* At(const Bytes& b, size_t o, size_t n) {
-  if (o > b.size() || n > b.size() - o) throw Error{fmt::format("range 0x{:X}+0x{:X} past end", o, n)};
+  if (o > b.size() || n > b.size() - o) throw Error{std::format("range 0x{:X}+0x{:X} past end", o, n)};
   return b.data() + o;
 }
 std::string Hex(const uint8_t* p, size_t n) {
   std::string s;
-  for (size_t i = 0; i < n; ++i) s += fmt::format("{:02x}", p[i]);
+  for (size_t i = 0; i < n; ++i) s += std::format("{:02x}", p[i]);
   return s;
 }
 std::string Version(uint32_t v) {
-  return fmt::format("{}.{}.{}.{}", v >> 28, (v >> 24) & 0xF, (v >> 8) & 0xFFFF, v & 0xFF);
+  return std::format("{}.{}.{}.{}", v >> 28, (v >> 24) & 0xF, (v >> 8) & 0xFFFF, v & 0xFF);
 }
 
 Bytes ReadFile(const fs::path& p) {
@@ -173,7 +175,7 @@ struct Header {
 };
 void HeaderRange(const Header& h, size_t offset, size_t length) {
   if (offset > h.header_size || length > h.header_size - offset)
-    throw Error{fmt::format("header: range 0x{:X}+0x{:X} outside header", offset, length)};
+    throw Error{std::format("header: range 0x{:X}+0x{:X} outside header", offset, length)};
 }
 Header ParseHeader(const Bytes& h) {
   if (Be32(h, 0) != 0x58455832) throw Error{"not an XEX2 header"};
@@ -243,7 +245,7 @@ bool VerifyPages(const Bytes& h, const Bytes& image, std::string* report) {
     const Digest di = link(i);
     ok += std::memcmp(di.data(), At(h, hd.sec + 0x184 + 24 * (i - 1) + 4, 20), 20) == 0;
   }
-  *report = fmt::format("{}/{} page runs verified ({} pages of 0x{:X})", ok, n, hd.page_count,
+  *report = std::format("{}/{} page runs verified ({} pages of 0x{:X})", ok, n, hd.page_count,
                         hd.page_size);
   return ok == n;
 }
@@ -265,7 +267,7 @@ BaseImage DecodeBase(const Bytes& x, const std::vector<MasterKey>& keys) {
   const size_t format = *ffi;
   const uint16_t enc = Be16(x, format + 4), comp = Be16(x, format + 6);
   if (enc > 1 || comp != 2)
-    throw Error{fmt::format("base: encryption {} compression {} not handled (needs 0/1, 2)", enc, comp)};
+    throw Error{std::format("base: encryption {} compression {} not handled (needs 0/1, 2)", enc, comp)};
   BaseImage r{};
   r.window_size = Be32(x, format + 8);
   CheckWindow(r.window_size);
@@ -298,7 +300,7 @@ BaseImage DecodeBase(const Bytes& x, const std::vector<MasterKey>& keys) {
   while (size) {
     if (p > body.size() || size > body.size() - p || size < 24)
       throw Error{"base: block past end"};
-    if (Sha1(body.data() + p, size) != want) throw Error{fmt::format("base: block hash mismatch at 0x{:X}", p)};
+    if (Sha1(body.data() + p, size) != want) throw Error{std::format("base: block hash mismatch at 0x{:X}", p)};
     const uint32_t next = Be32(body, p);
     std::memcpy(want.data(), At(body, p + 4, 20), 20);
     size_t q = p + 24;
@@ -319,8 +321,7 @@ BaseImage DecodeBase(const Bytes& x, const std::vector<MasterKey>& keys) {
   if (compressed.size() >= std::numeric_limits<int>::max())
     throw Error{"base: compressed image too large for the LZX decoder"};
   r.image.resize(image_size);
-  if (lzx_decompress(compressed.data(), compressed.size(), r.image.data(), r.image.size(),
-                     r.window_size, nullptr, 0) != 0)
+  if (FileSystem().DecompressLZX(compressed, r.image, r.window_size, {}) != 0)
     throw Error{"base: LZX decompression failed"};
   return r;
 }
@@ -342,7 +343,7 @@ Bytes DecodeImage(const Bytes& x, const std::vector<MasterKey>& keys) {
     if (!VerifyPages(x, base.image, &report)) throw Error{"image: " + report};
     return std::move(base.image);
   }
-  if (enc > 1 || comp > 1) throw Error{fmt::format("encryption {} compression {} not handled", enc, comp)};
+  if (enc > 1 || comp > 1) throw Error{std::format("encryption {} compression {} not handled", enc, comp)};
   HeaderRange(hd, *ffi, info_size);
   if (comp == 1 && (info_size < 8 || (info_size - 8) % 8)) throw Error{"invalid basic compression info"};
   const uint8_t* body = x.data() + hd.header_size;
@@ -405,7 +406,7 @@ void CheckDelta(const uint8_t* p, size_t len, size_t dest_size, uint32_t window,
                 const char* what) {
   size_t o = 0;
   while (o < len) {
-    if (len - o < 12) throw Error{fmt::format("{}: truncated delta record", what)};
+    if (len - o < 12) throw Error{std::format("{}: truncated delta record", what)};
     const uint32_t old_addr = (uint32_t(p[o]) << 24) | (uint32_t(p[o + 1]) << 16) |
                               (uint32_t(p[o + 2]) << 8) | p[o + 3];
     const uint32_t new_addr = (uint32_t(p[o + 4]) << 24) | (uint32_t(p[o + 5]) << 16) |
@@ -414,12 +415,12 @@ void CheckDelta(const uint8_t* p, size_t len, size_t dest_size, uint32_t window,
     const uint16_t clen = uint16_t((p[o + 10] << 8) | p[o + 11]);
     if (!old_addr && !new_addr && !ulen && !clen) return;
     if (uint64_t(new_addr) + ulen > dest_size || (clen != 0 && uint64_t(old_addr) + ulen > dest_size))
-      throw Error{fmt::format("{}: delta record outside the buffer (old 0x{:X} new 0x{:X} len 0x{:X})",
+      throw Error{std::format("{}: delta record outside the buffer (old 0x{:X} new 0x{:X} len 0x{:X})",
                               what, old_addr, new_addr, ulen)};
     const size_t step = 12 + (clen > 1 ? clen : 0);
-    if (step > len - o) throw Error{fmt::format("{}: delta data past end", what)};
+    if (step > len - o) throw Error{std::format("{}: delta data past end", what)};
     if (clen > 1 && ulen > window)
-      throw Error{fmt::format("{}: delta reference exceeds LZX window", what)};
+      throw Error{std::format("{}: delta reference exceeds LZX window", what)};
     o += step;
   }
 }
@@ -478,7 +479,7 @@ std::vector<uint8_t> ReadXexTitleResource(const fs::path& path) {
     const auto execution = OptHeader(head, hd, 0x00040006);
     if (!execution) return {};
     HeaderRange(hd, *execution, 0x10);
-    return ReadResource(path, fmt::format("{:08X}", Be32(head, *execution + 0xC)), SdkKeys(),
+    return ReadResource(path, std::format("{:08X}", Be32(head, *execution + 0xC)), SdkKeys(),
                         256u << 20, 512u << 20);
   } catch (const Error& e) { throw std::runtime_error(e.what); }
 }
@@ -492,16 +493,16 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
                   const fs::path& key_file) {
   std::string log;
   auto say = [&](const std::string& s) {
-    fmt::print("{}\n", s);
+    std::print("{}\n", s);
     log += s + "\n";
   };
   try {
     const std::vector<MasterKey> keys = LoadKeys(key_file);
     const Bytes base = ReadFile(base_path);
     const Bytes patch = ReadFile(patch_path);
-    say(fmt::format("base  {} {} bytes sha256 {}", base_path.string(), base.size(),
+    say(std::format("base  {} {} bytes sha256 {}", base_path.string(), base.size(),
                     x360n::Sha256Hex({base.data(), base.size()})));
-    say(fmt::format("patch {} {} bytes sha256 {}", patch_path.string(), patch.size(),
+    say(std::format("patch {} {} bytes sha256 {}", patch_path.string(), patch.size(),
                     x360n::Sha256Hex({patch.data(), patch.size()})));
 
     // Base: decode and check against its own header.
@@ -510,7 +511,7 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     Bytes base_header(base.begin(), base.begin() + bh.header_size);
     std::string rep;
     const bool base_ok = VerifyPages(base_header, b.image, &rep);
-    say(fmt::format("base: key {}, image 0x{:X} bytes, {}", b.key_name, b.image.size(), rep));
+    say(std::format("base: key {}, image 0x{:X} bytes, {}", b.key_name, b.image.size(), rep));
     if (!base_ok) throw Error{"base image does not match its page digests"};
 
     // Patch descriptor and correspondence.
@@ -526,7 +527,7 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     const uint32_t target_ver = Be32(patch, desc + 4), source_ver = Be32(patch, desc + 8);
     const Digest sig = Sha1(At(base, bh.sec + 8, 0x100), 0x100);
     const bool sig_ok = std::memcmp(sig.data(), At(patch, desc + 0xC, 20), 20) == 0;
-    say(fmt::format("patch: {} -> {}; digest_source {} base sha1(rsa_signature) {}", Version(source_ver),
+    say(std::format("patch: {} -> {}; digest_source {} base sha1(rsa_signature) {}", Version(source_ver),
                     Version(target_ver), sig_ok ? "matches" : "DOES NOT match", Hex(sig.data(), 20)));
     if (!sig_ok) throw Error{"patch is not for this base"};
     const auto pffi = OptHeader(patch, ph, 0x000003FF);
@@ -535,8 +536,8 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     HeaderRange(ph, format, 0x24);
     const uint16_t penc = Be16(patch, format + 4), pcomp = Be16(patch, format + 6);
     if (penc != 0 && penc != 1)
-      throw Error{fmt::format("patch: encryption {} not supported", penc)};
-    if (pcomp != 3) throw Error{fmt::format("patch: compression {} (expected 3, delta)", pcomp)};
+      throw Error{std::format("patch: encryption {} not supported", penc)};
+    if (pcomp != 3) throw Error{std::format("patch: compression {} (expected 3, delta)", pcomp)};
     const uint32_t window = Be32(patch, format + 8);
     CheckWindow(window);
 
@@ -567,8 +568,7 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     const uint8_t* hp = At(patch, desc + 0x4C, hdr_patch_size);
     Bytes hdr_patch(hp, hp + hdr_patch_size);
     CheckDelta(hdr_patch.data(), hdr_patch.size(), header.size(), window, "header patch");
-    if (lzxdelta_apply_patch(reinterpret_cast<rex::xex2_delta_patch*>(hdr_patch.data()), hdr_patch.size(),
-                             window, header.data()) != 0)
+    if (FileSystem().ApplyLZXDelta(hdr_patch, window, header) != 0)
       throw Error{"header patch failed"};
     header.resize(target_header_size);
     const Header th = ParseHeader(header);
@@ -586,7 +586,7 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     }
     if (key_name.empty())
       throw Error{"patch: no key of the key file relates the patched header to the base session key"};
-    say(fmt::format("keys: patched header key {}; image_key_source checks", key_name));
+    say(std::format("keys: patched header key {}; image_key_source checks", key_name));
 
     // Image.
     const size_t target_image_size = ImageSize(th);
@@ -614,21 +614,20 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     while (size) {
       if (p + size > pbody.size() || size < 24) throw Error{"patch: block past end"};
       if (Sha1(pbody.data() + p, size) != want)
-        throw Error{fmt::format("patch: block {} hash mismatch", blocks)};
+        throw Error{std::format("patch: block {} hash mismatch", blocks)};
       const uint32_t next = Be32(pbody, p);
       std::memcpy(want.data(), At(pbody, p + 4, 20), 20);
       CheckDelta(pbody.data() + p + 24, size - 24, work, window, "image patch");
-      if (lzxdelta_apply_patch(reinterpret_cast<rex::xex2_delta_patch*>(pbody.data() + p + 24), size - 24,
-                               window, image.data()) != 0)
-        throw Error{fmt::format("patch: delta block {} failed", blocks)};
+      if (FileSystem().ApplyLZXDelta(std::span<const uint8_t>(pbody).subspan(p + 24, size - 24), window, image) != 0)
+        throw Error{std::format("patch: delta block {} failed", blocks)};
       p += size;
       size = next;
       ++blocks;
     }
     image.resize(target_image_size);
     const bool target_ok = VerifyPages(header, image, &rep);
-    say(fmt::format("result: {} patch blocks applied; image 0x{:X} bytes; {}", blocks, image.size(), rep));
-    say(fmt::format("result: header sha256 {}; image sha256 {}",
+    say(std::format("result: {} patch blocks applied; image 0x{:X} bytes; {}", blocks, image.size(), rep));
+    say(std::format("result: header sha256 {}; image sha256 {}",
                     x360n::Sha256Hex({header.data(), header.size()}),
                     x360n::Sha256Hex({image.data(), image.size()})));
     if (!target_ok) throw Error{"result does not match the page digests of the patched header"};
@@ -641,10 +640,10 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     WriteNew(out_dir / (stem + ".report.txt"), reinterpret_cast<const uint8_t*>(log.data()), log.size());
     return 0;
   } catch (const Error& e) {
-    fmt::print(stderr, "apply-patch: {}\n", e.what);
+    std::print(stderr, "apply-patch: {}\n", e.what);
     return 1;
   } catch (const std::exception& e) {
-    fmt::print(stderr, "apply-patch: {}\n", e.what());
+    std::print(stderr, "apply-patch: {}\n", e.what());
     return 1;
   }
 }

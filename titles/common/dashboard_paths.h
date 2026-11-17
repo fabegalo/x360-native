@@ -1,26 +1,33 @@
 #pragma once
 #include "dashboard_assets.h"
-#include <rex/rex_app.h>
-#include <rex/logging.h>
-#include <rex/system.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/path_settings.h>
+#include <rex/logging/log_category.h>
+#include <rex/result.h>
+#include <rex/string/text.h>
 
 namespace x360n {
-// Called before constructing Runtime or loading any original image.
-inline bool PrepareDashboardPaths(rex::PathConfig& paths, std::string_view version,
+// Called after all user settings settle, before drivers or original images load.
+inline rex::Result<void> PrepareDashboardPaths(rex::kernel::TitlePaths& paths, std::string_view version,
                                   std::span<const DashboardAsset> assets) {
-  auto error = paths.update_data_root.empty() ? VerifyDashboardAssets(paths.game_data_root, version, assets)
+  auto error = paths.update_root.Get().empty() ? VerifyDashboardAssets(paths.game_root.Get(), version, assets)
       : "Dashboard Retail " + std::string(version) + ": update_data_root overlays are not supported; use the complete matching original package";
   if (!error.empty()) {
     REXLOG_ERROR("{}", error);
-    rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, error);
-    return false;
+    return rex::Err(rex::ErrorCategory::kValidation, error);
   }
-  paths.cache_root = DashboardCacheRoot(paths.cache_root.empty() ? paths.user_data_root / "cache" : paths.cache_root, version);
+  auto& host = REX_PATHS();
+  const auto cache = host.cache_root.Get();
+  REX_TRY_VOID(host.cache_root.SetText(rex::SettingLayer::kRuntime,
+      rex::string::PathToUTF8(DashboardCacheRoot(cache.empty() ? host.user_root.Get() / "cache" : cache, version))));
   // An explicit root also disables the SDK's parent-directory metadata search.
-  paths.metadata_root = paths.metadata_root.empty() ? paths.game_data_root / "metadata"
-      : DashboardCacheRoot(paths.metadata_root, version);
+  const auto metadata = paths.metadata_root.Get();
+  const auto isolated_metadata = metadata.empty() || paths.metadata_root.GetLayer() == rex::SettingLayer::kDefault
+      ? paths.game_root.Get() / "metadata" : DashboardCacheRoot(metadata, version);
+  REX_TRY_VOID(paths.metadata_root.SetText(rex::SettingLayer::kRuntime,
+      rex::string::PathToUTF8(isolated_metadata)));
   REXLOG_INFO("Dashboard Retail {}: verified {} original dependencies in {}; no cross-version fallback",
-              version, assets.size(), paths.game_data_root.string());
-  return true;
+              version, assets.size(), rex::string::PathToUTF8(paths.game_root.Get()));
+  return rex::Ok();
 }
 }

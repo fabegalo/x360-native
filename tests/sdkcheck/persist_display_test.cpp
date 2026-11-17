@@ -1,55 +1,68 @@
 #include <catch2/catch_test_macros.hpp>
-#include <filesystem>
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
+#include <cstring>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/title_runtime.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/title_state.h"
 #include "../../titles/dash_17559/src/display_transition.h"
+#include <rex/xam/title_lifecycle.h>
+#include <rex/xam/system_ui.h>
 
-extern "C" REX_FUNC(__imp__VdPersistDisplay);
+TEST_CASE("17559 display transition rejects a missing original frame without presenting",
+          "[sdk][persist-display]") {
+  rex::test::KernelFixture fixture;
+  dash17559::InstallDisplayTransition(fixture.GetRuntime());
+  auto* services = REX_INTERFACE(rex::xam::IXAMTitleServices);
+  REQUIRE(services);
+  REQUIRE(services->GetSystemUI().launch_display_transition);
+  fixture.RunOnGuestThread([&](rex::test::Caller&) {
+    CHECK(services->GetSystemUI().launch_display_transition() == rex::kernel::XResultFromWin32(50));
+    CHECK(fixture.GetRuntime().GetPersistedDisplay().buffer == 0);
+  });
+}
 
 TEST_CASE("VdPersistDisplay retains the actual descriptor and transfers its allocation", "[sdk][persist-display]") {
-  using rex::X_STATUS;
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
-  auto* memory = rt.memory();
-  const auto scratch = memory->SystemHeapAlloc(64);
-  const auto image = memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  REQUIRE(scratch);
-  REQUIRE(image);
-  auto* bytes = memory->TranslateVirtual(scratch);
-  PPCContext ctx{};
-  auto invoke = [&] {
-    ctx.r3.u64 = scratch;
-    ctx.r4.u64 = scratch + 32;
-    __imp__VdPersistDisplay(ctx, memory->virtual_membase());
-    return ctx.r3.u32;
-  };
-  std::memset(bytes, 0, 64);
-  CHECK(invoke() == 0); // no dummy image to free on the first present
-  CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 32) == 0);
-  rex::memory::store_and_swap<uint32_t>(bytes, image);
-  rex::memory::store_and_swap<uint16_t>(bytes + 4, 16);
-  rex::memory::store_and_swap<uint16_t>(bytes + 6, 16);
-  rex::memory::store_and_swap<uint32_t>(bytes + 8, 0x28280106);
-  CHECK(invoke() == 1);
-  CHECK(rt.kernel_state()->GetPersistedDisplay().buffer == image);
-  CHECK(rt.kernel_state()->GetPersistedDisplay().width == 16);
-  CHECK(rt.kernel_state()->GetPersistedDisplay().format == 0x28280106);
-  // A malformed replacement must not discard the valid persisted image.
-  rex::memory::store_and_swap<uint16_t>(bytes + 4, 0);
-  CHECK(invoke() == 0);
-  CHECK(rt.kernel_state()->GetPersistedDisplay().buffer == image);
-  std::memset(bytes, 0, 12);
-  CHECK(invoke() == 1);
-  CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 32) == image);
-  CHECK(rt.kernel_state()->GetPersistedDisplay().buffer == 0);
-  CHECK(invoke() == 0); // ownership cannot be transferred twice
-  memory->SystemHeapFree(image);
-  memory->SystemHeapFree(scratch);
+  rex::test::KernelFixture fixture;
+  auto& runtime = fixture.GetRuntime();
+  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
+    auto* memory = rex::kernel::StateOf(runtime).GetAddressSpace();
+    const auto scratch = c.Alloc(64);
+    const auto image = memory->SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+    REQUIRE(image);
+    auto* bytes = c.GetBase() + scratch;
+    auto invoke = [&] { return c.Kernel("VdPersistDisplay", {scratch, scratch + 32}); };
+    CHECK(invoke() == 0);
+    CHECK(c.Load32(scratch + 32) == 0);
+    c.Store32(scratch, image);
+    rex::memory::store_and_swap<uint16_t>(bytes + 4, 16);
+    rex::memory::store_and_swap<uint16_t>(bytes + 6, 16);
+    c.Store32(scratch + 8, 0x28280106);
+    CHECK(invoke() == 1);
+    CHECK(runtime.GetPersistedDisplay().buffer == image);
+    CHECK(runtime.GetPersistedDisplay().width == 16);
+    CHECK(runtime.GetPersistedDisplay().height == 16);
+    CHECK(runtime.GetPersistedDisplay().format == 0x28280106);
+    c.Store32(image, 0x12345678);
+    rex::memory::store_and_swap<uint16_t>(bytes + 4, 0);
+    CHECK(invoke() == 0);
+    CHECK(runtime.GetPersistedDisplay().buffer == image);
+    rex::memory::store_and_swap<uint16_t>(bytes + 4, 16);
+    c.Store32(scratch + 32, 0xABABABAB);
+    CHECK(c.Kernel("VdPersistDisplay", {0xFFFFFFFC, scratch + 32}) == 0);
+    CHECK(c.Load32(scratch + 32) == 0xABABABAB);
+    CHECK(c.Kernel("VdPersistDisplay", {0, 0xFFFFFFFC}) == 0);
+    CHECK(runtime.GetPersistedDisplay().buffer == image);
+    CHECK(c.Kernel("VdPersistDisplay", {0, scratch + 32}) == 1);
+    CHECK(c.Load32(scratch + 32) == image);
+    CHECK(runtime.GetPersistedDisplay().buffer == 0);
+    CHECK(c.Load32(image) == 0x12345678);
+    std::memset(bytes, 0, 12);
+    CHECK(invoke() == 0);
+    CHECK(c.Load32(scratch + 32) == 0);
+    memory->SystemHeapFree(image);
+  });
+  runtime.Unload();
+  CHECK(runtime.GetPersistedDisplay().buffer == 0);
 }
 
 TEST_CASE("17559 transition LUT retains channel values and reaches the original black endpoint", "[sdk][persist-display]") {

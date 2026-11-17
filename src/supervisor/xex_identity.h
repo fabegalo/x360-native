@@ -1,6 +1,6 @@
 // Reads the identity of an XEX2 file from its headers. The input is untrusted:
 // every offset and size is bounds-checked against the header block.
-// Structure layouts come from the SDK (rex/system/util/xex2_info.h).
+// Structure layouts come from the SDK (rex/kernel/types/xex.h).
 #pragma once
 
 #include <cstdint>

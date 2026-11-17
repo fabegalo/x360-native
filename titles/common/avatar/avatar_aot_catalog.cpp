@@ -1,6 +1,6 @@
 #include "avatar_aot_catalog.h"
 
-#include <rex/memory.h>
+#include <rex/kernel/heap.h>
 
 #include <cstring>
 #include <utility>
@@ -10,7 +10,7 @@ namespace {
 constexpr uint32_t kSize = 0x20000, kGenerator = 0x1000, kPath = 0x400,
                    kOutput = 0x4000;
 }
-AotAvatarCatalog::AotAvatarCatalog(rex::memory::Memory& memory,
+AotAvatarCatalog::AotAvatarCatalog(rex::kernel::GuestAddressSpace& memory,
                                    AvatarAotCall call)
     : memory_(memory), call_(std::move(call)) {}
 AotAvatarCatalog::~AotAvatarCatalog() { Close(); }

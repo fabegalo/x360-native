@@ -4,4 +4,4 @@
 
 #include "castle_crashers_app.h"
 
-REX_DEFINE_APP(castle_crashers, CastleCrashersApp::Create)
+REX_TITLE_APP(CastleCrashersApp)

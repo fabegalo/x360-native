@@ -1,24 +1,35 @@
 #include <algorithm>
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <cstring>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/kernel/xam/task_context.h>
+#include <rex/ppc/hook.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/kernel/heap.h>
+#include <rex/xam/task_context.h>
+#include "system_ui_dependencies.h"
 #include "system_ui_task.h"
+
+namespace {
+rex::kernel::GuestAddressSpace* SystemMemory() {
+  auto* thread = rex::kernel::KernelThread::GetCallingThread();
+  REX_CHECK(thread, "17559 original allocator requires a guest calling thread");
+  return thread->GetAddressSpace();
+}
+}
+
 
 // Notifications run as host system tasks. Route their task identity/attributes
 // through the runtime; retain original behavior for original XAM-owned handles.
 extern "C" REX_FUNC(__imp__sub_816B8098);
-extern "C" REX_FUNC(sub_816B8098) {
-  ctx.r3.u64 = rex::kernel::xam::CurrentSystemTask();
+REX_HOOK_RAW(sub_816B8098) {
+  ctx.r3.u64 = rex::xam::CurrentSystemTask();
   if (!ctx.r3.u32) __imp__sub_816B8098(ctx, base);
 }
 #define BRIDGE_RUNTIME_TASK(address, name) \
   extern "C" REX_FUNC(__imp__##name); \
   extern "C" REX_FUNC(__imp__sub_##address); \
-  extern "C" REX_FUNC(sub_##address) { \
-    if (rex::kernel::xam::IsRuntimeTask(ctx.r3.u32)) __imp__##name(ctx, base); \
+  REX_HOOK_RAW(sub_##address) { \
+    if (rex::xam::IsRuntimeTask(ctx.r3.u32)) __imp__##name(ctx, base); \
     else __imp__sub_##address(ctx, base); \
   }
 BRIDGE_RUNTIME_TASK(816B7BF0, XamTaskGetAttributes)
@@ -28,7 +39,7 @@ BRIDGE_RUNTIME_TASK(816B7B80, XamTaskCloseHandle)
 // Original PNG encoding polls export 1B3 directly. Its internal implementation
 // dereferences original task TLS, which host-dispatched runtime tasks do not own.
 extern "C" REX_FUNC(__imp__sub_816B8090);
-extern "C" REX_FUNC(sub_816B8090) {
+REX_HOOK_RAW(sub_816B8090) {
   if (const auto result = dash17559::RuntimeSystemTaskShouldExit()) ctx.r3.u64 = *result;
   else __imp__sub_816B8090(ctx, base);
 }
@@ -37,7 +48,7 @@ extern "C" REX_FUNC(sub_816B8090) {
 // same identity and settings service as the dashboard and system applications.
 #define BRIDGE_XAM_SERVICE(address, name) \
   extern "C" REX_FUNC(__imp__##name); \
-  extern "C" REX_FUNC(sub_##address) { __imp__##name(ctx, base); }
+  REX_HOOK_RAW(sub_##address) { __imp__##name(ctx, base); }
 BRIDGE_XAM_SERVICE(816D8590, XamUserGetXUID)
 BRIDGE_XAM_SERVICE(816D8698, XamUserGetIndexFromXUID)
 BRIDGE_XAM_SERVICE(816D86A8, XamUserGetGamerTag)
@@ -54,7 +65,7 @@ BRIDGE_XAM_SERVICE(81670740, XamWriteGamerTileEx)
 BRIDGE_XAM_SERVICE(81670E08, XamWriteGamerTile)
 // XamTaskSchedule (export 1AF): the package registry schedules its work
 // internally. XAM's own task queue (81AA08A8) belongs to the XAM boot this host
-// never runs; its uninitialized semaphore faulted (docs/avatar-system.md ยง20).
+// never runs; its uninitialized semaphore faulted (docs/avatar-system.md ง20).
 // Runtime tasks already own close/attributes above.
 BRIDGE_XAM_SERVICE(816BA440, XamTaskSchedule)
 #undef BRIDGE_XAM_SERVICE
@@ -64,7 +75,7 @@ BRIDGE_XAM_SERVICE(816BA440, XamTaskSchedule)
 // focus, navigation, button dispatch and dialog completion.
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
 extern "C" REX_FUNC(__imp__sub_816F4AB8);
-extern "C" REX_FUNC(sub_816F4AB8) {
+REX_HOOK_RAW(sub_816F4AB8) {
   if (ctx.r4.u32 == 0x400000FFu) {
     ctx.r3.u64 = 0xFF; // ANY_USER in the native flags, a value in the HUD Ex ABI.
     __imp__XamInputGetKeystrokeHudEx(ctx, base);
@@ -75,21 +86,21 @@ extern "C" REX_FUNC(sub_816F4AB8) {
 // The XUI library's private malloc/free/size/realloc boundary (tag 0x248E).
 // Back allocations with the existing guest heap; never start XAM's system heap
 // or replace account services. Strong symbols override only these AOT functions.
-extern "C" REX_FUNC(sub_817AB898) {
+REX_HOOK_RAW(sub_817AB898) {
   const auto size = ctx.r3.u32;
-  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(size);
+  ctx.r3.u64 = SystemMemory()->SystemHeapAlloc(size);
   if (!ctx.r3.u32) REXLOG_ERROR("17559 XUI allocation failed size={} lr={:08X}", size, uint32_t(ctx.lr));
 }
-extern "C" REX_FUNC(sub_817AB8A0) {
+REX_HOOK_RAW(sub_817AB8A0) {
   uint32_t size = 0;
-  if (ctx.r3.u32) REX_KERNEL_MEMORY()->LookupHeap(ctx.r3.u32)->QuerySize(ctx.r3.u32, &size);
+  if (ctx.r3.u32) SystemMemory()->LookupHeap(ctx.r3.u32)->QuerySize(ctx.r3.u32, &size);
   ctx.r3.u64 = size;
 }
-extern "C" REX_FUNC(sub_817AB8C0) {
-  if (ctx.r3.u32) REX_KERNEL_MEMORY()->SystemHeapFree(ctx.r3.u32);
+REX_HOOK_RAW(sub_817AB8C0) {
+  if (ctx.r3.u32) SystemMemory()->SystemHeapFree(ctx.r3.u32);
 }
-extern "C" REX_FUNC(sub_817AB8D8) {
-  auto* memory = REX_KERNEL_MEMORY();
+REX_HOOK_RAW(sub_817AB8D8) {
+  auto* memory = SystemMemory();
   const auto old = ctx.r3.u32, requested = ctx.r4.u32;
   if (!requested) { if (old) memory->SystemHeapFree(old); ctx.r3.u64 = 0; return; }
   const auto next = memory->SystemHeapAlloc(requested);
@@ -102,15 +113,14 @@ extern "C" REX_FUNC(sub_817AB8D8) {
   ctx.r3.u64 = next;
 }
 // XAM's self-module getter, used by its original section:// resource builders.
-#include <rex/cvar.h>
-REXCVAR_DEFINE_UINT32(dash17559_ui_self, 0, "Dashboard 17559", "Verified original XUI module handle");
-extern "C" REX_FUNC(sub_816E03A8) { ctx.r3.u64 = REXCVAR_GET(dash17559_ui_self); }
 
-#include <rex/logging.h>
+REX_HOOK_RAW(sub_816E03A8) { ctx.r3.u64 = dash17559::OriginalUiModuleHandle(); }
+
+#include <rex/logging/log_category.h>
 // Temporary stage diagnostics: execute the original body and preserve its result.
 #define TRACE_XUI_STAGE(address) \
   extern "C" REX_FUNC(__imp__sub_##address); \
-  extern "C" REX_FUNC(sub_##address) { \
+  REX_HOOK_RAW(sub_##address) { \
     __imp__sub_##address(ctx, base); \
     REXLOG_INFO("17559 XUI stage " #address " -> {:08X}", ctx.r3.u32); \
   }
@@ -137,13 +147,13 @@ extern "C" REX_FUNC(__imp__XMemAlloc);
 extern "C" REX_FUNC(__imp__XMemFree);
 extern "C" REX_FUNC(__imp__sub_816E69E0);
 extern "C" REX_FUNC(__imp__sub_816E6AB0);
-extern "C" REX_FUNC(sub_816E69E0) {
+REX_HOOK_RAW(sub_816E69E0) {
   // Physical requests use the original alignment/protection decoder and
   // MmAllocatePhysicalMemoryEx. Only the unavailable virtual XAM heap is bridged.
   if (ctx.r4.u32 & 0x80000000u) __imp__sub_816E69E0(ctx, base);
   else __imp__XMemAlloc(ctx, base);
 }
-extern "C" REX_FUNC(sub_816E6AB0) {
+REX_HOOK_RAW(sub_816E6AB0) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_816E6AB0(ctx, base);
   else __imp__XMemFree(ctx, base);
 }
@@ -152,10 +162,10 @@ extern "C" REX_FUNC(sub_816E6AB0) {
 // list. Virtual blocks use the bridged heap above; physical blocks keep the
 // original path.
 extern "C" REX_FUNC(__imp__sub_816E6BB8);
-extern "C" REX_FUNC(sub_816E6BB8) {
+REX_HOOK_RAW(sub_816E6BB8) {
   const auto old = ctx.r3.u32, requested = ctx.r4.u32;
   if (old >= 0xA0000000u) { __imp__sub_816E6BB8(ctx, base); return; }
-  auto* memory = REX_KERNEL_MEMORY();
+  auto* memory = SystemMemory();
   const auto next = requested ? memory->SystemHeapAlloc(requested, 0x20) : 0;
   if ((next || !requested) && old) {
     uint32_t size = 0;
@@ -167,7 +177,7 @@ extern "C" REX_FUNC(sub_816E6BB8) {
 }
 
 extern "C" REX_FUNC(__imp__sub_817B8A58);
-extern "C" REX_FUNC(sub_817B8A58) {
+REX_HOOK_RAW(sub_817B8A58) {
   const auto descriptor = ctx.r3.u32;
   auto read_name = [&](uint32_t pointer) {
     std::string result;
@@ -190,10 +200,10 @@ extern "C" REX_FUNC(sub_817B8A58) {
 // host is the SDK, so obtain that same identity from its actual executable,
 // without constructing a second XAM title/worker manager.
 extern "C" REX_FUNC(__imp__sub_8169CE70);
-extern "C" REX_FUNC(sub_8169CE70) {
+REX_HOOK_RAW(sub_8169CE70) {
   const auto manager = rex::memory::load_and_swap<uint32_t>(base + 0x81A9F850);
   if (manager) __imp__sub_8169CE70(ctx, base);
-  else ctx.r3.u64 = REX_KERNEL_STATE()->title_id();
+  else ctx.r3.u64 = REX_RUNTIME()->GetTitleID();
 }
 
 // Same manager: 8169D088 returns its launch-in-progress word (+0x27C) and the
@@ -202,7 +212,7 @@ extern "C" REX_FUNC(sub_8169CE70) {
 // without a manager XAM has no launch pending and no error to report. The
 // package experience mode (816E97B0) reads it for the Guide's Avatar item.
 extern "C" REX_FUNC(__imp__sub_8169D088);
-extern "C" REX_FUNC(sub_8169D088) {
+REX_HOOK_RAW(sub_8169D088) {
   if (rex::memory::load_and_swap<uint32_t>(base + 0x81A9F850)) {
     __imp__sub_8169D088(ctx, base);
     return;
@@ -212,7 +222,7 @@ extern "C" REX_FUNC(sub_8169D088) {
 }
 
 extern "C" REX_FUNC(__imp__sub_817DA648);
-extern "C" REX_FUNC(sub_817DA648) {
+REX_HOOK_RAW(sub_817DA648) {
   std::string path;
   for (unsigned i=0; ctx.r3.u32 && i<512; ++i) {
     auto c=rex::memory::load_and_swap<uint16_t>(base+ctx.r3.u32+2*i);
@@ -225,24 +235,24 @@ extern "C" REX_FUNC(sub_817DA648) {
 
 // HUD control constructors use XAM's private C++ allocator (tag 0x500).
 // Pair it with its original delete boundary, backed by the SDK guest heap.
-extern "C" REX_FUNC(sub_816E6B18) {
-  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
+REX_HOOK_RAW(sub_816E6B18) {
+  ctx.r3.u64 = SystemMemory()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
 }
 // Its malloc 816E6B68 (flags 0x500) reached the same unstarted XAM heap and
 // returned null, so XUI data sources could not copy their listener lists and
 // property changes were never delivered. It pairs with the delete below.
-extern "C" REX_FUNC(sub_816E6B68) {
-  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
+REX_HOOK_RAW(sub_816E6B68) {
+  ctx.r3.u64 = SystemMemory()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
 }
 // Tagged virtual allocation (size, tag). The image cache uses tag 17 for its
 // D3D texture headers. 816E6C78 always selects a virtual XAM heap, via
 // 816E5F10/816E63D8; the tag is accounting metadata, not physical attributes.
 // These blocks are released through the XMemFree/delete boundaries above.
-extern "C" REX_FUNC(sub_816E6C78) {
-  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(ctx.r3.u32, 0x20);
+REX_HOOK_RAW(sub_816E6C78) {
+  ctx.r3.u64 = SystemMemory()->SystemHeapAlloc(ctx.r3.u32, 0x20);
 }
-extern "C" REX_FUNC(sub_816E6B10) {
-  if (ctx.r3.u32) REX_KERNEL_MEMORY()->SystemHeapFree(ctx.r3.u32);
+REX_HOOK_RAW(sub_816E6B10) {
+  if (ctx.r3.u32) SystemMemory()->SystemHeapFree(ctx.r3.u32);
 }
 
 // Internal XamAllocEx/XamFree calls share the SDK allocation contract.
@@ -250,11 +260,11 @@ extern "C" REX_FUNC(__imp__XamAllocEx);
 extern "C" REX_FUNC(__imp__sub_816E67E8);
 extern "C" REX_FUNC(__imp__XamFree);
 extern "C" REX_FUNC(__imp__sub_816E6858);
-extern "C" REX_FUNC(sub_816E6858) {
+REX_HOOK_RAW(sub_816E6858) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_816E6858(ctx, base);
   else __imp__XamFree(ctx, base);
 }
-extern "C" REX_FUNC(sub_816E67E8) {
+REX_HOOK_RAW(sub_816E67E8) {
   const auto tag=ctx.r3.u32, flags=ctx.r4.u32, size=ctx.r5.u32, output=ctx.r6.u32, caller=uint32_t(ctx.lr);
   // The original system compositor requests tagged physical command memory.
   // Preserve its physical allocator, as for XMemAlloc above; the SDK's XAM
@@ -276,19 +286,19 @@ std::string XuiDiagnosticName(uint8_t* base, uint32_t p) {
 }
 }
 extern "C" REX_FUNC(__imp__sub_817C3AD8);
-extern "C" REX_FUNC(sub_817C3AD8) {
+REX_HOOK_RAW(sub_817C3AD8) {
   const auto name=XuiDiagnosticName(base,rex::memory::load_and_swap<uint32_t>(base+ctx.r3.u32));
   __imp__sub_817C3AD8(ctx,base);
   if (int32_t(ctx.r3.u32)<0) REXLOG_ERROR("17559 XUI scene control {} -> {:08X}",name,ctx.r3.u32);
 }
 extern "C" REX_FUNC(__imp__sub_817B8B58);
-extern "C" REX_FUNC(sub_817B8B58) {
+REX_HOOK_RAW(sub_817B8B58) {
   const auto name=XuiDiagnosticName(base,ctx.r3.u32);
   __imp__sub_817B8B58(ctx,base);
   if (int32_t(ctx.r3.u32)<0) REXLOG_ERROR("17559 XUI object create {} -> {:08X}",name,ctx.r3.u32);
 }
 extern "C" REX_FUNC(__imp__sub_817BEFD8);
-extern "C" REX_FUNC(sub_817BEFD8) {
+REX_HOOK_RAW(sub_817BEFD8) {
   const auto property=ctx.r4.u32;
   const auto flags=rex::memory::load_and_swap<uint32_t>(base+property);
   const auto descriptor=rex::memory::load_and_swap<uint32_t>(base+property+4);
@@ -300,7 +310,7 @@ extern "C" REX_FUNC(sub_817BEFD8) {
 // Its virtual allocation and existing delete boundary must use the same heap.
 extern "C" REX_FUNC(__imp__XamAlloc);
 extern "C" REX_FUNC(__imp__sub_816E67A0);
-extern "C" REX_FUNC(sub_816E67A0) {
+REX_HOOK_RAW(sub_816E67A0) {
   const auto flags=ctx.r3.u32, size=ctx.r4.u32;
   if (flags == 0x20000000u) __imp__XamAlloc(ctx,base);
   else __imp__sub_816E67A0(ctx,base);

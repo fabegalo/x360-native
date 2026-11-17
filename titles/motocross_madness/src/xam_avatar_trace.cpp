@@ -3,7 +3,7 @@
 // log r3; no register or memory is changed.
 #include <cstdint>
 
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
 
 #define X360N_XAM_STEP(fn, what)                                                         \
@@ -16,9 +16,9 @@ X360N_XAM_STEP(x360n_xam_avatar_init_step3, "0x8196B9A8: 0x8196B3D8()")
 X360N_XAM_STEP(x360n_xam_avatar_init_pack, "0x8196B9A8: result (after 0x8196B8C8)")
 #undef X360N_XAM_STEP
 
-#include <rex/system/thread_state.h>
+#include <rex/kernel/thread_state.h>
 void x360n_xam_mipmap_failure(PPCRegister& r3, PPCRegister& r27, PPCRegister& r31) {
-  auto* c=rex::runtime::ThreadState::Get()->context();
+  auto* c=rex::kernel::ThreadState::Get()->GetContext();
   REXLOG_INFO("xam-avatar-trace: mipmap failure after LR={:08X} r3={:08X} level={} texture={:08X}",
     uint32_t(c->lr),r3.u32,r27.u32,r31.u32);
 }

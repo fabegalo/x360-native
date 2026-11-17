@@ -1,20 +1,19 @@
 // Execute the real generated large switch, including its original table loads.
 #include "large_switch_init.h"
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include "codegen/tool_runtime.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/guest_memory.h>
 #include <cstdio>
 
-using rex::X_STATUS;
 
 int main() {
-  rex::Runtime runtime(X360N_LARGE_SWITCH_FIXTURE);
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  if (runtime.Setup(PPCImageConfig, std::move(config), true) != X_STATUS_SUCCESS ||
-      runtime.LoadXexImage("game:\\test.xex") != X_STATUS_SUCCESS) return 1;
-  auto* base = runtime.memory()->virtual_membase();
+  rex::codegen::ToolApp app("split_default_switch_native", X360N_LARGE_SWITCH_FIXTURE);
+  if (!app.Start()) return 1;
+  rex::kernel::TitleRuntime runtime(kPPCImageConfig, true);
+  if (!runtime.GetTitlePaths().game_root.Set(X360N_LARGE_SWITCH_FIXTURE) ||
+      !runtime.GetTitlePaths().entry.Set("test.xex") || !runtime.Load()) return 1;
+  auto* base = runtime.GetMembase().GetBase();
   for (uint32_t index = 0; index < 65536; ++index) {
     PPCContext ctx{};
     ctx.r3.u64 = 0x1122334400000000ull | index;

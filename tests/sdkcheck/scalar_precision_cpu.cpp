@@ -1,14 +1,20 @@
 // Exercise the interpreter used by draw extent estimation with guest ALU words.
 #include "scalar_precision_oracle.h"
-#include <rex/graphics/pipeline/shader/interpreter.h>
-#include <rex/graphics/registers.h>
-#include <rex/cvar.h>
+#include <catch2/catch_test_macros.hpp>
+#include "gpu/xenos/pipeline/shader/interpreter.h"
+#include <rex/xenos/register.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/title_context.h"
+#include <memory>
 #include <algorithm>
 #include <bit>
 #include <cstring>
 #include <iostream>
 #include <vector>
-using namespace rex::graphics;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+namespace ucode = rex::xenos::ucode;
 namespace {
 struct Sink : ShaderInterpreter::ExportSink {
   float value = 0;
@@ -17,44 +23,34 @@ struct Sink : ShaderInterpreter::ExportSink {
     if (mask & 1) { value = v[0]; ++writes; }
   }
 };
-std::vector<uint32_t> Program(ucode::AluScalarOpcode op, bool address = false,
-                              bool paired_mad = false) {
-  using namespace ucode;
-  uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
-                   (uint64_t(ControlFlowOpcode::kAlloc) << 44);
-  uint64_t exec = 1 | (uint64_t(address ? 2 : 1) << 12) |
-                  (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
-  std::vector<uint32_t> code{uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16),
-      uint32_t(exec >> 16), (1u << 15) | (1u << 20) | (uint32_t(op) << 26), 0,
-      uint32_t(paired_mad ? AluVectorOpcode::kMad : AluVectorOpcode::kMax) << 24};
-  if (address) code.insert(code.end(), {(1u << 15) | (1u << 16) |
-      (uint32_t(AluScalarOpcode::kRetainPrev) << 26),
-      (1u << 29) | (1u << 30) | (1u << 31), uint32_t(AluVectorOpcode::kMax) << 24});
-  return code;
+using x360n::test::Program;
 }
-}
-int main() {
+TEST_CASE("Scalar interpreter preserves precision and special-value contracts", "[sdk][gpu][shader-fetch][scalar-precision]") {
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
   RegisterFile regs;
   std::memset(regs.values, 0, sizeof(regs.values));
-  regs[XE_GPU_REG_SQ_PS_CONST] = 0x000FF100;
-  rex::memory::Memory memory;
-  ShaderInterpreter interpreter(regs, memory);
-  std::fill_n(interpreter.temp_registers(), xenos::kMaxShaderTempRegisters * 4, 0.0f);
+  regs[std::to_underlying(xenos::Register::SQ_PS_CONST)] = 0x000FF100;
+  rex::kernel::TitleContext context(caller.GetRuntime());
+  auto interpreter = std::make_unique<ShaderInterpreter>(regs, context);
+  std::fill_n(interpreter->GetTempRegisters(), xenos::kMaxShaderTempRegisters * 4, 0.0f);
   Sink sink;
-  interpreter.SetExportSink(&sink);
+  interpreter->SetExportSink(&sink);
   auto constant = [&](unsigned index, unsigned component, float value) {
-    regs[XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + index) * 4 + component] =
+    regs[std::to_underlying(xenos::Register::SHADER_CONSTANT_000_X) + (256 + index) * 4 + component] =
         std::bit_cast<uint32_t>(value);
   };
   auto execute = [&](const std::vector<uint32_t>& code) {
     sink.writes = 0;
-    interpreter.SetShader(xenos::ShaderType::kPixel, code.data());
-    interpreter.Execute();
+    interpreter->SetShader(xenos::ShaderType::kPixel, code.data());
+    interpreter->Execute();
     return sink.value;
   };
   unsigned checks = 0, failures = 0;
   auto check = [&](bool ok, const char* name) {
     ++checks;
+    INFO(name);
+    CHECK(ok);
     if (!ok) { ++failures; std::cerr << "FAIL " << name << '\n'; }
   };
   using O = ucode::AluScalarOpcode;
@@ -86,11 +82,12 @@ int main() {
         "paired MAD scalar operand remains WX like the shared GPU parser");
   auto mulsc = Program(O::kMulsc0);
   for (bool rtz : {false, true}) {
-    check(rex::cvar::SetFlagByName("mulsc_round_toward_zero", rtz ? "true" : "false"),
-          "explicit mulsc rounding setting");
+    interpreter = std::make_unique<ShaderInterpreter>(regs, context, rtz);
+    std::fill_n(interpreter->GetTempRegisters(), xenos::kMaxShaderTempRegisters * 4, 0.0f);
+    interpreter->SetExportSink(&sink);
     for (float a : {.1f, -.1f, .3f, 1.3f}) {
       for (float b : {.1f, .3f, -1.1f, 9.876543f}) {
-        constant(0, 3, a); interpreter.temp_registers()[0] = b;
+        constant(0, 3, a); interpreter->GetTempRegisters()[0] = b;
         double exact = double(a) * double(b);
         float expected = float(exact);
         if (rtz && std::fabs(double(expected)) > std::fabs(exact))
@@ -101,5 +98,6 @@ int main() {
     }
   }
   std::cout << checks - failures << '/' << checks << " scalar interpreter checks passed\n";
-  return failures ? 1 : 0;
+  CHECK(failures == 0);
+  });
 }

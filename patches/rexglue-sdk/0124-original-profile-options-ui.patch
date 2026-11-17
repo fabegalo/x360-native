@@ -1,0 +1,79 @@
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -515,6 +515,12 @@
+   u32 request[136 / 4]{};
+   request[0] = user; request[1] = mode;
+   return DispatchProfileUi(0x2100E, request, 34);
++}
++
++u32 XamShowOptionsUI_entry(u32 user) {
++  if (user >= 4) return kernel::X_ERROR_INVALID_PARAMETER;
++  const u32 request[] = {0, user, 6};
++  return DispatchProfileUi(0x21015, request, 3);
+ }
+ 
+ u32 XamShowGuideUI_entry(u32 user) {
+@@ -935,3 +941,5 @@
+ REX_XAM_BODY(__imp__XamShowSigninUIp, rex::xam::XamShowSigninUIp_entry)
+ 
+ REX_XAM_BODY(__imp__XamHudGetUserIndex, rex::xam::XamHudGetUserIndex_entry)
++
++REX_XAM_BODY(__imp__XamShowOptionsUI, rex::xam::XamShowOptionsUI_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1427,7 +1427,7 @@
+ REX_EXPORT_STUB(__imp__XamShowNuiVideoRichPresenceUI);
+ REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUI);
+ REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUIEx);
+-REX_EXPORT_STUB(__imp__XamShowOptionsUI);
++
+ REX_EXPORT_STUB(__imp__XamShowPamUI);
+ REX_EXPORT_STUB(__imp__XamShowPartyInviteUI);
+ REX_EXPORT_STUB(__imp__XamShowPartyJoinInProgressUI);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -371,3 +371,5 @@
+ REX_XAM_FORWARD(__imp__XamNetworkStorageIsUserInSync)
+ REX_XAM_FORWARD(__imp__XamNetworkStorageUserHasPrivilege)
+ REX_XAM_FORWARD(__imp__XamNetworkStorageShouldHideFromTitle)
++
++REX_XAM_FORWARD(__imp__XamShowOptionsUI)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1250,3 +1250,32 @@
+     }
+   });
+ }
++
++
++REX_TEST_CASE("profile options request the original Guide page and propagate dispatch errors", "[kernel][xam][profile-options]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    CHECK(c.XAM("XamShowOptionsUI", {2}) == 1627);
++    u32 calls = 0;
++    ui.system_ui_request = [&](u32 message, u32 buffer, u32 bytes) {
++      ++calls;
++      CHECK(message == 0x21015);
++      CHECK(bytes == 12);
++      CHECK(c.Load32(buffer) == 0);
++      CHECK(c.Load32(buffer + 4) == 2);
++      CHECK(c.Load32(buffer + 8) == 6);
++      return 0u;
++    };
++    rex::ScopeGuard clear([&] { ui.system_ui_request = {}; });
++    CHECK(c.XAM("XamShowOptionsUI", {2}) == 0);
++    CHECK(c.XAM("XamShowOptionsUI", {4}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(calls == 1);
++    ui.system_ui_request = [](u32, u32, u32) { return 0x8007000Eu; };
++    CHECK(c.XAM("XamShowOptionsUI", {2}) == 14);
++    ui.system_ui_request = [](u32, u32, u32) { return 0x80004005u; };
++    CHECK(c.XAM("XamShowOptionsUI", {2}) == 1627);
++    CHECK(rex::xam::CurrentXAM().GetUserProfile().GetSigninState() == 0);
++    CHECK_FALSE(ui.GetSystemUiSession().visible);
++  });
++}

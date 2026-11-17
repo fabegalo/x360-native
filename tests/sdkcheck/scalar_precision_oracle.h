@@ -1,10 +1,12 @@
 #pragma once
-#include <rex/graphics/format/ucode.h>
+#include <rex/xenos/ucode.h>
+#include <cstdint>
+#include <vector>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 namespace x360n::test {
-namespace ucode = rex::graphics::ucode;
+namespace ucode = rex::xenos::ucode;
 inline float ReducedPrecision(float value) {
   if (!std::isfinite(value) || value == 0) return value;
   int exponent;
@@ -39,4 +41,20 @@ inline float ScalarExpected(ucode::AluScalarOpcode opcode, float value) {
   }
   return reduced;
 }
+inline std::vector<uint32_t> Program(ucode::AluScalarOpcode op, bool address = false,
+                              bool paired_mad = false) {
+  using namespace ucode;
+  uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
+                   (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  uint64_t exec = 1 | (uint64_t(address ? 2 : 1) << 12) |
+                  (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  std::vector<uint32_t> code{uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16),
+      uint32_t(exec >> 16), (1u << 15) | (1u << 20) | (uint32_t(op) << 26), 0,
+      uint32_t(paired_mad ? AluVectorOpcode::kMad : AluVectorOpcode::kMax) << 24};
+  if (address) code.insert(code.end(), {(1u << 15) | (1u << 16) |
+      (uint32_t(AluScalarOpcode::kRetainPrev) << 26),
+      (1u << 29) | (1u << 30) | (1u << 31), uint32_t(AluVectorOpcode::kMax) << 24});
+  return code;
+}
+
 }

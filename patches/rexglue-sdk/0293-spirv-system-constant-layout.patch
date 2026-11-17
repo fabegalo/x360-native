@@ -1,0 +1,39 @@
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -32,7 +32,7 @@
+  public:
+   union Modification {
+     /** Pipeline storage version, incremented when the layout changes incompatibly. */
+-    static constexpr u32 kVersion = 0x17;
++    static constexpr u32 kVersion = 0x18;
+ 
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
+     enum class DepthStencilMode : u32 {
+@@ -192,7 +192,7 @@
+    * System constants in the std140 layout, vec2 aligned to 8 bytes and vec3 and vec4 to 16.
+    * SystemConstantIndex and the BeginTranslation members must match.
+    */
+-  struct SystemConstants {
++  struct alignas(16) SystemConstants {
+     u32 flags;
+     u32 vertex_index_load_address;
+     xenos::Endian vertex_index_endian;
+@@ -201,7 +201,7 @@
+     i32 vertex_base_index;
+     u32 vertex_index_reset;
+     u32 compute_memexport_vertex_count;
+-    f32 user_clip_planes[6][4];
++    alignas(16) f32 user_clip_planes[6][4];
+ 
+     f32 ndc_scale[3];
+     f32 point_vertex_diameter_min;
+@@ -219,7 +219,7 @@
+      * Post swizzle TextureSign per byte for each needed component of the 32 used texture
+      * fetch constants.
+      */
+-    u32 texture_swizzled_signs[8];
++    alignas(16) u32 texture_swizzled_signs[8];
+ 
+     /**
+      * Component swizzle applied in the shader when imageViewFormatSwizzle is unsupported,

@@ -264,14 +264,14 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 
 | # | Decisão | Motivo | Reversão |
 |---|---|---|---|
-| D1 | Fixar ReXGlue **v0.10.0** (`f5337cdc`) | última versão estável (2026-08-21); `development` muda diariamente; Pinyon Shift parte da mesma versão | trocar o commit em `deps.lock.json` e no submódulo |
+| D1 | Fixar ReXGlue **v0.11.0** (`a3e1d826`) | release estável oficial; substitui o pin v0.10.0 (`f5337cdc`) após rebase e validação local, sem nightly | trocar o commit em `deps.lock.json` e no submódulo; invalidar AOT e runtime incompatíveis |
 | D2 | LLVM **22.1.8** portátil em `.local/toolchains` | o SDK exige Clang ≥ 18 (`CMakeLists.txt:83-93`) e o CI usa LLVM upstream (`choco install llvm`); 22.1.8 era a última estável na data da tag; sem admin nem PATH global | apagar o diretório; ajustar o lock |
 | D3 | SDK via `add_subdirectory` (modo "Git Submodule" da wiki), sem `install` | `install` executa `reg add HKCU\Software\Kitware\CMake\Packages\rexglue` (`cmake/rexglue_install.cmake:194-217`) | rodar o install quando o usuário autorizar |
 | D4 | Backport do commit upstream `b5e0cf8` no nosso CMake, só para o pin v0.10.0 | `include/rex/hash.h` (público) inclui `<xxhash.h>`, mas xxHash é ligado como PRIVATE; `unit_tests` não compila | removido automaticamente ao trocar o pin |
 | D5 | Materializar 15 symlinks do libmspack como cópias verificadas (`scripts/setup/materialize-symlinks.ps1`) | sem Developer Mode a conta não cria symlinks; o git os grava como texto e `lzxd.c` não compila | `git -C external/rexglue-sdk/thirdparty/libmspack checkout -- .` |
 | D6 | O supervisor não liga o runtime | identificar e supervisionar não precisa de memória de guest; a DLL do runtime acoplaria o supervisor a cada título | ligar quando houver necessidade demonstrada |
 | D7 | Teste PowerPC próprio pelo pipeline oficial `recompile-tests` | único caminho do SDK que recompila e executa código PPC sem XEX | — |
-| D8 | Migração para as interfaces oficiais do ReXGlue v0.11.0 aprovada pelo mantenedor em 2026-11-15: `App/TitleApp`, interfaces de runtime, tabela de handles e módulos oficiais | Preservar os sete módulos lógicos, um único runtime, Xenos/Native e as adaptações locais durante o porte; o pin v0.10.0 permanece vigente até a publicação da candidata verificada | Reavaliar com o mantenedor antes de mudar essas fronteiras |
+| D8 | Migração para as interfaces oficiais do ReXGlue v0.11.0 aprovada pelo mantenedor em 2026-11-15: `App/TitleApp`, interfaces de runtime, tabela de handles e módulos oficiais | Sete módulos lógicos, um único runtime e Xenos/Native preservados; 279 patches originais contabilizados, oito equivalentes upstream e 278 entradas finais verificadas por hash e reaplicação limpa. Release Windows x64, regressões sintéticas e GPU real passaram; 17559/Guide e abertura de Castle Crashers observados, sem certificação de gameplay ou ciclo completo de retorno | Reavaliar com o mantenedor antes de mudar essas fronteiras |
 
 ## 7. Problemas conhecidos no SDK v0.10.0 (observados aqui)
 

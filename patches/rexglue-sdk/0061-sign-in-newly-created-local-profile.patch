@@ -1,21 +1,57 @@
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -61,7 +61,8 @@
- // 8199EEC0 replaces the slot array for flags=0 (zero XUID signs that slot out).
- // Original Sign-in 17559 (901186BC-90118720) uses 0x120420 for its
- // replacement confirmation and 0x120424 for merge confirmation. The closing
--// snapshot uses Logon(0x63) with four XUIDs. Live and additional slots remain
-+// snapshot uses Logon(0x63) with four XUIDs. CreateProfile 17559 uses
-+// Logon(0x24) to select the newly persisted local identity. Live and additional slots remain
- // unsupported; all supported modes go through the persistent local store.
- static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
-                            uint32_t stride) {
-@@ -69,7 +70,7 @@
-   if (!users) return uint32_t(X_E_INVALIDARG);
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -68,7 +68,7 @@
+   if (!users) return static_cast<u32>(kernel::X_E_INVALIDARG);
    const bool append = stride == 392 && flags == 0x120424;
    if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
 -      !(stride == 8 && flags == 0x63)) return 0x80004001u;
 +      !(stride == 8 && (flags == 0x63 || flags == 0x24))) return 0x80004001u;
-   auto* bytes = users.as<uint8_t*>();
-   for (unsigned i = 1; i < 4; ++i) {
-     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
+   auto* bytes = users.As<u8*>();
+   for (unsigned i = 1; i < 4; ++i)
+     if (memory::load_and_swap<u64>(bytes + i * stride)) return 0x80004001u;
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -611,3 +611,41 @@
+   std::ifstream corrupt(root / "profiles" / "local-v2.dat", std::ios::binary);
+   CHECK(std::string(std::istreambuf_iterator<char>(corrupt), {}) == "invalid v2");
+ }
++
++
++REX_TEST_CASE("local logon modes preserve transactional selection and reject peer or online accounts", "[kernel][xam][local-profile-session]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  u64 first = 0, second = 0;
++  REQUIRE(profile.CreateLocal("First", &first) == 0);
++  REQUIRE(profile.CreateLocal("Second", &second) == 0);
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto users = caller.Alloc(4 * 392), output = caller.Alloc(4);
++    for (const u32 device : {0u, 1u}) {
++      REQUIRE(caller.XAM("XamProfileCreateEnumerator", {device, output}) == 0);
++      CHECK(caller.Kernel("NtClose", {caller.Load32(output)}) == 0);
++    }
++    CHECK(caller.XAM("XamProfileCreateEnumerator", {2, output}) == rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED);
++    CHECK(caller.Load32(output) == 0);
++    caller.Store64(users, first);
++    REQUIRE(caller.XAM("XamUserLogonEx", {users, 0x120424, 0}) == 0);
++    CHECK(profile.identity().xuid == first);
++    CHECK(profile.GetSigninState() == 1);
++    caller.Store64(users, second);
++    REQUIRE(caller.XAM("XamUserLogon", {users, 0x24, 0}) == 0);
++    CHECK(profile.identity().xuid == second);
++    CHECK(profile.FindLocal(first).signin_state == 0);
++    REQUIRE(caller.XAM("XamUserLogon", {users, 0x63, 0}) == 0);
++    caller.Store64(users, first);
++    caller.Store64(users + 48, 1);
++    CHECK(caller.XAM("XamUserLogonEx", {users, 0x120424, 0}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    caller.Store64(users + 48, 0);
++    caller.Store64(users + 392, second);
++    CHECK(caller.XAM("XamUserLogonEx", {users, 0x120424, 0}) == 0x80004001u);
++    caller.Store64(users + 392, 0);
++    CHECK(caller.XAM("XamUserLogonEx", {users, 0xFFFFFFFF, 0}) == 0x80004001u);
++    CHECK(profile.identity().xuid == second);
++    CHECK(profile.GetSigninState() == 1);
++    CHECK(profile.FindLocal(first).signin_state == 0);
++  });
++}

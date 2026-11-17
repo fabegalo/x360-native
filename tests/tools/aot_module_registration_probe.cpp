@@ -5,8 +5,8 @@
 #include "sha256.h"
 #include "xex_identity.h"
 #include "paths.h"
-#include <rex/image_info.h>
-#include <rex/system/function_dispatcher.h>
+#include <rex/ppc/image.h>
+#include <rex/kernel/function_dispatcher.h>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -15,7 +15,7 @@
 #include <windows.h>
 
 namespace fs = std::filesystem;
-struct Collector final : rex::runtime::IModuleRegistrar {
+struct Collector final : rex::kernel::IFunctionRegistrar {
   std::map<uint32_t, PPCFunc*> functions;
   bool valid = true;
   bool SetFunction(uint32_t address, PPCFunc* fn) override {
@@ -49,8 +49,8 @@ int main(int argc, char** argv) {
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!library) { std::cerr << "LoadLibrary error=" << GetLastError() << '\n'; return 5; }
     struct Unload { HMODULE library; ~Unload() { FreeLibrary(library); } } unload{library};
-    const auto image_fn = reinterpret_cast<const rex::PPCImageInfo* (*)()>(GetProcAddress(library, "ReXModule_GetImageInfo"));
-    const auto register_fn = reinterpret_cast<rex::runtime::FunctionDispatcher::RegisterFn>(GetProcAddress(library, "ReXModule_Register"));
+    const auto image_fn = reinterpret_cast<const rex::ppc::PPCImage* (*)()>(GetProcAddress(library, "ReXGetModuleImage"));
+    const auto register_fn = reinterpret_cast<rex::kernel::FunctionDispatcher::RegisterFn>(GetProcAddress(library, "ReXRegisterModule"));
     const auto host_fn = reinterpret_cast<bool (*)()>(GetProcAddress(library, "ReXModule_UsesHostFunctionTable"));
     if (!image_fn || !register_fn) return 6;
     const auto* image = image_fn();

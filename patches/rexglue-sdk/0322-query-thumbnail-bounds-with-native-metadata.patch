@@ -1,0 +1,26 @@
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -1109,13 +1109,16 @@
+     if (stored->xuid != data.xuid || stored->title_id != data.title_id ||
+         stored->content_type != data.content_type || stored->GetFileName() != data.GetFileName()) return 13;
+     const auto thumbnail_path = ResolvePackagePath(data.xuid, data) / detail::kThumbnailFileName;
+-    std::error_code thumbnail_error;
+-    const bool has_thumbnail = std::filesystem::exists(thumbnail_path, thumbnail_error);
+-    if (thumbnail_error) return kernel::X_ERROR_ACCESS_DENIED;
++    // Query native attributes without opening the payload, including Windows share-locked files.
++    const auto thumbnail_info = title_.file_system_factory.StatHostPath(thumbnail_path);
++    const bool has_thumbnail = thumbnail_info.has_value();
+     if (has_thumbnail) {
+-      const auto size = std::filesystem::file_size(thumbnail_path, thumbnail_error);
+-      if (thumbnail_error) return kernel::X_ERROR_ACCESS_DENIED;
+-      if (size > filesystem::XContentMetadata::kThumbLengthV2) return 13;
++      if (thumbnail_info->directory) return kernel::X_ERROR_ACCESS_DENIED;
++      if (thumbnail_info->size > filesystem::XContentMetadata::kThumbLengthV2) return 13;
++    } else {
++      std::error_code thumbnail_error;
++      const bool exists = std::filesystem::exists(thumbnail_path, thumbnail_error);
++      if (thumbnail_error || exists) return kernel::X_ERROR_ACCESS_DENIED;
+     }
+     std::array<u8, 36> attributes{};
+     if (const auto error = GetContentAttributes(data, attributes.data())) return error;

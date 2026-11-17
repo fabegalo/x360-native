@@ -1,8 +1,8 @@
 #include "command_processor.h"
-#include <rex/graphics/register_file.h>
-#include <rex/memory/ring_buffer.h>
+#include <rex/xenos/register.h>
+#include <rex/memory/stream.h>
 #include <cstdio>
-namespace rex::graphics {
+namespace rex::gpu {
 // Called only by SDK sources compiled for Native with REX_GPU_VALIDATE_PACKET.
 // The Xenos plugin has no extra branch, virtual call, or instrumentation.
 void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& payload) {
@@ -10,15 +10,15 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // while it executes: the next packet starts a new guest epoch as well.
   static thread_local bool after_guest_sync = false;
   if (after_guest_sync) { after_guest_sync = false; x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncPacket, 0x80); }
-  const auto remaining_dwords = payload.read_count() / 4;
+  const auto remaining_dwords = payload.GetReadCount() / 4;
   if (!header) return;
   const uint32_t type = header >> 30;
   const uint32_t count = type == 2 ? 0 : type == 1 ? 2 : ((header >> 16) & 0x3fff) + 1;
   if (count > remaining_dwords) x360n::native::Unsupported("truncated PM4 packet");
   if (type == 0) {
     const uint32_t base = header & 0x7fff;
-    if (base >= RegisterFile::kRegisterCount ||
-        (!(header & 0x8000) && count > RegisterFile::kRegisterCount - base))
+    if (base >= rex::xenos::RegisterFile::kRegisterCount ||
+        (!(header & 0x8000) && count > rex::xenos::RegisterFile::kRegisterCount - base))
       x360n::native::Unsupported("PM4 register range outside supported GPU state");
     return;
   }
@@ -104,7 +104,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     if (type > 1 || (size >> 16) || !(size & 65535))
       x360n::native::Unsupported("invalid shader type, start or length");
     if (opcode == PM4_IM_LOAD_IMMEDIATE) {
-      if (count != size + 2 || uint64_t(cursor.read_offset()) + size * 4 > cursor.capacity())
+      if (count != size + 2 || uint64_t(cursor.GetReadOffset()) + size * 4 > cursor.GetCapacity())
         x360n::native::Unsupported("inline shader exceeds contiguous packet extent");
     } else if (uint64_t(source & ~3u) + size * 4 > 0x20000000)
       x360n::native::Unsupported("shader outside guest physical memory");
@@ -135,7 +135,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
       if (bank >= 5) x360n::native::Unsupported("invalid constant register bank");
       base = banks[bank] + (offset & 0x7ff);
     }
-    if (base >= RegisterFile::kRegisterCount || length > RegisterFile::kRegisterCount - base || uint64_t(address) + length * 4 > 0x20000000)
+    if (base >= rex::xenos::RegisterFile::kRegisterCount || length > rex::xenos::RegisterFile::kRegisterCount - base || uint64_t(address) + length * 4 > 0x20000000)
       x360n::native::Unsupported("constant register or memory extent invalid");
   }
   // These packets read or write guest memory, or let the guest run code:

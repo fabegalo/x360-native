@@ -2,24 +2,28 @@
 // textures and resolve destinations (Xenia Canary 8322658). No GPU.
 #include <cstring>
 #include <iostream>
-#include <rex/graphics/pipeline/texture/info.h>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/util/draw.h>
-#include <rex/system/xmemory.h>
+#include <catch2/catch_test_macros.hpp>
+#include <rex/xenos/texture.h>
+#include <rex/xenos/register.h>
+#include <rex/kernel/guest_memory.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/title_runtime.h>
+#include "gpu/xenos/draw_state.h"
+#include "gpu/xenos/xenos_settings.h"
+#include "kernel/title_context.h"
+#include "kernel/title_state.h"
+#include "kernel/kernel_fixture.h"
 
-using namespace rex::graphics;
+using namespace rex::xenos;
+namespace xenos = rex::xenos;
 template <typename T> void Set(RegisterFile &regs, T value) {
-  regs[T::register_index] = value.value;
+  regs[T::kRegisterIndex] = value.value;
 }
 
-int main() {
-  int failures = 0, checks = 0;
-  auto check = [&](bool ok, const char *name) {
-    ++checks;
-    if (!ok) {
-      ++failures;
-      std::cerr << "FAIL " << name << '\n';
-    }
+TEST_CASE("Canary texture aliases preserve resolve destinations", "[sdk][gpu][tiled-address]") {
+  auto check = [](bool ok, const char *name) {
+    INFO(name);
+    CHECK(ok);
   };
 
   check(GetBaseFormat(xenos::TextureFormat::k_8_A) == xenos::TextureFormat::k_8,
@@ -34,17 +38,16 @@ int main() {
                 xenos::TextureFormat::k_8_8_8_8,
         "other base formats unchanged");
 
-  rex::memory::Memory memory;
-  if (!memory.Initialize())
-    return 2;
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto& memory = *rex::kernel::StateOf(caller.GetRuntime()).GetAddressSpace();
+  rex::kernel::TitleContext physical(caller.GetRuntime());
+  struct TestSettings : rex::gpu::XenosSettings {} settings;
   constexpr uint32_t address = 0x01000000;
-  if (!memory.LookupHeap(0xA1000000)
-           ->AllocFixed(0xA1000000, 4096, 4096,
-                        rex::memory::kMemoryAllocationReserve |
-                            rex::memory::kMemoryAllocationCommit,
-                        rex::memory::kMemoryProtectRead |
-                            rex::memory::kMemoryProtectWrite))
-    return 3;
+  REQUIRE(memory.LookupHeap(0xA1000000)->AllocFixed(
+      0xA1000000, 4096, 4096,
+      rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+      rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite));
   const struct {
     xenos::ColorFormat guest, expected;
   } cases[] = {
@@ -56,11 +59,12 @@ int main() {
   for (const auto &c : cases) {
     RegisterFile regs;
     std::memset(regs.values, 0, sizeof(regs.values));
-    xenos::xe_gpu_vertex_fetch_t fetch{};
+
+    xenos::VertexFetch fetch{};
     fetch.type = xenos::FetchConstantType::kVertex;
     fetch.address = address / 4;
     fetch.size = 6;
-    std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch,
+    std::memcpy(&regs[std::to_underlying(xenos::Register::SHADER_CONSTANT_FETCH_00_0)], &fetch,
                 sizeof(fetch));
     float vertices[] = {0, 0, 16, 0, 0, 16};
     std::memcpy(memory.TranslatePhysical(address), vertices, sizeof(vertices));
@@ -88,14 +92,13 @@ int main() {
     reg::RB_COPY_CONTROL control{};
     control.copy_command = xenos::CopyCommand::kRaw;
     Set(regs, control);
-    draw_util::ResolveInfo info;
+    rex::gpu::draw_state::ResolveRequest info;
     std::memset(&info, 0xCD, sizeof(info));
-    check(draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info),
+    check(rex::gpu::draw_state::GetResolveInfo(settings, regs, physical, 1, 1, false, false, info),
           "resolve succeeds");
     check(info.copy_dest_info.copy_dest_format == c.expected,
           "resolve destination uses the aliased format");
     check(info.copy_dest_extent_length != 0, "resolve destination is writable");
   }
-  std::cout << (checks - failures) << '/' << checks << " checks passed\n";
-  return failures ? 1 : 0;
+  });
 }

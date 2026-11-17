@@ -1,40 +1,31 @@
-diff --git a/include/rex/codegen/function_types.h b/include/rex/codegen/function_types.h
-index 8c6772d..1169dcb 100644
---- a/include/rex/codegen/function_types.h
-+++ b/include/rex/codegen/function_types.h
-@@ -248,6 +248,9 @@ struct JumpTable {
-   uint32_t tableAddress;          // Address of jump table data
-   uint8_t indexRegister;          // Register holding switch index
-   std::vector<uint32_t> targets;  // Resolved case targets (internal labels)
-+  // Finite computed branch domain, not table slots. Preserve the original
-+  // loads/arithmetic and dispatch on CTR; other destinations use the resolver.
-+  bool dispatchByTarget = false;
+diff --git a/src/codegen/function_types.h b/src/codegen/function_types.h
+--- a/src/codegen/function_types.h
++++ b/src/codegen/function_types.h
+@@ -272,6 +272,7 @@
+   u32 table_address;
+   u8 index_register;        /**< Register holding the switch index */
+   std::vector<u32> targets; /**< Resolved case targets, internal labels */
++  bool dispatch_by_target = false; /**< A finite CTR domain, not a table of slots. */
  };
-
- //=============================================================================
+ 
+ /** Internal jump awaiting resolution. */
 diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
-index d7ba519..ad9e6fe 100644
 --- a/src/codegen/function_scanner.cpp
 +++ b/src/codegen/function_scanner.cpp
-@@ -1362,6 +1362,83 @@ BoundsInfo scanForBounds(DecodedBinary& decoded, uint32_t bctrAddr, const CodeRe
- //=============================================================================
- // Jump Table Detection
- //=============================================================================
-+namespace {
+@@ -183,6 +183,75 @@
+ }
+ 
+ }  // anonymous namespace
 +
-+// A byte load followed by a constant-base add has a finite destination domain
-+// even when the number of table slots is unknowable. Recognize the actual
-+// def-use chain (including the exact rotate/mask), without reading table data.
-+// Keep this matcher local and conservative: only nops may separate definitions.
-+std::optional<JumpTable> detectByteDispatch(DecodedBinary& decoded, uint32_t bctr,
-+                                          uint32_t start, uint32_t end) {
-+  using namespace rex::codegen::ppc;
-+  uint32_t cursor = bctr;
++std::optional<JumpTable> DetectByteDispatch(DecodedBinary& decoded, u32 bctr,
++                                          u32 start, u32 end) {
++  using namespace rex::codegen::detail;
++  u32 cursor = bctr;
 +  auto previous = [&]() -> const Instruction* {
 +    while (cursor >= start + 4) {
 +      cursor -= 4;
-+      const auto* insn = decoded.get(cursor);
-+      if (!insn || static_cast<uint32_t>(insn->code) != 0x60000000)
++      const auto* insn = decoded.FindInsn(cursor);
++      if (!insn || static_cast<u32>(insn->code) != 0x60000000)
 +        return insn;
 +    }
 +    return nullptr;
@@ -47,8 +38,8 @@ index d7ba519..ad9e6fe 100644
 +  const auto* low = previous();
 +  if (!low || low->opcode != Opcode::addi || low->D.RT == 0 || low->D.RA != low->D.RT)
 +    return std::nullopt;
-+  const uint8_t baseReg = low->D.RT;
-+  uint8_t offsetReg;
++  const u8 baseReg = low->D.RT;
++  u8 offsetReg;
 +  if (sum->XO.RA == baseReg) offsetReg = sum->XO.RB;
 +  else if (sum->XO.RB == baseReg) offsetReg = sum->XO.RA;
 +  else return std::nullopt;
@@ -56,9 +47,9 @@ index d7ba519..ad9e6fe 100644
 +  const auto* high = previous();
 +  if (!high || high->opcode != Opcode::lis || high->D.RT != baseReg)
 +    return std::nullopt;
-+  const uint32_t base = (uint32_t(high->D.UIMM()) << 16) + int16_t(low->D.d);
++  const u32 base = (u32(high->D.UIMM()) << 16) + i16(low->D.d);
 +  const auto* value = previous();
-+  uint32_t shift = 0, mask = 0xFFFFFFFF;
++  u32 shift = 0, mask = 0xFFFFFFFF;
 +  if (value && value->opcode == Opcode::rlwinm && value->M.RA == offsetReg) {
 +    // A record-form rotate changes CR; it is still executed by the emitter.
 +    shift = value->M.SH;
@@ -76,17 +67,17 @@ index d7ba519..ad9e6fe 100644
 +    return std::nullopt;
 +
 +  JumpTable jt{};
-+  jt.bctrAddress = bctr;
-+  jt.dispatchByTarget = true;
++  jt.bctr_address = bctr;
++  jt.dispatch_by_target = true;
 +  // These are possible branch destinations derived from PPC semantics, not
 +  // invented table entries. Never extend ownership into the next function.
-+  for (uint32_t byte = 0; byte < 256; ++byte) {
-+    const uint32_t rotated = shift ? (byte << shift) | (byte >> (32 - shift)) : byte;
-+    const uint32_t target = (base + (rotated & mask)) & ~3u;
++  for (u32 byte = 0; byte < 256; ++byte) {
++    const u32 rotated = shift ? (byte << shift) | (byte >> (32 - shift)) : byte;
++    const u32 target = (base + (rotated & mask)) & ~3u;
 +    if (target >= start && target < end) {
-+      const auto* insn = decoded.get(target);
-+      if (insn && static_cast<uint32_t>(insn->code) != 0 &&
-+          static_cast<uint32_t>(insn->code) != 0xFFFFFFFF)
++      const auto* insn = decoded.FindInsn(target);
++      if (insn && static_cast<u32>(insn->code) != 0 &&
++          static_cast<u32>(insn->code) != 0xFFFFFFFF)
 +        jt.targets.push_back(target);
 +    }
 +  }
@@ -94,160 +85,120 @@ index d7ba519..ad9e6fe 100644
 +  jt.targets.erase(std::unique(jt.targets.begin(), jt.targets.end()), jt.targets.end());
 +  return jt;
 +}
-+
-+}  // namespace
-+
- std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAddr,
-                                          const CodeRegion& containingRegion, uint32_t funcStart,
-                                          uint32_t funcEnd) {
-@@ -1935,7 +2012,29 @@ BlockDiscoveryResult discoverBlocks(
+ 
+ /**
+  * The scan runs back from the bctr through mtctr, the load, the optional add of a base, and the
+@@ -665,7 +734,19 @@
              }
            }
            if (!jt) {
--            jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
-+            // PDATA can omit out-of-line cases. The next known entry is the
-+            // ownership barrier; a finite domain may extend into the gap before it.
-+            jt = detectByteDispatch(decoded, addr, entryPoint, containingRegion.end);
+-            jt = DetectJumpTable(decoded, limits, addr, containing_region, entry_point, func_end);
++            jt = DetectByteDispatch(decoded, addr, entry_point, containing_region.end);
 +            if (jt) {
-+              uint32_t localEnd = containingRegion.end;
-+              for (uint32_t other : knownFunctions) {
-+                if (other > entryPoint && other < localEnd) localEnd = other;
-+              }
-+              // Calls whose callers are discovered later must also protect the
-+              // unowned gap. Do not reinterpret calls inside declared metadata
-+              // (which may be local PC-capture/funclet idioms) as new boundaries.
-+              const uint32_t extensionStart = pdataSize ? entryPoint + pdataSize : entryPoint + 4;
-+              if (auto called = decoded.nextDirectCallTarget(extensionStart))
-+                localEnd = std::min(localEnd, *called);
-+              std::erase_if(jt->targets, [localEnd](uint32_t t) { return t >= localEnd; });
-+              // A case's successors may run beyond the largest computed target.
-+              // Follow those paths to their terminators, within the same barrier,
-+              // rather than truncating at the final byte-domain address + 4.
-+              if (!jt->targets.empty() && (!pdataSize || funcEnd < localEnd))
-+                funcEnd = localEnd;
++              u32 local_end = containing_region.end;
++              for (u32 other : known_functions)
++                if (other > entry_point && other < local_end) local_end = other;
++              const u32 extension_start = pdata_size ? entry_point + pdata_size : entry_point + 4;
++              if (auto called = decoded.NextDirectCallTarget(extension_start))
++                local_end = std::min(local_end, *called);
++              std::erase_if(jt->targets, [local_end](u32 target) { return target >= local_end; });
++              if (!jt->targets.empty() && (!pdata_size || func_end < local_end)) func_end = local_end;
 +            }
 +            if (!jt)
-+              jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
++              jt = DetectJumpTable(decoded, limits, addr, containing_region, entry_point, func_end);
            }
            if (jt) {
-             REXCODEGEN_TRACE("discoverBlocks: detected jump table at bctr 0x{:08X} with {} targets",
-diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
-index fc918bb..1af5781 100644
---- a/src/codegen/function_graph.cpp
-+++ b/src/codegen/function_graph.cpp
-@@ -520,8 +520,14 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
-       if (stIt != ctx.config.switchTables.end()) {
-         activeJt = &stIt->second;
-       } else {
-+        for (const auto& jt : jumpTables()) {
-+          if (jt.bctrAddress == blockBase) {
-+            activeJt = &jt;
-+            break;
-+          }
-+        }
-         auto lateIt = lateJumpTables.find(blockBase);
--        if (lateIt != lateJumpTables.end()) {
-+        if (!activeJt && lateIt != lateJumpTables.end()) {
-           activeJt = &lateIt->second;
-         }
-       }
-diff --git a/src/codegen/builders/control_flow.cpp b/src/codegen/builders/control_flow.cpp
-index 26957fc..c91f026 100644
---- a/src/codegen/builders/control_flow.cpp
-+++ b/src/codegen/builders/control_flow.cpp
-@@ -125,11 +125,17 @@ bool build_bctr(BuilderContext& ctx) {
+             REXCG_TRACE("discoverBlocks: detected jump table at bctr 0x{:08X} with {} targets",
+diff --git a/src/codegen/builder/control_flow.cpp b/src/codegen/builder/control_flow.cpp
+--- a/src/codegen/builder/control_flow.cpp
++++ b/src/codegen/builder/control_flow.cpp
+@@ -130,11 +130,17 @@
    }
-
+ 
    if (jt) {
--    ctx.println("\tswitch ({}.u32) {{", ctx.r(jt->indexRegister));
-+    if (jt->dispatchByTarget)
-+      ctx.println("\tswitch ({}.u32 & ~3u) {{", ctx.ctr());
+-    ctx.Println("\tswitch ({}.u32) {{", ctx.R(jt->index_register));
++    if (jt->dispatch_by_target)
++      ctx.Println("\tswitch ({}.u32 & ~3u) {{", ctx.CTR());
 +    else
-+      ctx.println("\tswitch ({}.u32) {{", ctx.r(jt->indexRegister));
-
++      ctx.Println("\tswitch ({}.u32) {{", ctx.R(jt->index_register));
+ 
      for (size_t i = 0; i < jt->targets.size(); i++) {
--      ctx.println("\tcase {}:", i);
+-      ctx.Println("\tcase {}:", i);
        auto label = jt->targets[i];
-+      if (jt->dispatchByTarget)
-+        ctx.println("\tcase 0x{:X}:", label);
++      if (jt->dispatch_by_target)
++        ctx.Println("\tcase 0x{:X}:", label);
 +      else
-+        ctx.println("\tcase {}:", i);
-
-       // TODO(tomc): Figure out if this actually is triggered on real hardware and what would
-       // happen?
-@@ -168,7 +174,12 @@ bool build_bctr(BuilderContext& ctx) {
++        ctx.Println("\tcase {}:", i);
+ 
+       if (label == 0) {
+         ctx.Println("\t\t__builtin_trap(); // ERROR - detected jump to null value");
+@@ -175,7 +181,12 @@
      }
-
-     ctx.println("\tdefault:");
--    ctx.println("\t\t__builtin_trap(); // Switch case out of range");
-+    if (jt->dispatchByTarget) {
-+      ctx.println("\t\tREX_CALL_INDIRECT_FUNC({}.u32 & ~3u);", ctx.ctr());
-+      ctx.println("\t\treturn;");
+ 
+     ctx.Println("\tdefault:");
+-    ctx.Println("\t\t__builtin_trap(); // Switch case out of range");
++    if (jt->dispatch_by_target) {
++      ctx.Println("\t\tREX_CALL_INDIRECT_FUNC({}.u32 & ~3u);", ctx.CTR());
++      ctx.Println("\t\treturn;");
 +    } else {
-+      ctx.println("\t\t__builtin_trap(); // Switch case out of range");
++      ctx.Println("\t\t__builtin_trap(); // Switch case out of range");
 +    }
-     ctx.println("\t}}");
-
-     ctx.reset_switch_table();
+     ctx.Println("\t}}");
+ 
+     ctx.ResetJumpTable();
 diff --git a/src/codegen/decoded_binary.h b/src/codegen/decoded_binary.h
-index 75a4afb..2aa1f36 100644
 --- a/src/codegen/decoded_binary.h
 +++ b/src/codegen/decoded_binary.h
-@@ -107,6 +107,10 @@ class DecodedBinary {
-   /// Get all code regions (separated by null padding)
-   const std::vector<CodeRegion>& codeRegions() const { return codeRegions_; }
-
-+  /// A direct-call destination can establish an entry before iterative graph
-+  /// discovery reaches its caller. Used only as a speculative extension barrier.
-+  std::optional<uint32_t> nextDirectCallTarget(uint32_t lowerBound) const;
+@@ -110,6 +110,8 @@
+   /** Returns the code region containing an address, or null when none contains the address. */
+   const CodeRegion* FindRegionContaining(u32 addr) const;
+ 
++  std::optional<u32> NextDirectCallTarget(u32 lower_bound) const;
 +
-   /// Find code region containing address
-   const CodeRegion* regionContaining(uint32_t addr) const;
-
-@@ -154,6 +158,7 @@ class DecodedBinary {
+   size_t GetInstructionCount() const;
+ 
+  private:
+@@ -143,6 +145,7 @@
    const BinaryView& binary_;
    std::vector<Section> sections_;
-   std::vector<CodeRegion> codeRegions_;
-+  std::vector<uint32_t> directCallTargets_;
-
-   /// Compute code regions by finding null padding boundaries
-   void computeCodeRegions();
+   std::vector<CodeRegion> code_regions_;
++  std::vector<u32> direct_call_targets_;
+ 
+   void ComputeCodeRegions();
+ 
 diff --git a/src/codegen/decoded_binary.cpp b/src/codegen/decoded_binary.cpp
-index f148099..9ddcbc4 100644
 --- a/src/codegen/decoded_binary.cpp
 +++ b/src/codegen/decoded_binary.cpp
-@@ -28,6 +28,7 @@ DecodedBinary::DecodedBinary(const BinaryView& binary) : binary_(binary) {}
- void DecodedBinary::decode() {
+@@ -12,6 +12,7 @@
+ void DecodedBinary::Decode() {
    sections_.clear();
-   codeRegions_.clear();
-+  directCallTargets_.clear();
-
-   for (const auto& section : binary_.sections()) {
+   code_regions_.clear();
++  direct_call_targets_.clear();
+ 
+   for (const auto& section : binary_.GetSections()) {
      Section sec;
-@@ -48,6 +49,10 @@ void DecodedBinary::decode() {
-         uint32_t raw = load_and_swap<uint32_t>(section.data + offset);
-
-         auto insn = rex::codegen::ppc::decode_instruction(addr, raw);
-+        // Reuse the existing decode pass, not another executable-section scan.
-+        // bl to the next word is the PC-capture idiom, not an entry barrier.
-+        if (insn.is_call() && insn.branch_target && *insn.branch_target != addr + 4)
-+          directCallTargets_.push_back(*insn.branch_target);
+@@ -29,6 +30,8 @@
+         u32 raw = memory::load<be_u32>(section.data + offset);
+ 
+         auto insn = rex::codegen::detail::DecodeInstruction(addr, raw);
++        if (insn.IsCall() && insn.branch_target && *insn.branch_target != addr + 4)
++          direct_call_targets_.push_back(*insn.branch_target);
          sec.instructions.push_back(insn);
        }
      }
-@@ -61,6 +66,15 @@ void DecodedBinary::decode() {
-
-   // Compute code regions
-   computeCodeRegions();
-+  std::sort(directCallTargets_.begin(), directCallTargets_.end());
-+  directCallTargets_.erase(std::unique(directCallTargets_.begin(), directCallTargets_.end()),
-+                          directCallTargets_.end());
-+  std::erase_if(directCallTargets_, [this](uint32_t target) { return !get(target); });
+@@ -40,6 +43,15 @@
+             [](const Section& a, const Section& b) { return a.base < b.base; });
+ 
+   ComputeCodeRegions();
++  std::sort(direct_call_targets_.begin(), direct_call_targets_.end());
++  direct_call_targets_.erase(std::unique(direct_call_targets_.begin(), direct_call_targets_.end()),
++                              direct_call_targets_.end());
++  std::erase_if(direct_call_targets_, [this](u32 target) { return !FindInsn(target); });
 +}
 +
-+std::optional<uint32_t> DecodedBinary::nextDirectCallTarget(uint32_t lowerBound) const {
-+  auto it = std::lower_bound(directCallTargets_.begin(), directCallTargets_.end(), lowerBound);
-+  return it == directCallTargets_.end() ? std::nullopt : std::optional<uint32_t>(*it);
++std::optional<u32> DecodedBinary::NextDirectCallTarget(u32 lower_bound) const {
++  auto it = std::lower_bound(direct_call_targets_.begin(), direct_call_targets_.end(), lower_bound);
++  return it == direct_call_targets_.end() ? std::nullopt : std::optional<u32>(*it);
  }
-
- DecodedInsn* DecodedBinary::get(uint32_t addr) {
+ 
+ DecodedInsn* DecodedBinary::FindInsn(u32 addr) {

@@ -1,0 +1,220 @@
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -132,6 +132,7 @@
+     Type type;
+     size_t size;
+     bool is_set;
++    bool load_failed = false;
+     u32 loaded_title_id; /**< ID of the title whose saved value was loaded, 0 when none. */
+     /**
+      * @param is_set True when the setting holds a value.
+@@ -249,6 +250,7 @@
+   };
+ 
+   REX_XAM_API UserProfile();
++  auto LockSettings() { return std::unique_lock<std::recursive_mutex>(settings_mutex_); }
+ 
+   void SetSessionChangedCallback(std::function<void()> callback) { session_changed_ = std::move(callback); }
+ 
+@@ -303,6 +305,7 @@
+   bool storage_ready_ = false;
+   bool PersistProfiles(const std::vector<Identity>& next, const Identity& selected);
+   std::function<void()> session_changed_;
++  std::recursive_mutex settings_mutex_;
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<u32, Setting*> settings_;
+   IContentManager* content_ = nullptr;
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -275,6 +275,7 @@
+ }
+ 
+ u32 UserProfile::SetLocalSession(u64 xuid) {
++  auto settings_lock = LockSettings();
+   std::lock_guard lock(identity_mutex_);
+   if (!identity_.xuid) return xuid ? X_ERROR_NO_SUCH_USER : X_ERROR_SUCCESS;
+   auto next = profiles_;
+@@ -306,6 +307,7 @@
+ 
+ 
+ void UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
++  auto settings_lock = LockSettings();
+   Setting* previous_setting = setting.get();
+   std::swap(settings_[setting->setting_id], previous_setting);
+ 
+@@ -326,6 +328,7 @@
+ }
+ 
+ UserProfile::Setting* UserProfile::GetSetting(u32 setting_id) {
++  auto settings_lock = LockSettings();
+   const auto& it = settings_.find(setting_id);
+   if (it == settings_.end()) {
+     return nullptr;
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -200,6 +200,7 @@
+                                  be_u64* xuids, u32 setting_count, be_u32* setting_ids,
+                                  [[maybe_unused]] u32 unk, be_u32* buffer_size_ptr, u8* buffer,
+                                  kernel::XOVERLAPPED* overlapped) {
++  auto settings_lock = CurrentXAM().GetUserProfile().LockSettings();
+   const bool by_xuid = xuid_count && xuids;
+   const u32 xuid_entries = by_xuid ? xuid_count : 1;
+ 
+@@ -320,6 +321,7 @@
+                                       u32 setting_count,
+                                       GuestPtrT<rex::xam::X_USER_PROFILE_SETTING> settings,
+                                       GuestPtrT<kernel::XOVERLAPPED> overlapped) {
++  auto settings_lock = CurrentXAM().GetUserProfile().LockSettings();
+   if (!setting_count || !settings) {
+     return kernel::X_ERROR_INVALID_PARAMETER;
+   }
+@@ -483,6 +485,27 @@
+     REX_ASSERT_ALWAYS();
+     return kernel::X_ERROR_INVALID_PARAMETER;
+   }
++}
++
++struct XMSGSTARTIOREQUEST_UNKNOWNARG;
++kernel::X_HRESULT XMsgStartIORequestEx(u32, u32, u32, u32, u32, XMSGSTARTIOREQUEST_UNKNOWNARG*);
++
++u32 XamUserReadUserPreference_entry(u32 user, u32 preference, u32 output, u32 overlapped) {
++  auto& title = CurrentTitle();
++  const auto writable = kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite;
++  if (user >= 4 || !title.heap.IsGuestRangeAccessible(output, 4, writable) ||
++      (overlapped && !title.heap.IsGuestRangeAccessible(overlapped, sizeof(kernel::XOVERLAPPED), writable)))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  const auto request = title.heap.SystemHeapAlloc(12);
++  if (!request) return kernel::X_ERROR_FUNCTION_FAILED;
++  rex::ScopeGuard release([&] { title.heap.SystemHeapFree(request); });
++  auto* words = title.membase.TranslateVirtual<be_u32*>(request);
++  words[0] = user; words[1] = preference; words[2] = output;
++  const auto result = XMsgStartIORequestEx(0xFB, 0xB0082, overlapped, request, 12, nullptr);
++  if (result == 0x80070001u) return 259;
++  if (result == kernel::X_ERROR_IO_PENDING || result == kernel::XHRESULTFromWin32(kernel::X_ERROR_IO_PENDING))
++    return kernel::X_ERROR_IO_PENDING;
++  return kernel::XFAILED(result) ? kernel::X_ERROR_FUNCTION_FAILED : kernel::X_ERROR_SUCCESS;
+ }
+ 
+ static u32 DispatchProfileUi(u32 message, const u32* words, size_t count) {
+@@ -945,3 +968,5 @@
+ REX_XAM_BODY(__imp__XamHudGetUserIndex, rex::xam::XamHudGetUserIndex_entry)
+ 
+ REX_XAM_BODY(__imp__XamShowOptionsUI, rex::xam::XamShowOptionsUI_entry)
++
++REX_XAM_BODY(__imp__XamUserReadUserPreference, rex::xam::XamUserReadUserPreference_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1508,7 +1508,7 @@
+ REX_EXPORT_STUB(__imp__XamUserOverrideUserInfo);
+ REX_EXPORT_STUB(__imp__XamUserPrefetchProfileSettings);
+ REX_EXPORT_STUB(__imp__XamUserProfileSync);
+-REX_EXPORT_STUB(__imp__XamUserReadUserPreference);
++
+ REX_EXPORT_STUB(__imp__XamUserResetSubscriptionType);
+ REX_EXPORT_STUB(__imp__XamUserUnlockLogonPreviewMode);
+ REX_EXPORT_STUB(__imp__XamUserUpdateRecentPlayer);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -376,3 +376,5 @@
+ 
+ REX_XAM_FORWARD(__imp__XamAppLoad)
+ REX_XAM_FORWARD(__imp__XamAppRequestLoad)
++
++REX_XAM_FORWARD(__imp__XamUserReadUserPreference)
+diff --git a/src/xam/app/xgi_app.cpp b/src/xam/app/xgi_app.cpp
+--- a/src/xam/app/xgi_app.cpp
++++ b/src/xam/app/xgi_app.cpp
+@@ -18,6 +18,8 @@
+ #include <rex/xam/app_manager.h>
+ #include <rex/xam/title_lifecycle.h>
+ #include "xam/stub_log.h"
++#include "xam/xam_state.h"
++#include <rex/xam/user_profile.h>
+ 
+ namespace rex {
+ namespace xam {
+@@ -31,6 +33,32 @@
+ 
+ kernel::X_HRESULT XGIApp::DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) {
+   switch (message) {
++    case 0x000B0082: {
++      auto& title = CurrentTitle();
++      if ((buffer_length && buffer_length != 12) ||
++          !title.heap.IsGuestRangeAccessible(buffer_ptr, 12, kMemoryProtectRead)) return X_E_INVALIDARG;
++      const auto* words = membase_.TranslateVirtual<const be_u32*>(buffer_ptr);
++      const u32 user = words[0], preference = words[1], output = words[2];
++      u32 enabled_bit = 0;
++      switch (preference) {
++        case 1: case 32: case 64: case 128: case 256: case 512: break;
++        case 6: enabled_bit = 4; break;
++        case 24: enabled_bit = 16; break;
++        default: return X_E_INVALIDARG;
++      }
++      if (user >= 4 || !title.heap.IsGuestRangeAccessible(output, 4, kMemoryProtectWrite)) return X_E_INVALIDARG;
++      auto& profile = CurrentXAM().GetUserProfile();
++      auto lock = profile.LockSettings();
++      if (user || !profile.GetSigninState()) return XHRESULTFromWin32(X_ERROR_NO_SUCH_USER);
++      const auto* setting = profile.GetSetting(0x10040053);
++      if (!setting || setting->load_failed || setting->type != UserProfile::Setting::Type::kInt32) return X_E_FAIL;
++      const u32 flags = setting->is_set ? static_cast<const UserProfile::Int32Setting*>(setting)->value : 0;
++      u32 value = flags & preference;
++      const bool disabled = enabled_bit && (value & enabled_bit) != enabled_bit;
++      if (enabled_bit && !disabled) value &= ~enabled_bit;
++      *membase_.TranslateVirtual<be_u32*>(output) = value;
++      return disabled ? X_HRESULT(1) : X_E_SUCCESS;
++    }
+     case 0x000B0006: {
+       REX_ASSERT(!buffer_length || buffer_length == 24);
+       struct {
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1402,3 +1402,43 @@
+     CHECK_FALSE(ui.GetSystemUiSession().visible);
+   });
+ }
++
++
++REX_TEST_CASE("user preferences use the original XGI bit-mask contract and complete failures", "[kernel][xam][user-preferences]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    auto value = std::make_unique<rex::xam::UserProfile::Int32Setting>(0x10040053, 0x3FF);
++    profile.AddSetting(std::move(value));
++    const auto output = c.Alloc(8), request = c.Alloc(12), overlap = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    c.Store32(output + 4, 0xDEADBEEF);
++    for (const u32 preference : {1u, 6u, 24u, 32u, 64u, 128u, 256u, 512u}) {
++      const u32 enabled = preference == 6 ? 4 : preference == 24 ? 16 : 0;
++      CHECK(c.XAM("XamUserReadUserPreference", {0, preference, output, 0}) == 0);
++      CHECK(c.Load32(output) == (preference & ~enabled));
++      CHECK(c.Load32(output + 4) == 0xDEADBEEF);
++    }
++    auto unset = std::make_unique<rex::xam::UserProfile::Int32Setting>(0x10040053, 123);
++    unset->is_set = false;
++    profile.AddSetting(std::move(unset));
++    c.Store32(request, 0); c.Store32(request + 4, 6); c.Store32(request + 8, output);
++    CHECK(c.XAM("XMsgInProcessCall", {0xFB, 0xB0082, request, 12}) == 1);
++    CHECK(c.Load32(output) == 0);
++    c.Store32(output, 0xCAFEBABE);
++    CHECK(c.XAM("XamUserReadUserPreference", {0, 0xFFFF, output, 0}) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++    CHECK(c.Load32(output) == 0xCAFEBABE);
++    CHECK(c.XAM("XamUserReadUserPreference", {0, 0xFFFF, output, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(c.Load32(overlap) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(c.XAM("XamUserReadUserPreference", {1, 1, output, 0}) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++    CHECK(c.XAM("XamUserReadUserPreference", {4, 1, output, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XamUserReadUserPreference", {0, 1, 0x7F100000, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XamUserReadUserPreference", {0, 1, output, 0xFFFFFFF0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XMsgInProcessCall", {0xFB, 0xB0082, request, 8}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    {
++      auto lock = profile.LockSettings();
++      profile.GetSetting(0x10040053)->load_failed = true;
++    }
++    CHECK(c.XAM("XamUserReadUserPreference", {0, 1, output, 0}) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++    CHECK(c.Load32(output) == 0xCAFEBABE);
++  });
++}

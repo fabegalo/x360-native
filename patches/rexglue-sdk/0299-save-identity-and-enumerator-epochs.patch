@@ -1,0 +1,224 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -89,6 +89,7 @@
+   ContentManager(const XAMTitle& title, rex::xam::UserProfile& user_profile);
+   ~ContentManager() override;
+   void RetireStaleSaves();
++  static bool ValidName(std::string_view name);
+   u32 FlushContent(std::string_view root_name);
+ 
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContent(u32 device_id, u64 xuid,
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -115,6 +115,13 @@
+     : title_(title), root_path_(title.user_data_root), user_profile_(user_profile) {}
+ 
+ ContentManager::~ContentManager() = default;
++
++bool ContentManager::ValidName(std::string_view name) {
++  if (name.empty() || name == "." || name == ".." || name.back() == '.' || name.back() == ' ') return false;
++  return std::none_of(name.begin(), name.end(), [](unsigned char ch) {
++    return ch < 32 || ch >= 127 || std::string_view("/\\:*?\"<>|").find(ch) != std::string_view::npos;
++  });
++}
+ 
+ u32 ContentManager::FlushContent(std::string_view root_name) {
+   auto session_lock = user_profile_.LockSettings();
+@@ -617,7 +624,7 @@
+ u32 ContentManager::GetTitleID() const {
+   auto module =
+       title_.objects.Get<kernel::ILoadedModule>(title_.modules.GetExecutable().value_or(0));
+-  REX_ASSERT(module);
++  if (!module) return 0;
+ 
+   kernel::XEXOptExecutionInfo* exec_info = 0;
+   module->OptHeader(kernel::kXEXHeaderExecutionInfo, &exec_info);
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -76,11 +76,19 @@
+   return kernel::X_ERROR_NOT_FOUND;
+ }
+ 
+-u32 XamContentCreateEnumerator_entry([[maybe_unused]] u32 user_index, u32 device_id,
++u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id,
+                                      u32 content_type, [[maybe_unused]] u32 content_flags,
+                                      u32 items_per_enumerate, MappedU32 buffer_size_ptr,
+                                      MappedU32 handle_out) {
+-  REX_ASSERT(handle_out != nullptr);
++  auto& profile = CurrentXAM().GetUserProfile();
++  auto session_lock = profile.LockSettings();
++  if (!handle_out || !items_per_enumerate || items_per_enumerate > UINT32_MAX / sizeof(kernel::XCONTENT_DATA))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  *handle_out = 0;
++  const bool saved = content_type == std::to_underlying(kernel::XContentType::kSavedGame);
++  const auto identity = profile.identity();
++  if (saved && (user_index != 0 || !identity.signin_state)) return kernel::X_ERROR_NO_SUCH_USER;
++  const auto epoch = profile.GetStorageEpoch();
+ 
+   auto device_info = device_id == 0 ? nullptr : rex::xam::GetPlaceholderDevice(device_id);
+   if ((device_id && device_info == nullptr) || !handle_out) {
+@@ -89,6 +97,9 @@
+     }
+     return kernel::X_E_INVALIDARG;
+   }
++
++  if (saved && device_info && device_info->device_id != rex::xam::DummyDeviceID::kHDD)
++    return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+ 
+   if (buffer_size_ptr) {
+     *buffer_size_ptr = sizeof(kernel::XCONTENT_DATA) * items_per_enumerate;
+@@ -107,7 +118,7 @@
+       *item = content_data;
+     }
+ 
+-    if (xuid != 0) {
++    if (!saved && xuid != 0) {
+       auto common_datas = CurrentXAM().GetContentManager().ListContent(
+           std::to_underlying(rex::xam::DummyDeviceID::kHDD), 0,
+           static_cast<rex::kernel::XContentType>(content_type));
+@@ -127,7 +138,12 @@
+       &handle, EnumeratorInit{0xFF, 0xFE, 0x20005, 0x20007, 0},
+       EnumeratorObject(
+           items_per_enumerate, sizeof(kernel::XCONTENT_DATA),
+-          [items = std::move(items)](u32, u8* buffer_data, u32* written_count) mutable {
++          [items = std::move(items), saved, epoch, profile = &profile](u32, u8* buffer_data, u32* written_count) mutable {
++            auto lock = profile->LockSettings();
++            if (saved && epoch != profile->GetStorageEpoch()) {
++              *written_count = 0;
++              return kernel::X_ERROR_NO_SUCH_USER;
++            }
+             return items.Write(buffer_data, written_count);
+           }));
+   if (result == kernel::X_STATUS_NO_MEMORY) {
+@@ -143,10 +159,15 @@
+ 
+ enum class DispositionState : u8 { kUnknown = 0, kCreate = 1, kOpen = 2 };
+ 
+-u32 CreateAndMountContent(MappedString root_name, MappedVoid content_data_ptr,
++u32 CreateAndMountContent(u32 user_index, MappedString root_name, MappedVoid content_data_ptr,
+                           u32 content_data_size, u32 flags, MappedU32 disposition_ptr,
+                           MappedU32 license_mask_ptr, MappedVoid overlapped_ptr) {
+-  u64 xuid = CurrentXAM().GetUserProfile().GetXUID();
++  auto& profile = CurrentXAM().GetUserProfile();
++  auto request_lock = profile.LockSettings();
++  if (!root_name || !content_data_ptr || !ContentManager::ValidName(root_name.GetValue()))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  u64 xuid = profile.GetXUID();
++  const auto epoch = profile.GetStorageEpoch();
+ 
+   kernel::XCONTENT_AGGREGATE_DATA content_data;
+   if (content_data_size == sizeof(kernel::XCONTENT_DATA)) {
+@@ -171,8 +192,23 @@
+   }
+ 
+   auto run = [content_manager, xuid, root_name = root_name.GetValue(), flags, content_data,
+-              disposition_ptr,
+-              license_mask_ptr](u32& extended_error, u32& length) -> kernel::X_RESULT {
++              disposition_ptr, user_index, epoch,
++              license_mask_ptr](u32& extended_error, u32& length) mutable -> kernel::X_RESULT {
++    auto& profile = CurrentXAM().GetUserProfile();
++    auto session_lock = profile.LockSettings();
++    const auto fail = [&](u32 error) {
++      if (disposition_ptr) *disposition_ptr = 0;
++      extended_error = kernel::XHRESULTFromWin32(error); length = 0;
++      return error;
++    };
++    if (!ContentManager::ValidName(content_data.GetFileName())) return fail(kernel::X_ERROR_INVALID_PARAMETER);
++    const auto* device = GetPlaceholderDevice(content_data.device_id);
++    if (!device || device->device_id != DummyDeviceID::kHDD) return fail(kernel::X_ERROR_DEVICE_NOT_CONNECTED);
++    if (content_data.content_type == kernel::XContentType::kSavedGame) {
++      const auto identity = profile.identity();
++      if (user_index != 0 || !identity.signin_state || epoch != profile.GetStorageEpoch()) return fail(kernel::X_ERROR_NO_SUCH_USER);
++      xuid = identity.xuid; content_data.xuid = xuid; content_data.title_id = content_manager->GetTitleID();
++    }
+     kernel::X_RESULT result = kernel::X_ERROR_INVALID_PARAMETER;
+     DispositionState disposition = DispositionState::kUnknown;
+     switch (flags & 0xF) {
+@@ -229,7 +265,7 @@
+         }
+         break;
+       default:
+-        REX_UNHANDLED_CASE(flags & 0xF);
++        result = kernel::X_ERROR_INVALID_PARAMETER;
+         break;
+     }
+ 
+@@ -288,18 +324,18 @@
+   }
+ }
+ 
+-u32 XamContentCreateEx_entry([[maybe_unused]] u32 user_index, MappedString root_name,
++u32 XamContentCreateEx_entry(u32 user_index, MappedString root_name,
+                              MappedVoid content_data_ptr, u32 flags, MappedU32 disposition_ptr,
+                              MappedU32 license_mask_ptr, [[maybe_unused]] u32 cache_size,
+                              [[maybe_unused]] u64 content_size, MappedVoid overlapped_ptr) {
+-  return CreateAndMountContent(root_name, content_data_ptr, sizeof(kernel::XCONTENT_DATA), flags,
++  return CreateAndMountContent(user_index, root_name, content_data_ptr, sizeof(kernel::XCONTENT_DATA), flags,
+                                disposition_ptr, license_mask_ptr, overlapped_ptr);
+ }
+ 
+-u32 XamContentCreate_entry([[maybe_unused]] u32 user_index, MappedString root_name,
++u32 XamContentCreate_entry(u32 user_index, MappedString root_name,
+                            MappedVoid content_data_ptr, u32 flags, MappedU32 disposition_ptr,
+                            MappedU32 license_mask_ptr, MappedVoid overlapped_ptr) {
+-  return CreateAndMountContent(root_name, content_data_ptr, sizeof(kernel::XCONTENT_DATA), flags,
++  return CreateAndMountContent(user_index, root_name, content_data_ptr, sizeof(kernel::XCONTENT_DATA), flags,
+                                disposition_ptr, license_mask_ptr, overlapped_ptr);
+ }
+ 
+@@ -307,7 +343,7 @@
+                                    MappedU32 disposition_ptr, MappedU32 license_mask_ptr,
+                                    [[maybe_unused]] u32 cache_size,
+                                    [[maybe_unused]] u64 content_size, MappedVoid overlapped_ptr) {
+-  return CreateAndMountContent(root_name, content_data_ptr, sizeof(kernel::XCONTENT_AGGREGATE_DATA),
++  return CreateAndMountContent(0, root_name, content_data_ptr, sizeof(kernel::XCONTENT_AGGREGATE_DATA),
+                                flags, disposition_ptr, license_mask_ptr, overlapped_ptr);
+ }
+ 
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1510,3 +1510,40 @@
+     CHECK(c.XAM("XamContentFlush", {name, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
+   });
+ }
++
++
++REX_TEST_CASE("generic save creation requires the connected identity and its enumerators cannot revive", "[kernel][xam][save-storage]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    const auto xuid = profile.GetXUID();
++    const auto root = c.AllocString("SAVE"), data = c.Alloc(sizeof(rex::kernel::XCONTENT_DATA));
++    const auto disposition = c.Alloc(4), size = c.Alloc(4), handle = c.Alloc(4), count = c.Alloc(4);
++    auto* content = reinterpret_cast<rex::kernel::XCONTENT_DATA*>(c.GetBase() + data);
++    content->device_id = 1; content->content_type = rex::kernel::XContentType::kSavedGame;
++    content->SetFileName("progress");
++    const auto create = [&](u32 user, u32 flags) { return c.XAM("XamContentCreate", {user, root, data, flags, disposition, 0, 0}); };
++    REQUIRE(profile.SetLocalSession(0) == 0);
++    CHECK(create(0, 4) == rex::kernel::X_ERROR_NO_SUCH_USER);
++    REQUIRE(profile.SetLocalSession(xuid) == 0);
++    CHECK(create(1, 4) == rex::kernel::X_ERROR_NO_SUCH_USER);
++    for (const char* name : {"../escape", "..", "bad:stream", "trailing.", ""}) {
++      content->SetFileName(name); CHECK(create(0, 4) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    }
++    content->SetFileName("progress"); CHECK(create(0, 0) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    REQUIRE(create(0, 4) == 0); CHECK(c.Load32(disposition) == 1);
++    std::filesystem::create_directories(fixture.GetRoot() / "0000000000000000" / "00000000" / "00000001" / "legacy");
++    REQUIRE(c.XAM("XamContentCreateEnumerator", {0, 1, 1, 0, 4, size, handle}) == 0);
++    const auto enumerator = c.Load32(handle), output = c.Alloc(c.Load32(size));
++    REQUIRE(c.XAM("XamEnumerate", {enumerator, 0, output, c.Load32(size), count, 0}) == 0);
++    CHECK(c.Load32(count) == 1);
++    REQUIRE(profile.SetLocalSession(0) == 0);
++    CHECK(c.XAM("XamEnumerate", {enumerator, 0, output, c.Load32(size), count, 0}) == rex::kernel::X_ERROR_NO_SUCH_USER);
++    REQUIRE(profile.SetLocalSession(xuid) == 0);
++    CHECK(c.XAM("XamEnumerate", {enumerator, 0, output, c.Load32(size), count, 0}) == rex::kernel::X_ERROR_NO_SUCH_USER);
++    CHECK(c.Kernel("NtClose", {enumerator}) == 0);
++    const auto saved = fixture.GetRoot() / std::format("{:016X}", xuid) / "00000000" / "00000001" / "progress";
++    CHECK(std::filesystem::is_directory(saved));
++    CHECK(std::filesystem::is_directory(fixture.GetRoot() / "0000000000000000" / "00000000" / "00000001" / "legacy"));
++  });
++}

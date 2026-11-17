@@ -4,24 +4,24 @@
 #include "d3d12_fxaa.h"
 #include <array>
 #include <memory>
-#include <rex/ui/d3d12/d3d12_provider.h>
+#include <gpu/xenos/host/d3d12/d3d12_provider.h>
 #include <wrl/client.h>
 namespace x360n::native {
 class D3D12Scanout final : public ScanoutBackend {
  public:
-  explicit D3D12Scanout(rex::ui::d3d12::D3D12Provider& provider);
+  explicit D3D12Scanout(rex::gpu::d3d12::D3D12Provider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch);
   ~D3D12Scanout();
-  void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
+  void Present(rex::gpu::Presenter& presenter, const ScanoutTexture& texture,
                const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                const void* overlay_pixels, ScanoutPostEffect = ScanoutPostEffect::kNone) override;
   void Drain() override;
   void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id) override;
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) override { if (render_) render_->CompleteGuestWrites(source, opcode); }
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) override { if (render_) render_->SyncPacketRead(address, length, opcode); }
-  rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) override;
-  void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
-      rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose = DrawPurpose::kGuest) override;
-  void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override;
+  rex::gpu::Shader* LoadShader(rex::xenos::ShaderType type, const uint32_t* data, uint32_t count) override;
+  void Draw(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory, rex::gpu::Shader* vs, rex::gpu::Shader* ps,
+      rex::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose = DrawPurpose::kGuest) override;
+  void Resolve(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory) override;
   SampleCounts ReadSampleCounts(bool counting_after) override;
   void SetSampleCounts(const SampleCounts&, bool visibility_only) override;
   void CompleteFrame(const ScanoutTexture&, const void* pixels) override;
@@ -41,7 +41,9 @@ class D3D12Scanout final : public ScanoutBackend {
   };
   void Wait(uint64_t serial);
   D3D12Render& Render();
-  rex::ui::d3d12::D3D12Provider& provider_;
+  rex::gpu::d3d12::D3D12Provider& provider_;
+  const rex::gpu::XenosSettings& settings_;
+  rex::IPhysicalWriteWatch& watch_;
   Ptr<ID3D12RootSignature> root_;
   Ptr<ID3D12PipelineState> pipeline_;
   Ptr<ID3D12DescriptorHeap> descriptors_;

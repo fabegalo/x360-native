@@ -1,47 +1,45 @@
-diff --git a/src/codegen/builders/vector.cpp b/src/codegen/builders/vector.cpp
-index cbdd7f7..2f16f77 100644
---- a/src/codegen/builders/vector.cpp
-+++ b/src/codegen/builders/vector.cpp
-@@ -470,6 +470,18 @@ bool build_vavgub(BuilderContext& ctx) {
-   return true;
+diff --git a/src/codegen/builder/vector.cpp b/src/codegen/builder/vector.cpp
+--- a/src/codegen/builder/vector.cpp
++++ b/src/codegen/builder/vector.cpp
+@@ -517,6 +517,18 @@
  }
  
-+bool build_vavguw(BuilderContext& ctx) {
-+  // Rounded unsigned average. Widen before adding so UINT32_MAX pairs do
-+  // not wrap; lane-local writes also preserve vD == vA or vD == vB.
+ template <>
++bool Build<PPC_INST_VAVGUW>(BuilderContext& ctx) {
++  // Widen before adding; lane-local writes preserve vD aliases.
 +  for (int lane = 0; lane < 4; ++lane) {
-+    ctx.println("\t{}.u32[{}] = static_cast<uint32_t>((uint64_t({}.u32[{}]) + "
-+                "uint64_t({}.u32[{}]) + 1) >> 1);",
-+                ctx.v(ctx.insn.operands[0]), lane, ctx.v(ctx.insn.operands[1]), lane,
-+                ctx.v(ctx.insn.operands[2]), lane);
++    ctx.Println("\t{}.u32[{}] = static_cast<rex::u32>((rex::u64({}.u32[{}]) + "
++                "rex::u64({}.u32[{}]) + 1) >> 1);",
++                ctx.V(ctx.insn.operands[0]), lane, ctx.V(ctx.insn.operands[1]), lane,
++                ctx.V(ctx.insn.operands[2]), lane);
 +  }
 +  return true;
 +}
 +
- bool build_vavguh(BuilderContext& ctx) {
-   ctx.emit_vec_int_binary("avg_epu16", "u16");
++template <>
+ bool Build<PPC_INST_VAVGUH>(BuilderContext& ctx) {
+   ctx.EmitVecIntBinary("avg_epu16", "u16");
    return true;
-diff --git a/src/codegen/builders.h b/src/codegen/builders.h
-index 24894f2..87993f4 100644
---- a/src/codegen/builders.h
-+++ b/src/codegen/builders.h
-@@ -495,6 +495,7 @@ bool build_vavgsh(BuilderContext& ctx);
- bool build_vavgsw(BuilderContext& ctx);
- bool build_vavgub(BuilderContext& ctx);
- bool build_vavguh(BuilderContext& ctx);
-+bool build_vavguw(BuilderContext& ctx);
+diff --git a/src/codegen/builder.h b/src/codegen/builder.h
+--- a/src/codegen/builder.h
++++ b/src/codegen/builder.h
+@@ -723,6 +723,8 @@
+ bool Build<PPC_INST_VAVGUB>(BuilderContext& ctx);
+ template <>
+ bool Build<PPC_INST_VAVGUH>(BuilderContext& ctx);
++template <>
++bool Build<PPC_INST_VAVGUW>(BuilderContext& ctx);
  
- // Vector logical
- bool build_vand(BuilderContext& ctx);
+ template <>
+ bool Build<PPC_INST_VAND>(BuilderContext& ctx);
 diff --git a/src/codegen/instruction_dispatch.cpp b/src/codegen/instruction_dispatch.cpp
-index 40ae269..0eab428 100644
 --- a/src/codegen/instruction_dispatch.cpp
 +++ b/src/codegen/instruction_dispatch.cpp
-@@ -491,6 +491,7 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
-       {PPC_INST_VAVGSW, build_vavgsw},
-       {PPC_INST_VAVGUB, build_vavgub},
-       {PPC_INST_VAVGUH, build_vavguh},
-+      {PPC_INST_VAVGUW, build_vavguw},
+@@ -434,6 +434,7 @@
+       {PPC_INST_VAVGSW, Build<PPC_INST_VAVGSW>},
+       {PPC_INST_VAVGUB, Build<PPC_INST_VAVGUB>},
+       {PPC_INST_VAVGUH, Build<PPC_INST_VAVGUH>},
++      {PPC_INST_VAVGUW, Build<PPC_INST_VAVGUW>},
  
-       //=====================================================================
-       // Vector - Logical
+       {PPC_INST_VAND, Build<PPC_INST_VAND>},
+       {PPC_INST_VAND128, Build<PPC_INST_VAND>},

@@ -2,7 +2,7 @@
 
 [project]
 name = "dash_17559"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../.local/inputs/dashboards/17559/runtime"
 
 # Per-target system assets, extracted from Microsoft's SystemUpdate_17559_USB.zip.

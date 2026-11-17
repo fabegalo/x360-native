@@ -1,119 +1,198 @@
-diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
-index f49fc91..f795772 100644
---- a/include/rex/kernel/xam/module.h
-+++ b/include/rex/kernel/xam/module.h
-@@ -12,6 +12,9 @@
- 
- #include <atomic>
- #include <string>
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/xam/system_ui.h
+@@ -0,0 +1,50 @@
++#pragma once
++/**
++ ******************************************************************************
++ * Xenia : Xbox 360 Emulator Research Project                                 *
++ ******************************************************************************
++ * Copyright 2013 Ben Vanik. All rights reserved.                             *
++ * Released under the BSD license - see LICENSE in the root for more details. *
++ ******************************************************************************
++ *
++ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
++ */
++
++/** Original-system UI registration and transport, owned by the attached XAM title. */
++#include <functional>
 +#include <mutex>
 +#include <optional>
 +#include <unordered_map>
- 
- #include <rex/ppc/function.h>
- #include <rex/system/export_resolver.h>
-@@ -34,6 +37,31 @@ class XamModule : public system::KernelModule {
-   // Optional, explicitly selected system-version implementation. No default fade.
-   std::function<X_RESULT()> launch_display_transition;
- 
-+  // The profile selects the original system UI module; the shared runtime only
-+  // transports requests and tracks registrations. No UI/state change is implied.
-+  std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
-+  struct SystemApp { uint32_t module, slot, callback, resource_id; };
-+  uint32_t RegisterSystemApp(SystemApp app) {
++#include <rex/types.h>
++
++namespace rex::xam {
++class SystemUIState {
++ public:
++  // The original-system host selects and renders the original module.
++  std::function<u32(u32, u32, u32)> system_ui_request;
++  struct SystemApp { u32 module, slot, callback, resource_id; };
++  u32 RegisterSystemApp(SystemApp app) {
 +    if (!app.module || !app.callback) return 1627;
 +    std::lock_guard lock(system_apps_mutex_);
 +    if (system_apps_.contains(app.slot)) return 1627;
 +    system_apps_.emplace(app.slot, app);
 +    return 0;
 +  }
-+  uint32_t UnregisterSystemApp(uint32_t module, uint32_t slot) {
++  u32 UnregisterSystemApp(u32 module, u32 slot) {
 +    std::lock_guard lock(system_apps_mutex_);
 +    auto it = system_apps_.find(slot);
 +    if (it == system_apps_.end()) return 1627;
 +    if (it->second.module == module) system_apps_.erase(it);
-+    return 0; // Original unregister leaves another owner's callback intact.
++    return 0;
 +  }
-+  std::optional<SystemApp> FindSystemApp(uint32_t slot) {
++  std::optional<SystemApp> FindSystemApp(u32 slot) {
 +    std::lock_guard lock(system_apps_mutex_);
-+    auto it = system_apps_.find(slot);
++    const auto it = system_apps_.find(slot);
 +    if (it == system_apps_.end()) return std::nullopt;
 +    return it->second;
 +  }
-+
-   static void RegisterExportTable(rex::runtime::ExportResolver* export_resolver);
- 
-   struct LoaderData {
-@@ -51,6 +79,8 @@ class XamModule : public system::KernelModule {
-   uint32_t GetLanguageLocaleFallback(uint32_t language);
- 
-  private:
++ private:
 +  std::mutex system_apps_mutex_;
-+  std::unordered_map<uint32_t, SystemApp> system_apps_;
-   LoaderData loader_data_;
-   uint32_t language_fallback_table_ = 0;  // Owned guest UTF16 strings, 16 bytes per ID.
- };
-diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
-index 7f10ece..64d2254 100644
---- a/src/kernel/xam/apps/xam_app.cpp
-+++ b/src/kernel/xam/apps/xam_app.cpp
-@@ -10,6 +10,7 @@
-  */
++  std::unordered_map<u32, SystemApp> system_apps_;
++};
++}  // namespace rex::xam
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -43,6 +43,8 @@
  
- #include <rex/kernel/xam/apps/app.h>
-+#include <rex/kernel/xam/module.h>
- #include <rex/logging.h>
- #include <rex/system/kernel_state.h>
- #include <rex/system/xenumerator.h>
-@@ -30,6 +31,13 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
-   // NOTE: buffer_length may be zero or valid.
-   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+ namespace rex::xam {
+ 
++class SystemUIState;
++class UserProfile;
+ class IAchievementManager;
+ class IContentManager;
+ 
+@@ -94,13 +96,17 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 2)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 3)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+    * @return The manager, valid between AttachTitle and DetachTitle.
+    */
+   [[nodiscard]] virtual IContentManager& GetContentManager() = 0;
++
++  /** Title-owned services, valid between AttachTitle and DetachTitle. */
++  [[nodiscard]] virtual SystemUIState& GetSystemUI() = 0;
++  [[nodiscard]] virtual UserProfile& GetUserProfile() = 0;
+ 
+   /**
+    * @return The manager, valid between AttachTitle and DetachTitle.
+diff --git a/src/xam/xam_state.h b/src/xam/xam_state.h
+--- a/src/xam/xam_state.h
++++ b/src/xam/xam_state.h
+@@ -28,6 +28,7 @@
+ #include <rex/xam/title_lifecycle.h>
+ #include "xam/xam_title.h"
+ #include <rex/xam/user_profile.h>
++#include <rex/xam/system_ui.h>
+ #include <rex/kernel/heap.h>
+ #include <rex/types.h>
+ #include <rex/utility.h>
+@@ -168,6 +169,7 @@
+   const XAMTitle& GetTitle() const { return title_; }
+ 
+   XAMLoaderState& GetLoaderState() { return loader_state_; }
++  SystemUIState& GetSystemUI() { return system_ui_; }
+ 
+   /**
+    * Counts XamInputGetState calls so the log can stop after the first few.
+@@ -195,6 +197,7 @@
+   VideoMode video_mode_;
+   rex::kernel::XLanguage user_language_ = rex::kernel::XLanguage::kEnglish;
+   XAMLoaderState loader_state_;
++  SystemUIState system_ui_;
+   std::array<u8, 13> net_startup_params_{};
+   std::atomic<int> shown_prompts_{0};
+   std::atomic<int> input_state_calls_{0};
+diff --git a/src/xam/xam_title_lifecycle.h b/src/xam/xam_title_lifecycle.h
+--- a/src/xam/xam_title_lifecycle.h
++++ b/src/xam/xam_title_lifecycle.h
+@@ -33,6 +33,8 @@
+   void DestroyApps() override;
+   void DetachTitle() override;
+   [[nodiscard]] IContentManager& GetContentManager() override;
++  [[nodiscard]] SystemUIState& GetSystemUI() override;
++  [[nodiscard]] UserProfile& GetUserProfile() override;
+   [[nodiscard]] IAchievementManager& GetAchievementManager() override;
+   [[nodiscard]] u32 GetTitleID() const override;
+   [[nodiscard]] std::unique_ptr<filesystem::IXDBFTitleData> GetTitleXDBF() const override;
+diff --git a/src/xam/xam_title_lifecycle.cpp b/src/xam/xam_title_lifecycle.cpp
+--- a/src/xam/xam_title_lifecycle.cpp
++++ b/src/xam/xam_title_lifecycle.cpp
+@@ -52,6 +52,9 @@
+   state_.reset();
+ }
+ 
++SystemUIState& XAMTitleLifecycle::GetSystemUI() { return state_->GetSystemUI(); }
++UserProfile& XAMTitleLifecycle::GetUserProfile() { return state_->GetUserProfile(); }
++
+ IContentManager& XAMTitleLifecycle::GetContentManager() {
+   return state_->GetContentManager();
+ }
+diff --git a/src/xam/app/xam_app.cpp b/src/xam/app/xam_app.cpp
+--- a/src/xam/app/xam_app.cpp
++++ b/src/xam/app/xam_app.cpp
+@@ -39,6 +39,12 @@
+ kernel::X_HRESULT XAMApp::DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) {
+   auto buffer = membase_.TranslateVirtual(buffer_ptr);
    switch (message) {
 +    case 0x00021001:
 +    case 0x00021008: {
-+      auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-+      if (xam && xam->system_ui_request)
-+        return xam->system_ui_request(message, buffer_ptr, buffer_length);
-+      return X_E_NOTFOUND;
++      auto& ui = CurrentXAM().GetSystemUI();
++      if (ui.system_ui_request) return ui.system_ui_request(message, buffer_ptr, buffer_length);
++      return kernel::X_E_NOTFOUND;
 +    }
      case 0x0002000E: {
-       struct message_data {
-         rex::be<uint32_t> user_index;
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 525f1b8..0f29993 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -9,6 +9,7 @@
-  */
+       struct MessageData {
+         be_u32 user_index;
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -466,6 +466,16 @@
  
- #include <rex/kernel/xam/private.h>
-+#include <rex/kernel/xam/module.h>
- #include <rex/logging.h>
- #include <rex/hook.h>
+ // Local account flags contain neither Live nor the partial-profile flag.
+ u32 XamUserIsPartialProfile_entry() { return 0; }
++
++u32 XamRegisterSysApp_entry(u32 module, u32 slot, u32 callback, u32 resource_id) {
++  const auto result = CurrentXAM().GetSystemUI().RegisterSystemApp({module, slot, callback, resource_id});
++  REXXAM_INFO("XamRegisterSysApp(module={:08X}, slot={:08X}, callback={:08X}, resource={}) -> {}",
++      module, slot, callback, resource_id, result);
++  return result;
++}
++u32 XamUnregisterSysApp_entry(u32 module, u32 slot, [[maybe_unused]] u32 resource_id) {
++  return CurrentXAM().GetSystemUI().UnregisterSystemApp(module, slot);
++}
  
-@@ -693,7 +694,20 @@ REX_EXPORT_STUB(__imp__XamReadTileEx);
+ }  // namespace xam
+ }  // namespace rex
+@@ -516,3 +526,7 @@
+ REX_XAM_BODY(__imp__XamIsNuiAutomationEnabled, rex::xam::XamIsNuiAutomationEnabled_entry)
+ 
+ REX_XAM_BODY(__imp__XamUserIsPartialProfile, rex::xam::XamUserIsPartialProfile_entry)
++
++REX_XAM_BODY(__imp__XamRegisterSysApp, rex::xam::XamRegisterSysApp_entry)
++
++REX_XAM_BODY(__imp__XamUnregisterSysApp, rex::xam::XamUnregisterSysApp_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -679,7 +679,7 @@
  REX_EXPORT_STUB(__imp__XamReadTileToTextureEx);
  REX_EXPORT_STUB(__imp__XamRegisterSMCNotification);
  REX_EXPORT_STUB(__imp__XamRegisterScreenSaverCallback);
 -REX_EXPORT_STUB(__imp__XamRegisterSysApp);
-+namespace rex::kernel::xam {
-+u32 XamRegisterSysApp_entry(u32 module, u32 slot, u32 callback, u32 resource_id) {
-+  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
-+  const auto result = xam->RegisterSystemApp({module, slot, callback, resource_id});
-+  REXKRNL_INFO("XamRegisterSysApp(module={:08X}, slot={:08X}, callback={:08X}, resource={}) -> {}",
-+               uint32_t(module), uint32_t(slot), uint32_t(callback), uint32_t(resource_id), result);
-+  return result;
-+}
-+u32 XamUnregisterSysApp_entry(u32 module, u32 slot, u32 resource_id) {
-+  return REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex")->UnregisterSystemApp(module, slot);
-+}
-+}
-+REX_EXPORT(__imp__XamRegisterSysApp, rex::kernel::xam::XamRegisterSysApp_entry)
-+REX_EXPORT(__imp__XamUnregisterSysApp, rex::kernel::xam::XamUnregisterSysApp_entry)
++
  REX_EXPORT_STUB(__imp__XamReleaseCameraPreviewStuff);
  REX_EXPORT_STUB(__imp__XamReloadSysApp);
  REX_EXPORT_STUB(__imp__XamReminderClearCache);
-@@ -747,7 +761,7 @@ REX_EXPORT_STUB(__imp__XamTestShowNuiTroubleshooterUI);
+@@ -732,7 +732,7 @@
  REX_EXPORT_STUB(__imp__XamUIThreadDisableFontPatching);
  REX_EXPORT_STUB(__imp__XamUIThreadEnableFontPatching);
  REX_EXPORT_STUB(__imp__XamUnloadSysApp);
@@ -122,3 +201,14 @@ index 525f1b8..0f29993 100644
  REX_EXPORT_STUB(__imp__XamUpdateAllocateExtenderBuffer);
  REX_EXPORT_STUB(__imp__XamUpdateAttachExtenderInstance);
  REX_EXPORT_STUB(__imp__XamUpdateChainPass3FromPass2);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -326,3 +326,7 @@
+ REX_XAM_FORWARD(__imp__XamUserIsPartialProfile)
+ 
+ REX_XAM_FORWARD(__imp__XamUserFlushLogonQueue)
++
++REX_XAM_FORWARD(__imp__XamRegisterSysApp)
++
++REX_XAM_FORWARD(__imp__XamUnregisterSysApp)

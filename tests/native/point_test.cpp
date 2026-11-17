@@ -7,7 +7,9 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 using namespace x360n::native;
-using namespace rex::graphics;
+using namespace rex::gpu;
+using namespace rex::xenos;
+namespace xenos = rex::xenos;
 using Microsoft::WRL::ComPtr;
 TEST_CASE("Native float constant runs preserve packed bytes, banks and empty bindings", "[native-constant-runs]") {
   std::array<uint32_t,2048> registers;
@@ -48,10 +50,10 @@ TEST_CASE("Native float constant runs preserve packed bytes, banks and empty bin
 }
 TEST_CASE("Native point constants preserve independent size and vertex limits") {
   RegisterFile r;
-  r[XE_GPU_REG_PA_SU_POINT_SIZE] = 0x00080008;
-  r[XE_GPU_REG_PA_SU_POINT_MINMAX] = 0x04000010;
-  draw_util::ViewportInfo v{}; v.xy_extent[0] = 1280; v.xy_extent[1] = 720;
-  DxbcShaderTranslator::SystemConstants c{};
+  r[rex::xenos::Register::PA_SU_POINT_SIZE] = 0x00080008;
+  r[rex::xenos::Register::PA_SU_POINT_MINMAX] = 0x04000010;
+  draw_util::HostViewport v{}; v.xy_extent[0] = 1280; v.xy_extent[1] = 720;
+  DXBCShaderTranslator::SystemConstants c{};
   SetPointConstants(r, v, c);
   CHECK(c.point_constant_diameter[0] == 1.f);
   CHECK(c.point_constant_diameter[1] == 1.f);
@@ -59,7 +61,7 @@ TEST_CASE("Native point constants preserve independent size and vertex limits") 
   CHECK(c.point_vertex_diameter_max == 128.f);
   CHECK(c.point_screen_diameter_to_ndc_radius[0] == 1.f / 1280.f);
   CHECK(c.point_screen_diameter_to_ndc_radius[1] == 1.f / 720.f);
-  r[XE_GPU_REG_PA_SU_POINT_SIZE] = 0x00100020;
+  r[rex::xenos::Register::PA_SU_POINT_SIZE] = 0x00100020;
   v.xy_extent[0] = v.xy_extent[1] = 0;
   SetPointConstants(r, v, c);
   CHECK(c.point_constant_diameter[0] == 2.f);
@@ -68,19 +70,19 @@ TEST_CASE("Native point constants preserve independent size and vertex limits") 
 }
 TEST_CASE("Native empty resolve coverage respects clipping and eight pixel alignment") {
   RegisterFile r;
-  r[XE_GPU_REG_RB_SURFACE_INFO] = 1280;
-  r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR] = (512u << 16) | 1280;
-  r[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR] = (8192u << 16) | 8192;
+  r[rex::xenos::Register::RB_SURFACE_INFO] = 1280;
+  r[rex::xenos::Register::PA_SC_WINDOW_SCISSOR_BR] = (512u << 16) | 1280;
+  r[rex::xenos::Register::PA_SC_SCREEN_SCISSOR_BR] = (8192u << 16) | 8192;
   const float outside[]{-.5f,511.5f,1279.5f,511.5f,1279.5f,719.5f};
   CHECK(ResolveCoverageEmpty(r, outside));
-  r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR] = (720u << 16) | 1280;
+  r[rex::xenos::Register::PA_SC_WINDOW_SCISSOR_BR] = (720u << 16) | 1280;
   CHECK_FALSE(ResolveCoverageEmpty(r, outside));
   const float inside[]{-.5f,-.5f,1279.5f,-.5f,1279.5f,511.5f};
   CHECK_FALSE(ResolveCoverageEmpty(r, inside));
   // Collapsed but non-aligned extents are expanded by the shared resolve ABI.
   const float subpixel[]{8.5f,8.5f,8.5f,8.5f,8.5f,8.5f};
   CHECK_FALSE(ResolveCoverageEmpty(r, subpixel));
-  r[XE_GPU_REG_RB_SURFACE_INFO] = 3u << 16;
+  r[rex::xenos::Register::RB_SURFACE_INFO] = 3u << 16;
   CHECK_FALSE(ResolveCoverageEmpty(r, outside));
 }
 TEST_CASE("Native point geometry links constant and exported size with sprite coordinates") {
@@ -228,9 +230,9 @@ TEST_CASE("Native texture block conversion costs", "[.native-block-cost]") {
     std::cout << "block_cost," << sample << "," << times[0] << "," << times[1] << '\n';
   }
 }
-#include <rex/graphics/pipeline/texture/util.h>
+#include <rex/xenos/texture.h>
 TEST_CASE("Native tiled texture runs match per-block tiled addressing") {
-  using rex::graphics::texture_util::GetTiledOffset2D;
+  using rex::xenos::GetTiledOffset2D;
   for (unsigned log2 = 0; log2 <= 4; ++log2) for (unsigned pitch : {32u, 40u, 64u, 160u, 1280u}) {
     const unsigned run = TiledContiguousBlocks(log2);
     REQUIRE(run >= 1); REQUIRE((run & (run - 1)) == 0);

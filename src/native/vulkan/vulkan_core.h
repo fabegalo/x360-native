@@ -1,5 +1,5 @@
 #pragma once
-#include <rex/ui/vulkan/device.h>
+#include <gpu/xenos/host/vulkan/vulkan_device.h>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -43,9 +43,9 @@ void CheckVulkan(VkResult result, const char* operation);
 // Core Vulkan entry points unused by the provider need not be added to the
 // SDK's executor function table. Native loads them from its own device.
 template<class Function>
-Function LoadNativeVulkanFunction(const rex::ui::vulkan::VulkanDevice& device, const char* name) {
+Function LoadNativeVulkanFunction(const rex::gpu::vulkan::VulkanDevice& device, const char* name) {
   auto function = reinterpret_cast<Function>(
-      device.vulkan_instance()->functions().vkGetDeviceProcAddr(device.device(), name));
+      device.GetVulkanInstance()->GetFunctions().vkGetDeviceProcAddr(device.GetDevice(), name));
   if (!function) throw std::runtime_error(std::string("Native Vulkan: missing device function ") + name);
   return function;
 }
@@ -55,7 +55,7 @@ Function LoadNativeVulkanFunction(const rex::ui::vulkan::VulkanDevice& device, c
 class VulkanBuffer {
  public:
   enum class Access { kDevice, kUpload, kReadback };
-  VulkanBuffer(const rex::ui::vulkan::VulkanDevice&, VkDeviceSize size,
+  VulkanBuffer(const rex::gpu::vulkan::VulkanDevice&, VkDeviceSize size,
                VkBufferUsageFlags usage, Access);
   ~VulkanBuffer();
   VulkanBuffer(const VulkanBuffer&) = delete;
@@ -69,7 +69,7 @@ class VulkanBuffer {
   void Invalidate(VkDeviceSize offset, VkDeviceSize size);
  private:
   void SynchronizeMapping(VkDeviceSize offset, VkDeviceSize size, bool invalidate);
-  const rex::ui::vulkan::VulkanDevice& device_;
+  const rex::gpu::vulkan::VulkanDevice& device_;
   VkBuffer buffer_ = VK_NULL_HANDLE;
   VkDeviceMemory memory_ = VK_NULL_HANDLE;
   VkDeviceSize size_, allocation_size_ = 0;
@@ -84,7 +84,7 @@ class VulkanBuffer {
 class VulkanSubmissionRing {
  public:
   static constexpr size_t kSlots = 3;
-  explicit VulkanSubmissionRing(const rex::ui::vulkan::VulkanDevice&);
+  explicit VulkanSubmissionRing(const rex::gpu::vulkan::VulkanDevice&);
   ~VulkanSubmissionRing();
   VulkanSubmissionRing(const VulkanSubmissionRing&) = delete;
   VulkanSubmissionRing& operator=(const VulkanSubmissionRing&) = delete;
@@ -113,7 +113,7 @@ class VulkanSubmissionRing {
     bool timed = false;
     std::vector<std::shared_ptr<void>> retained;
   };
-  const rex::ui::vulkan::VulkanDevice& device_;
+  const rex::gpu::vulkan::VulkanDevice& device_;
   std::array<Slot, kSlots> slots_;
   uint64_t serial_ = 0, completed_ = 0;
   bool recording_ = false;
@@ -123,8 +123,8 @@ class VulkanSubmissionRing {
 };
 
 // Host shaders only. Guest shaders go through the shared PowerPC GPU shader
-// semantics in SpirvShaderTranslator and the Native-owned shader cache.
+// semantics in SPIRVShaderTranslator and the Native-owned shader cache.
 std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string_view source);
-VkShaderModule CreateNativeShaderModule(const rex::ui::vulkan::VulkanDevice&,
+VkShaderModule CreateNativeShaderModule(const rex::gpu::vulkan::VulkanDevice&,
                                         std::span<const uint32_t> spirv);
 }

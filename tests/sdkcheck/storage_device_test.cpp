@@ -11,17 +11,20 @@
 #include <windows.h>
 #include <winioctl.h>
 #endif
-#include <rex/cvar.h>
-#include <rex/kernel/init.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/test_access.h"
+#include "kernel/settings_access.h"
 #include <rex/hash.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/xam/content_manager.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/runtime.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/xtypes.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/types/io.h>
+#include <rex/xam/system_ui.h>
+#include <rex/xam/title_lifecycle.h>
+#include "xam/xam_state.h"
 
 #define STORAGE_IMPORT(name) extern "C" void __imp__##name(PPCContext&, uint8_t*)
 STORAGE_IMPORT(XamContentCreateDeviceEnumerator);
@@ -44,6 +47,7 @@ STORAGE_IMPORT(XamNetworkStorageUserHasPrivilege);
 STORAGE_IMPORT(XamNetworkStorageShouldHideFromTitle);
 STORAGE_IMPORT(XamNetworkStorageDeviceHasCacheFile);
 using namespace rex;
+using namespace rex::kernel;
 
 namespace {
 struct StorageRoot {
@@ -54,32 +58,26 @@ struct StorageRoot {
   void config(std::string_view text) { std::ofstream(path / "storage.toml") << text; }
 };
 struct DeviceGuest {
-  rex::Runtime runtime;
+  rex::test::KernelFixture fixture;
+  rex::kernel::TitleRuntime& runtime;
   uint32_t address;
   uint8_t* bytes;
-  explicit DeviceGuest(const std::filesystem::path& root) : runtime(root, root) {
-    rex::RuntimeConfig config{};
-    config.tool_mode = true;
-    config.kernel_init = rex::kernel::InitializeKernel;
-    REQUIRE(runtime.Setup(std::move(config)) == 0);
-    address = runtime.memory()->SystemHeapAlloc(8192);
+  explicit DeviceGuest(const std::filesystem::path& root)
+      : fixture({}, {}, {}, {}, {}, root), runtime(fixture.GetRuntime()) {
+    address = runtime.GetGuestHeap().SystemHeapAlloc(8192);
     REQUIRE(address);
-    bytes = runtime.memory()->virtual_membase();
+    bytes = runtime.GetMembase().GetBase();
     std::memset(bytes + address, 0, 8192);
   }
   uint32_t call(void (*fn)(PPCContext&, uint8_t*), std::initializer_list<uint64_t> args) {
     uint32_t result = ~0u;
-    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        runtime.kernel_state(), 128 * 1024, 0, [&] {
-      auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      auto& ctx=caller.GetContext();
       PPCRegister* registers[] = {&ctx.r3, &ctx.r4, &ctx.r5, &ctx.r6, &ctx.r7, &ctx.r8, &ctx.r9, &ctx.r10};
       size_t i = 0;
       for (auto value : args) registers[i++]->u64 = value;
-      fn(ctx, bytes); result = ctx.r3.u32; return 0;
-    }));
-    REQUIRE(thread->Create() == 0);
-    uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0, 0, 0, &timeout) == 0);
+      fn(ctx, bytes); result = ctx.r3.u32;
+    });
     return result;
   }
   uint32_t word(size_t offset) { return rex::memory::load_and_swap<uint32_t>(bytes + address + offset); }
@@ -190,7 +188,7 @@ TEST_CASE("Storage rejects corrupt configuration without silently inventing devi
 TEST_CASE("Storage path validation rejects reparse ancestors and preserves missing paths",
           "[sdk][storage-device][storage-path-validation]") {
   StorageRoot root;
-  using rex::system::xam::IsUnlinkedStoragePath;
+  using rex::xam::IsUnlinkedStoragePath;
   CHECK(IsUnlinkedStoragePath(root.path));
   CHECK(IsUnlinkedStoragePath(root.path / "missing" / "child"));
   std::filesystem::create_directories(root.path / "target");
@@ -213,9 +211,9 @@ TEST_CASE("Quota traversal rejects linked entries and volume ancestors without c
           "[sdk][storage-device][storage-quota-links]") {
 #if defined(_WIN32)
   namespace fs = std::filesystem;
-  using rex::system::xam::ContentDeviceInfo;
-  using rex::system::xam::DeviceType;
-  using rex::system::xam::QueryContentDeviceSpace;
+  using rex::xam::ContentDeviceInfo;
+  using rex::xam::DeviceType;
+  using rex::xam::QueryContentDeviceSpace;
   for (bool linked_ancestor : {false, true}) {
     DYNAMIC_SECTION("linked volume ancestor " << linked_ancestor) {
       StorageRoot root;
@@ -225,7 +223,7 @@ TEST_CASE("Quota traversal rejects linked entries and volume ancestors without c
       const auto outside = root.path / "unrelated";
       fs::create_directories(outside);
       std::ofstream(outside / "sentinel") << "outside";
-      ContentDeviceInfo device{7, DeviceType::MU, 0, 0, u"Test", volume, 1048576, 0};
+      ContentDeviceInfo device{7, DeviceType::kMU, 0, 0, u"Test", volume, 1048576, 0};
       REQUIRE(QueryContentDeviceSpace(device) == 0);
       REQUIRE(device.total_bytes == 1048576);
       REQUIRE(device.free_bytes == 1048576 - 6);
@@ -253,13 +251,13 @@ TEST_CASE("Quota traversal rejects linked entries and volume ancestors without c
 TEST_CASE("Storage selector preserves original request and defers selection to the system app", "[sdk][storage-selector]") {
   StorageRoot root;
   DeviceGuest guest(root.path);
-  const auto xam = guest.runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  const auto xam = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI());
   unsigned calls = 0;
   xam->system_ui_request = [&](uint32_t message, uint32_t request, uint32_t size) {
     ++calls;
     CHECK(message == 0x2100B);
     REQUIRE(size == 40);
-    const auto* words = guest.runtime.memory()->TranslateVirtual<rex::be<uint32_t>*>(request);
+    const auto* words = reinterpret_cast<rex::be_u32*>(guest.runtime.GetMembase().GetBase()+request);
     CHECK(uint32_t(words[0]) == 0);
     CHECK(uint32_t(words[1]) == 0xFF);
     CHECK(uint32_t(words[2]) == 1);
@@ -340,20 +338,20 @@ void ProgressCallback(PPCContext& ctx, uint8_t* base) {
 constexpr uint64_t kOwner = 0xE000000012345678ull;
 constexpr uint32_t kTitle = 0x1234ABCD;
 // Writes one saved-game package on `device` and the dashboard's 512-byte item.
-rex::system::xam::XCONTENT_AGGREGATE_DATA MakeItem(DeviceGuest& guest, uint32_t device,
+rex::kernel::XCONTENT_AGGREGATE_DATA MakeItem(DeviceGuest& guest, uint32_t device,
                                                     const std::filesystem::path& root, size_t size) {
-  rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+  rex::kernel::XCONTENT_AGGREGATE_DATA data{};
   data.device_id = device;
-  data.content_type = rex::system::XContentType::kSavedGame;
-  data.set_display_name(u"Transfer save");
-  data.set_file_name("SAVE0001");
+  data.content_type = rex::kernel::XContentType::kSavedGame;
+  data.SetDisplayName(u"Transfer save");
+  data.SetFileName("SAVE0001");
   data.xuid = kOwner;
   data.title_id = kTitle;
   const auto package = root / "E000000012345678" / "1234ABCD" / "00000001" / "SAVE0001";
   std::filesystem::create_directories(package / "dir");
   std::ofstream(package / "dir" / "slot.dat", std::ios::binary) << std::string(size, 's');
   std::ofstream(package / "small.bin", std::ios::binary) << "abc";
-  REQUIRE(guest.runtime.kernel_state()->content_manager()->WriteContentHeaderFile(kOwner, data) == 0);
+  REQUIRE((&rex::xam::CurrentXAM().GetContentManager())->WriteContentHeaderFile(kOwner, data));
   std::memset(guest.bytes + guest.address + 1024, 0, 512);
   std::memcpy(guest.bytes + guest.address + 1024, &data, sizeof(data));
   rex::memory::store_and_swap<uint64_t>(guest.bytes + guest.address + 1024 + 328, size + 3);
@@ -388,9 +386,8 @@ TEST_CASE("XMsg cancellation stops storage I/O without an event and preserves th
   const auto mu = root.path / "storage/00000007";
   std::filesystem::create_directories(mu);
   DeviceGuest guest(root.path);
-  auto* dispatcher = guest.runtime.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
-  REQUIRE(dispatcher->SetFunction(0x82000100, &CancelTransferCallback));
+  auto* dispatcher = (&GetFunctionDispatcher(guest.runtime));
+  REQUIRE(dispatcher->SetFunction(0x8F000100, &CancelTransferCallback));
   const auto device = guest.address + 2048;
   cancel_io = guest.address + 2304;
   rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
@@ -398,7 +395,7 @@ TEST_CASE("XMsg cancellation stops storage I/O without an event and preserves th
     MakeItem(guest, 1, root.path, 300000);
     std::memset(guest.bytes + cancel_io, 0, 28);
     cancel_calls = 0;
-    REQUIRE(guest.call(operation, {0, device, guest.address + 1024, 0x82000100, 0, 0, cancel_io}) == 997);
+    REQUIRE(guest.call(operation, {0, device, guest.address + 1024, 0x8F000100, 0, 0, cancel_io}) == 997);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (guest.word(cancel_io - guest.address) == 997 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -460,11 +457,10 @@ TEST_CASE("Storage FE transfer requests use the original 552-byte packet and com
   CHECK(std::filesystem::exists(PackageOn(root.path)));
 
   // The message acknowledgement must not complete the worker's OVERLAPPED.
-  auto* dispatcher = guest.runtime.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
-  REQUIRE(dispatcher->SetFunction(0x82000100, &CancelTransferCallback));
+  auto* dispatcher = (&GetFunctionDispatcher(guest.runtime));
+  REQUIRE(dispatcher->SetFunction(0x8F000100, &CancelTransferCallback));
   cancel_io = io; cancel_calls = 0;
-  put(16, 12); put(8, 7); put(536, 0x82000100);
+  put(16, 12); put(8, 7); put(536, 0x8F000100);
   REQUIRE(guest.call(__imp__XMsgStartIORequest, {0xFE, 0x2000C, io, packet, 552}) == 0);
   const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (guest.word(io - guest.address) == 997 && std::chrono::steady_clock::now() < cancel_deadline)
@@ -492,31 +488,33 @@ TEST_CASE("XMsg cancellation waits for worker cleanup even without a guest event
   StorageRoot root;
   DeviceGuest guest(root.path);
   const auto io = guest.address + 2304;
-  auto* content = guest.runtime.kernel_state()->content_manager();
+  auto* content = (&rex::xam::CurrentXAM().GetContentManager());
   auto request = content->BeginTransfer(io);
   REQUIRE(request);
   CHECK_FALSE(content->BeginTransfer(io));
   rex::memory::store_and_swap<uint32_t>(guest.bytes + io, 997);
   std::atomic<uint32_t> returned{~0u};
-  auto waiter = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      guest.runtime.kernel_state(), 128 * 1024, 0, [&] {
-    auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+  auto waiter=guest.runtime.GetThreadRegistry().LaunchHostThread("storage cancellation",128*1024,[&] {
+    auto& ctx=*KernelThread::GetCallingThread()->GetThreadState()->GetContext();
     ctx.r3.u64 = io; ctx.r4.u64 = 1;
     __imp__XMsgCancelIORequest(ctx, guest.bytes);
     returned.store(ctx.r3.u32);
     return 0;
-  }));
-  REQUIRE(waiter->Create() == 0);
+  });
+  REQUIRE(waiter);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (!request->cancelled.load() && std::chrono::steady_clock::now() < deadline)
+  while (!(*request)->cancelled.load() && std::chrono::steady_clock::now() < deadline)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  CHECK(request->cancelled.load());
+  CHECK((*request)->cancelled.load());
   CHECK(returned.load() == ~0u);
-  content->FinishTransfer(io, request, [&] {
-    guest.runtime.kernel_state()->CompleteOverlappedEx(io, 1223, 0x800704C7, 0);
+  guest.fixture.RunOnGuestThread([&](rex::test::Caller&) {
+    content->FinishTransfer(io, *request, [&] {
+      rex::xam::CurrentTitle().overlapped_dispatcher.Complete(io, {1223, 0x800704C7, 0});
+    });
   });
   uint64_t timeout = uint64_t(-50'000'000ll);
-  REQUIRE(waiter->Wait(0, 0, 0, &timeout) == 0);
+  REQUIRE(guest.runtime.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*waiter,0,0,0,&timeout) == 0);
+  CloseOwned(guest.runtime.GetObjectTable(),*waiter);
   CHECK(returned.load() == 0);
   CHECK(guest.word(io - guest.address) == 1223);
   CHECK(guest.word(io - guest.address + 24) == 0x800704C7);
@@ -524,8 +522,8 @@ TEST_CASE("XMsg cancellation waits for worker cleanup even without a guest event
   // Reuse is allowed after completion, with a fresh cancellation state.
   const auto reused = content->BeginTransfer(io);
   REQUIRE(reused);
-  CHECK_FALSE(reused->cancelled.load());
-  content->FinishTransfer(io, reused, [] {});
+  CHECK_FALSE((*reused)->cancelled.load());
+  content->FinishTransfer(io, *reused, [] {});
   rex::memory::store_and_swap<uint32_t>(guest.bytes + io, 997);
   CHECK(guest.call(__imp__XMsgCancelIORequest, {io, 0}) == 50);
   CHECK(guest.word(io - guest.address) == 997);
@@ -543,9 +541,8 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   // A staging directory abandoned by an interrupted process.
   std::filesystem::create_directories(mu / ".x360n-transfer" / "stale");
   DeviceGuest guest(root.path);
-  auto* dispatcher = guest.runtime.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
-  REQUIRE(dispatcher->SetFunction(0x82000100, &ProgressCallback));
+  auto* dispatcher = (&GetFunctionDispatcher(guest.runtime));
+  REQUIRE(dispatcher->SetFunction(0x8F000100, &ProgressCallback));
   const auto item = guest.address + 1024;
   const auto device = guest.address + 2048;
   const auto io = guest.address + 2304;
@@ -559,7 +556,7 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   // HDD -> MU, synchronous, with progress. Context arrives as the ninth argument.
   put(device, 7);
   progress_log = {};
-  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x82000100, 0xC0FFEE, 0, 0}) == 0);
+  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x8F000100, 0xC0FFEE, 0, 0}) == 0);
   REQUIRE(progress_log.reasons.size() >= 3);
   CHECK(progress_log.reasons.front() == 1);
   CHECK(progress_log.transferred.front() == 0);
@@ -572,7 +569,7 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   CHECK(std::filesystem::file_size(PackageOn(mu) / "dir" / "slot.dat") == 300000);
   CHECK(std::filesystem::file_size(PackageOn(mu) / "small.bin") == 3);
   REQUIRE(std::filesystem::exists(HeaderOn(mu)));
-  rex::system::xam::XCONTENT_AGGREGATE_DATA header{};
+  rex::kernel::XCONTENT_AGGREGATE_DATA header{};
   std::ifstream(HeaderOn(mu), std::ios::binary).read(reinterpret_cast<char*>(&header), sizeof(header));
   CHECK(uint32_t(header.device_id) == 7);
   CHECK(uint64_t(header.xuid) == kOwner);
@@ -601,7 +598,7 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   put(device, 7);
   progress_log = {};
   progress_log.cancel_at = 1;
-  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x82000100, 1, 0, 0}) == 1223);
+  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x8F000100, 1, 0, 0}) == 1223);
   CHECK(progress_log.reasons.size() == 2);
   CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
   CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
@@ -625,7 +622,7 @@ TEST_CASE("Quota-backed content attributes stay current across repeated reads an
   for (unsigned i = 0; i != 256; ++i)
     std::ofstream(PackageOn(root.path) / "dir" / std::to_string(i), std::ios::binary)
         << std::string(1024, 'x');
-  auto* manager = guest.runtime.kernel_state()->content_manager();
+  auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
   uint8_t attributes[38];
   constexpr uint64_t expected_size = 5 + 3 + 256 * 1024;
   for (unsigned sample = 0; sample != 3; ++sample) {
@@ -673,7 +670,7 @@ TEST_CASE("Restart recovers the package and header publication boundaries withou
       std::filesystem::create_directories(staging);
       std::filesystem::copy(PackageOn(root.path), staging / "package",
                             std::filesystem::copy_options::recursive);
-      const auto ready = staging / (phase == 0 ? "header" : "header-" + rex::hash_bytes(header) + ".ready");
+      const auto ready = staging / (phase == 0 ? "header" : "header-" + rex::HashBytes(header) + ".ready");
       std::ofstream(ready, std::ios::binary).write(header.data(), header.size());
       if (phase >= 1) {
         std::filesystem::create_directories(PackageOn(mu).parent_path());
@@ -684,17 +681,17 @@ TEST_CASE("Restart recovers the package and header publication boundaries withou
         std::filesystem::rename(ready, HeaderOn(mu));
       }
       DeviceGuest restarted(root.path);
-      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       CHECK(manager->GetDevice(7).has_value());
       CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
-      const auto items = manager->ListContent(7, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+      const auto items = manager->ListContent(7, kOwner, rex::kernel::XContentType::kSavedGame, kTitle);
       if (phase == 0) {
         CHECK(items.empty());
         CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
         CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
       } else {
         REQUIRE(items.size() == 1);
-        CHECK(items.front().display_name() == u"Transfer save");
+        CHECK(items.front().GetDisplayName() == u"Transfer save");
         CHECK(std::filesystem::exists(HeaderOn(mu)));
         std::ifstream input(HeaderOn(mu), std::ios::binary);
         const std::string actual(std::istreambuf_iterator<char>{input}, {});
@@ -722,13 +719,13 @@ TEST_CASE("Content publication recovery preserves corrupt conflicting and linked
       root.config("version=1\n[[device]]\nid=7\ntype='mu'\n");
       const auto mu = root.path / "storage/00000007";
       std::filesystem::create_directories(mu);
-      rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+      rex::kernel::XCONTENT_AGGREGATE_DATA data{};
       {
         DeviceGuest guest(root.path);
         data = MakeItem(guest, 1, root.path, 8192);
       }
       data.device_id = mode == 1 ? 12 : 7;
-      if (mode == 2) data.set_file_name("../outside");
+      if (mode == 2) data.SetFileName("../outside");
       std::string header(reinterpret_cast<const char*>(&data), sizeof(data));
       header += "opaque header bytes";
       const auto staging = mu / ".x360n-transfer/interrupted";
@@ -736,7 +733,7 @@ TEST_CASE("Content publication recovery preserves corrupt conflicting and linked
       std::filesystem::create_directories(PackageOn(mu).parent_path());
       std::filesystem::copy(PackageOn(root.path), PackageOn(mu),
                             std::filesystem::copy_options::recursive);
-      const auto ready = staging / ("header-" + rex::hash_bytes(header) + ".ready");
+      const auto ready = staging / ("header-" + rex::HashBytes(header) + ".ready");
       auto bytes = header;
       if (mode == 0) bytes.back() ^= 1;
       std::ofstream(ready, std::ios::binary).write(bytes.data(), bytes.size());
@@ -752,7 +749,7 @@ TEST_CASE("Content publication recovery preserves corrupt conflicting and linked
 #endif
       {
         DeviceGuest restarted(root.path);
-        CHECK_FALSE(restarted.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+        CHECK_FALSE((&rex::xam::CurrentXAM().GetContentManager())->GetDevice(7).has_value());
         CHECK(std::filesystem::exists(ready));
         std::ifstream input(ready, std::ios::binary);
         const bool unchanged = std::string(std::istreambuf_iterator<char>{input}, {}) == bytes;
@@ -773,7 +770,7 @@ TEST_CASE("Content publication recovery preserves corrupt conflicting and linked
         if (mode == 0) std::ofstream(ready, std::ios::binary | std::ios::trunc).write(header.data(), header.size());
         else REQUIRE(std::filesystem::remove(HeaderOn(mu)));
         DeviceGuest repaired(root.path);
-        CHECK(repaired.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+        CHECK((&rex::xam::CurrentXAM().GetContentManager())->GetDevice(7).has_value());
         std::ifstream input(HeaderOn(mu), std::ios::binary);
         const bool restored = std::string(std::istreambuf_iterator<char>{input}, {}) == header;
         CHECK(restored);
@@ -847,7 +844,7 @@ TEST_CASE("Storage crash child exits only at an actual publication checkpoint",
   const auto root = std::filesystem::absolute(*configured).lexically_normal();
   REQUIRE(root.parent_path() == std::filesystem::current_path());
   REQUIRE(root.filename().wstring().starts_with(L"storage-contract-"));
-  REQUIRE(rex::system::xam::IsUnlinkedStoragePath(root));
+  REQUIRE(rex::xam::IsUnlinkedStoragePath(root));
   std::ifstream marker(root / ".crash-test-root");
   REQUIRE(std::string(std::istreambuf_iterator<char>{marker}, {}) == "x360n-copy-crash-v1");
   const auto requested = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_STAGE");
@@ -861,21 +858,21 @@ TEST_CASE("Storage crash child exits only at an actual publication checkpoint",
     REQUIRE_FALSE(std::filesystem::exists(PackageOn(root)));
     MakeItem(guest, 1, root, 1024 * 1024);
   }
-  rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+  rex::kernel::XCONTENT_AGGREGATE_DATA data{};
   const auto operation = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_OPERATION");
   REQUIRE((!operation || *operation == L"transfer" || *operation == L"delete"));
   const auto separate_metadata = root / ".crash-content-data";
   const auto metadata = operation && *operation == L"delete" && std::filesystem::exists(separate_metadata)
       ? separate_metadata : HeaderOn(root);
-  REQUIRE(rex::system::xam::IsUnlinkedStoragePath(metadata));
+  REQUIRE(rex::xam::IsUnlinkedStoragePath(metadata));
   std::ifstream input(metadata, std::ios::binary);
   input.read(reinterpret_cast<char*>(&data), sizeof(data));
   REQUIRE(input.gcount() == sizeof(data));
   input.close();
-  auto checkpoint = [stage](rex::system::xam::ContentManager::TransferStage reached) {
+  auto checkpoint = [stage](rex::xam::ContentManager::TransferStage reached) {
     if (uint32_t(reached) == stage) std::_Exit(93);  // no destructors or staging cleanup
   };
-  auto* manager = guest.runtime.kernel_state()->content_manager();
+  auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
   if (operation && *operation == L"delete") {
     REQUIRE(stage >= 3);
     manager->DeleteContent(kOwner, data, nullptr, checkpoint);
@@ -906,7 +903,7 @@ TEST_CASE("A real process interruption at each publication boundary recovers on 
       CHECK(std::filesystem::exists(PackageOn(mu)) == (stage >= 1));
       CHECK(std::filesystem::exists(HeaderOn(mu)) == (stage >= 2));
       DeviceGuest restarted(root.path);
-      CHECK(restarted.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+      CHECK((&rex::xam::CurrentXAM().GetContentManager())->GetDevice(7).has_value());
       REQUIRE(std::filesystem::exists(HeaderOn(mu)));
       std::ifstream header(HeaderOn(mu), std::ios::binary);
       const bool complete_header = std::string(std::istreambuf_iterator<char>{header}, {}) == expected_header;
@@ -955,7 +952,7 @@ TEST_CASE("Interrupted move source retirement restores complete content or finis
         REQUIRE(std::filesystem::remove(entries.front() / "package/small.bin"));
       }
       DeviceGuest restarted(root.path);
-      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       REQUIRE(manager->GetDevice(1));
       REQUIRE(manager->GetDevice(7));
       CHECK_FALSE(std::filesystem::exists(pending));
@@ -967,10 +964,10 @@ TEST_CASE("Interrupted move source retirement restores complete content or finis
       const bool destination_complete = std::string(std::istreambuf_iterator<char>{payload}, {}) == std::string(1024 * 1024, 's');
       CHECK(destination_complete);
       CHECK(std::filesystem::file_size(PackageOn(mu) / "small.bin") == 3);
-      const auto items = manager->ListContent(1, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+      const auto items = manager->ListContent(1, kOwner, rex::kernel::XContentType::kSavedGame, kTitle);
       if (stage < 6) {
         REQUIRE(items.size() == 1);
-        CHECK(items.front().display_name() == u"Transfer save");
+        CHECK(items.front().GetDisplayName() == u"Transfer save");
         std::ifstream restored_header(HeaderOn(root.path), std::ios::binary);
         const bool metadata = std::string(std::istreambuf_iterator<char>{restored_header}, {}) == source_header;
         CHECK(metadata);
@@ -1006,10 +1003,10 @@ TEST_CASE("Interrupted storage staging is reclaimed before checking the destinat
     CHECK(std::filesystem::exists(PackageOn(root.path)));
   }
   DeviceGuest restarted(root.path);
-  const auto items = restarted.runtime.kernel_state()->content_manager()->ListContent(
-      7, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+  const auto items = (&rex::xam::CurrentXAM().GetContentManager())->ListContent(
+      7, kOwner, rex::kernel::XContentType::kSavedGame, kTitle);
   REQUIRE(items.size() == 1);
-  CHECK(items.front().file_name() == "SAVE0001");
+  CHECK(items.front().GetFileName() == "SAVE0001");
   std::ifstream input(PackageOn(mu) / "dir/slot.dat", std::ios::binary);
   const std::string bytes(std::istreambuf_iterator<char>{input}, {});
   CHECK(bytes == std::string(300000, 's'));
@@ -1027,7 +1024,7 @@ TEST_CASE("An active transfer preserves its staging while another volume recover
       << std::string(900000,'x');
   DeviceGuest guest(root.path);
   const auto data=MakeItem(guest,1,root.path,300000);
-  auto* content=guest.runtime.kernel_state()->content_manager();
+  auto* content=(&rex::xam::CurrentXAM().GetContentManager());
   uint32_t other_result=~0u;
   REQUIRE(content->TransferContent(kOwner,data,7,0,false,[&](uint64_t,uint64_t,bool first) {
     if(first) other_result=content->TransferContent(kOwner,data,12,0,false,{});
@@ -1076,10 +1073,10 @@ TEST_CASE("A failed move cleanup preserves the full source and committed destina
   }
   // Recovery must remain discoverable after the original runtime is gone.
   DeviceGuest restarted(root.path);
-  const auto data=restarted.runtime.kernel_state()->content_manager()->ListContent(
-      7,kOwner,rex::system::XContentType::kSavedGame,kTitle);
+  const auto data=(&rex::xam::CurrentXAM().GetContentManager())->ListContent(
+      7,kOwner,rex::kernel::XContentType::kSavedGame,kTitle);
   REQUIRE(data.size()==1);
-  CHECK(data.front().file_name()=="SAVE0001");
+  CHECK(data.front().GetFileName()=="SAVE0001");
   std::ifstream input(PackageOn(mu)/"dir/slot.dat",std::ios::binary);
   const std::string bytes(std::istreambuf_iterator<char>{input},{});
   CHECK(bytes==std::string(300000,'s'));
@@ -1100,9 +1097,12 @@ TEST_CASE("A locked content header cannot leave a partially deleted public save"
       } locked{CreateFileW(HeaderOn(root.path).c_str(), GENERIC_READ,
           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
       REQUIRE(locked.handle != INVALID_HANDLE_VALUE);
-      auto* manager = guest.runtime.kernel_state()->content_manager();
-      auto remove = [&] { return unmount ? manager->UnmountAndDeleteContent(kOwner, data)
-                                        : manager->DeleteContent(kOwner, data); };
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
+      auto remove = [&] {
+        // v0.11 closes a root explicitly before the shared recoverable deletion.
+        if(unmount) CHECK_FALSE(manager->CloseContent("storage-delete"));
+        return manager->DeleteContent(kOwner,data,nullptr);
+      };
       CHECK(remove() == X_ERROR_ACCESS_DENIED);
       REQUIRE(std::filesystem::exists(PackageOn(root.path)));
       CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 8192);
@@ -1144,13 +1144,13 @@ TEST_CASE("Direct deletion recovers real interruption at every retirement bounda
         REQUIRE(std::filesystem::remove(entries.front() / "package/small.bin"));
       }
       DeviceGuest restarted(root.path);
-      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       REQUIRE(manager->GetDevice(1));
       CHECK_FALSE(std::filesystem::exists(pending));
-      const auto items = manager->ListContent(1, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+      const auto items = manager->ListContent(1, kOwner, rex::kernel::XContentType::kSavedGame, kTitle);
       if (stage < 6) {
         REQUIRE(items.size() == 1);
-        CHECK(items.front().display_name() == u"Transfer save");
+        CHECK(items.front().GetDisplayName() == u"Transfer save");
         std::ifstream payload(PackageOn(root.path) / "dir/slot.dat", std::ios::binary);
         CHECK(std::string(std::istreambuf_iterator<char>{payload}, {}) == std::string(8192, 's'));
         CHECK(std::filesystem::file_size(PackageOn(root.path) / "small.bin") == 3);
@@ -1179,7 +1179,7 @@ TEST_CASE("Direct deletion preserves header-only and package-only content contra
         std::ofstream(PackageOn(root.path)) << "flat package";
       }
       bool removed = true;
-      auto* manager = guest.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       CHECK(manager->DeleteContent(kOwner, data, &removed) == (mode == 3 ? X_ERROR_FILE_NOT_FOUND : X_ERROR_SUCCESS));
       CHECK(removed == (mode != 3));
       CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
@@ -1194,7 +1194,7 @@ TEST_CASE("Direct deletion keeps committed failed cleanup private and retryable"
   StorageRoot root;
   DeviceGuest guest(root.path);
   const auto data = MakeItem(guest, 1, root.path, 8192);
-  auto* manager = guest.runtime.kernel_state()->content_manager();
+  auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
   struct LockedPayload {
     HANDLE handle = INVALID_HANDLE_VALUE;
     ~LockedPayload() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
@@ -1202,8 +1202,8 @@ TEST_CASE("Direct deletion keeps committed failed cleanup private and retryable"
   bool removed = false;
   std::filesystem::path private_payload;
   const auto result = manager->DeleteContent(kOwner, data, &removed,
-      [&](rex::system::xam::ContentManager::TransferStage stage) {
-        if (stage != rex::system::xam::ContentManager::TransferStage::SourceRetired) return;
+      [&](rex::xam::ContentManager::TransferStage stage) {
+        if (stage != rex::xam::ContentManager::TransferStage::SourceRetired) return;
         const auto pending = root.path / ".x360n-transfer";
         std::vector<std::filesystem::path> entries;
         for (const auto& entry : std::filesystem::directory_iterator(pending)) entries.push_back(entry.path());
@@ -1224,7 +1224,7 @@ TEST_CASE("Direct deletion keeps committed failed cleanup private and retryable"
   locked.handle = INVALID_HANDLE_VALUE;
   CHECK(manager->GetDevice(1));
   CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
-  CHECK(manager->ListContent(1, kOwner, rex::system::XContentType::kSavedGame, kTitle).empty());
+  CHECK(manager->ListContent(1, kOwner, rex::kernel::XContentType::kSavedGame, kTitle).empty());
 }
 
 TEST_CASE("Deletion recovery restores header-only and flat packages without changing their shape",
@@ -1244,7 +1244,7 @@ TEST_CASE("Deletion recovery restores header-only and flat packages without chan
       }
       InterruptStorageTransfer(root.path, 5, true);
       DeviceGuest restarted(root.path);
-      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       REQUIRE(manager->GetDevice(1));
       CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
       CHECK(std::filesystem::exists(PackageOn(root.path)) == flat);
@@ -1279,7 +1279,7 @@ TEST_CASE("Recovery cannot pair retired content with a newly created missing com
         std::ofstream(PackageOn(root.path) / "new.bin") << "new payload";
       } else std::ofstream(HeaderOn(root.path)) << "new header";
       DeviceGuest restarted(root.path);
-      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
       CHECK_FALSE(manager->GetDevice(1));
       CHECK(std::filesystem::exists(pending));
       if (header_only) {
@@ -1316,7 +1316,7 @@ TEST_CASE("Committed source retirement keeps failed physical cleanup private and
   std::filesystem::create_directories(mu);
   DeviceGuest guest(root.path);
   const auto data = MakeItem(guest, 1, root.path, 8192);
-  auto* manager = guest.runtime.kernel_state()->content_manager();
+  auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
   struct LockedPayload {
     HANDLE handle = INVALID_HANDLE_VALUE;
     ~LockedPayload() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
@@ -1324,8 +1324,8 @@ TEST_CASE("Committed source retirement keeps failed physical cleanup private and
   bool committed = false, removed = false;
   std::filesystem::path private_payload;
   const auto result = manager->TransferContent(kOwner, data, 7, 0, true, {}, &committed,
-      [&](rex::system::xam::ContentManager::TransferStage stage) {
-        if (stage != rex::system::xam::ContentManager::TransferStage::SourceRetired) return;
+      [&](rex::xam::ContentManager::TransferStage stage) {
+        if (stage != rex::xam::ContentManager::TransferStage::SourceRetired) return;
         const auto pending = root.path / ".x360n-transfer";
         std::vector<std::filesystem::path> entries;
         for (const auto& entry : std::filesystem::directory_iterator(pending)) entries.push_back(entry.path());
@@ -1352,7 +1352,7 @@ TEST_CASE("Committed source retirement keeps failed physical cleanup private and
   CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
   CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
   CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
-  CHECK(manager->ListContent(7, kOwner, rex::system::XContentType::kSavedGame, kTitle).size() == 1);
+  CHECK(manager->ListContent(7, kOwner, rex::kernel::XContentType::kSavedGame, kTitle).size() == 1);
 }
 
 TEST_CASE("Source retirement recovery preserves conflicts and rejects corrupt journals",
@@ -1397,7 +1397,7 @@ TEST_CASE("Source retirement recovery preserves conflicts and rejects corrupt jo
           std::ofstream(HeaderOn(root.path)) << "new metadata";
         }
         DeviceGuest restarted(root.path);
-        auto* manager = restarted.runtime.kernel_state()->content_manager();
+        auto* manager = (&rex::xam::CurrentXAM().GetContentManager());
         if (corrupt || stage == 5) {
           CHECK_FALSE(manager->GetDevice(1));
           REQUIRE(std::filesystem::exists(private_package / "dir/slot.dat"));
@@ -1443,22 +1443,22 @@ TEST_CASE("Source retirement recovery preserves conflicts and rejects corrupt jo
 TEST_CASE("A session's titles share the console hard drive, not their own user root",
           "[sdk][storage-device][storage-hdd-root]") {
   StorageRoot title_root, hard_drive;
-  struct RestoreFlag {
-    std::string value = rex::cvar::GetFlagByName("content_data_root");
-    ~RestoreFlag() { rex::cvar::SetFlagByName("content_data_root", value); }
-  } restore;
-  REQUIRE(rex::cvar::SetFlagByName("content_data_root", hard_drive.path.string()));
+  auto& root_setting=GetTitlePaths().content_root;
+  const auto previous=root_setting.GetText();const auto layer=root_setting.GetLayer();
+  rex::ScopeGuard restore_root([&] {CHECK(root_setting.Reset());
+    if(layer!=rex::SettingLayer::kDefault)CHECK(root_setting.SetText(layer,previous));});
+  REQUIRE(root_setting.Set(hard_drive.path));
   DeviceGuest guest(title_root.path);
-  auto* content = guest.runtime.kernel_state()->content_manager();
+  auto* content = (&rex::xam::CurrentXAM().GetContentManager());
   CHECK(std::filesystem::equivalent(content->DeviceRoot(1), hard_drive.path));
   // Saves created by the title land on the hard drive; its own root stays clean.
-  rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+  rex::kernel::XCONTENT_AGGREGATE_DATA data{};
   data.device_id = 1;
-  data.content_type = rex::system::XContentType::kSavedGame;
-  data.set_file_name("SAVE0001");
+  data.content_type = rex::kernel::XContentType::kSavedGame;
+  data.SetFileName("SAVE0001");
   data.xuid = 0xE000000012345678ull;
   data.title_id = 0x1234ABCD;
-  REQUIRE(content->WriteContentHeaderFile(0xE000000012345678ull, data) == 0);
+  REQUIRE(content->WriteContentHeaderFile(0xE000000012345678ull, data));
   CHECK(std::filesystem::exists(hard_drive.path / "E000000012345678" / "1234ABCD" / "Headers"));
   CHECK_FALSE(std::filesystem::exists(title_root.path / "E000000012345678"));
 }
@@ -1473,7 +1473,7 @@ struct ContentEvent { uint32_t reason, device; uint64_t owner, size; bool presen
 std::vector<ContentEvent> content_events;
 void ContentChangeCallback(PPCContext& ctx, uint8_t* base) {
   const auto reason = ctx.r3.u32, source = ctx.r4.u32;
-  auto* memory = rex::Runtime::instance()->memory();
+  auto* memory = (&REX_RUNTIME()->GetGuestHeap());
   const auto output = memory->SystemHeapAlloc(4);
   if (!output) return;
   // Exercise the original queue's allocator too (92263398), rather than
@@ -1487,10 +1487,10 @@ void ContentChangeCallback(PPCContext& ctx, uint8_t* base) {
   rex::memory::store_and_swap<uint32_t>(base + message, reason);
   std::memcpy(base + message + 8, base + source, 512);
   ctx.r3.u64 = reason; ctx.r4.u64 = message + 8;
-  auto* data = reinterpret_cast<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(base + ctx.r4.u32);
+  auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(base + ctx.r4.u32);
   content_events.push_back({ctx.r3.u32, data->device_id, data->xuid,
       rex::memory::load_and_swap<uint64_t>(base + ctx.r4.u32 + 328),
-      rex::Runtime::instance()->kernel_state()->content_manager()->ContentExists(data->xuid, *data)});
+      rex::xam::CurrentXAM().GetContentManager().HasContent(data->xuid, *data)});
   ctx.r3.u64 = message; __imp__XamFree(ctx, base);
   // A callback cannot replace the export's return value or caller registers.
   ctx.r3.u64 = 0xBADBAD;
@@ -1502,12 +1502,11 @@ TEST_CASE("Storage mutations notify the registered original content cache", "[sd
   const auto mu = root.path / "storage/00000007", usb = root.path / "storage/0000000C";
   std::filesystem::create_directories(mu); std::filesystem::create_directories(usb);
   DeviceGuest guest(root.path);
-  auto* dispatcher = guest.runtime.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
-  REQUIRE(dispatcher->SetFunction(0x82000200, &ContentChangeCallback));
+  auto* dispatcher = (&GetFunctionDispatcher(guest.runtime));
+  REQUIRE(dispatcher->SetFunction(0x8F000200, &ContentChangeCallback));
   MakeItem(guest, 1, root.path, 1234);
   const auto item = guest.address + 1024, device = guest.address + 2048, io = guest.address + 2304;
-  guest.call(__imp__XamContentRegisterChangeCallback, {0x82000200});
+  guest.call(__imp__XamContentRegisterChangeCallback, {0x8F000200});
   content_events.clear();
   rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
   REQUIRE(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0, 0, 0, 0}) == 0);
@@ -1520,10 +1519,10 @@ TEST_CASE("Storage mutations notify the registered original content cache", "[sd
   const auto copied_count = content_events.size();
   CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0, 0, 0, 0}) == 183);
   CHECK(content_events.size() == copied_count);
-  REQUIRE(dispatcher->SetFunction(0x82000100, &ProgressCallback));
+  REQUIRE(dispatcher->SetFunction(0x8F000100, &ProgressCallback));
   progress_log = {}; progress_log.cancel_at = 0;
   rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 12);
-  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x82000100, 0, 0, 0}) == 1223);
+  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x8F000100, 0, 0, 0}) == 1223);
   CHECK(content_events.size() == copied_count);
   rex::memory::store_and_swap<uint32_t>(guest.bytes + item, 7);
   rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 12);
@@ -1557,7 +1556,7 @@ TEST_CASE("Storage mutations notify the registered original content cache", "[sd
   // Move commits the destination even if Windows locks the source header.
   MakeItem(guest, 1, root.path, 1234);
   content_events.clear();
-  guest.call(__imp__XamContentRegisterChangeCallback, {0x82000200});
+  guest.call(__imp__XamContentRegisterChangeCallback, {0x8F000200});
   struct LockedHeader {
     HANDLE handle;
     ~LockedHeader() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }

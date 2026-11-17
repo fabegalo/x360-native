@@ -20,12 +20,12 @@ def method(source, signature):
 
 
 sdk, output = map(Path, sys.argv[1:])
-cp = (sdk / "src/graphics/vulkan/command_processor.cpp").read_text()
-texture = (sdk / "src/graphics/vulkan/texture_cache.cpp").read_text()
-upload = method(texture, "bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(")
+cp = (sdk / "src/gpu/xenos/vulkan/command_processor.cpp").read_text()
+texture = (sdk / "src/gpu/xenos/vulkan/texture_cache.cpp").read_text()
+upload = method(texture, "bool VulkanTextureCache::LoadHostTextureDataFromResidentMemory(")
 start = upload.index("  vulkan_texture.MarkAsUsed();")
-end = upload.index("  for (uint32_t level = level_first;", start)
-parts = ["namespace rex::graphics::vulkan {\n"]
+end = upload.index("  for (u32 level = level_first;", start)
+parts = ["namespace rex::gpu::vulkan {\n"]
 for signature in (
     "bool VulkanCommandProcessor::PushImageMemoryBarrier(",
     "bool VulkanCommandProcessor::SubmitBarriers(",
@@ -34,8 +34,8 @@ for signature in (
 ):
     parts.append(method(cp, signature))
 pass_method = method(cp, "void VulkanCommandProcessor::SubmitBarriersAndEnterRenderTargetCacheRenderPass(")
-parts.append("void VulkanCommandProcessor::EndActiveForPass(bool use_dynamic_rendering) {\n" +
-             method(pass_method, "  if (in_render_pass_) {") + "}\n")
+parts.append("void VulkanCommandProcessor::EndActiveForPass([[maybe_unused]] bool use_dynamic_rendering) {\n" +
+             next(line for line in pass_method.splitlines(True) if line.strip() == "if (in_render_pass_) EndRenderPass();") + "}\n")
 parts.append(method(texture, "void VulkanTextureCache::GetTextureUsageMasks("))
 parts.append("void VulkanTextureCache::RecordUpload(VulkanTexture& vulkan_texture) {\n"
              "auto& command_buffer = command_processor_.deferred_command_buffer_;\n"
@@ -46,7 +46,7 @@ parts.append("*copy_regions = {};\ncopy_regions->imageSubresource = {VK_IMAGE_AS
              "copy_regions->imageExtent = {1, 1, 1};\n}\n}\n")
 # Keep the complete real deferred stream implementation, including hoisting and
 # replay. The probe supplies just its command processor/device construction.
-deferred = (sdk / "src/graphics/vulkan/deferred_command_buffer.cpp").read_text()
-deferred = deferred.replace("#include <rex/graphics/vulkan/command_processor.h>", "")
+deferred = (sdk / "src/gpu/xenos/vulkan/deferred_command_buffer.cpp").read_text()
+deferred = deferred.replace('#include "gpu/xenos/vulkan/command_processor.h"', "")
 parts.append(deferred)
 output.write_text("".join(parts), encoding="utf-8")

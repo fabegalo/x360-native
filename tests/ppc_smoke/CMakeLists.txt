@@ -22,7 +22,7 @@ endblock()
 
 add_custom_command(
     OUTPUT ${X360N_PPC_GEN_DIR}/ppc_test_functions.cpp
-           ${X360N_PPC_GEN_DIR}/ppc_test_cases.cpp
+           ${X360N_PPC_GEN_DIR}/ppc_test_cases_0.cpp
            ${X360N_PPC_GEN_DIR}/ppc_test_decls.h
     COMMAND $<TARGET_FILE:rexglue> recompile-tests
             --output=${X360N_PPC_GEN_DIR}
@@ -34,16 +34,19 @@ add_custom_command(
 
 add_executable(x360n_ppc_smoke
     ${X360N_PPC_GEN_DIR}/ppc_test_functions.cpp
-    ${X360N_PPC_GEN_DIR}/ppc_test_cases.cpp)
+    ${X360N_PPC_GEN_DIR}/ppc_test_cases_0.cpp)
 target_include_directories(x360n_ppc_smoke PRIVATE ${X360_REXGLUE_DIR}/include ${X360N_PPC_GEN_DIR})
-target_link_libraries(x360n_ppc_smoke PRIVATE simde rexruntime fmt::fmt Catch2::Catch2WithMain x360n_ppc_options)
+target_link_libraries(x360n_ppc_smoke PRIVATE simde rexkernel Catch2::Catch2WithMain x360n_ppc_options)
 # Same effective flags as the SDK's ppc_tests: its directory-wide options
 # (SDK CMakeLists.txt add_compile_options) plus its target options.
 target_compile_options(x360n_ppc_smoke PRIVATE
     -fno-char8_t
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING
     -UREXGLUE_ENABLE_PERF_COUNTERS -UREXGLUE_PROFILE_GUEST_FUNCTIONS
-    -msse4.1 -mssse3)
+    )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
+    target_compile_options(x360n_ppc_smoke PRIVATE -msse4.1 -mssse3)
+endif()
 if(X360N_PPC_VALIDATE_GPU_STAGING)
     x360n_stage_runtime_dlls(x360n_ppc_smoke PLUGIN_TARGETS rexgpu-xenos)
 else()
@@ -56,6 +59,9 @@ catch_discover_tests(x360n_ppc_smoke TEST_PREFIX "x360n.ppc." PROPERTIES LABELS 
 add_executable(x360n_ppc_compile_semantics compile_semantics.cpp)
 target_include_directories(x360n_ppc_compile_semantics PRIVATE ${X360_REXGLUE_DIR}/include)
 target_link_libraries(x360n_ppc_compile_semantics PRIVATE simde x360n_ppc_options)
-target_compile_options(x360n_ppc_compile_semantics PRIVATE -O2 -msse4.1)
+target_compile_options(x360n_ppc_compile_semantics PRIVATE -O2)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|x64)$")
+    target_compile_options(x360n_ppc_compile_semantics PRIVATE -msse4.1)
+endif()
 add_test(NAME x360n.ppc.compile-semantics COMMAND x360n_ppc_compile_semantics)
 set_tests_properties(x360n.ppc.compile-semantics PROPERTIES LABELS "project;ppc" TIMEOUT 15)

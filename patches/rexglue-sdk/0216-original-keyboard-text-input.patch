@@ -1,301 +1,528 @@
-diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
---- a/src/input/input_system.cpp
-+++ b/src/input/input_system.cpp
-@@ -63,7 +63,14 @@
+diff --git a/include/rex/hid/input_system.h b/include/rex/hid/input_system.h
+--- a/include/rex/hid/input_system.h
++++ b/include/rex/hid/input_system.h
+@@ -51,8 +51,10 @@
+  * one when nothing else is present. Without input capture only the keyboard and mouse source reads
+  * neutral, and AcquireUIBlock makes every user neutral. Any thread.
+  */
+-REX_DECLARE_INTERFACE(IInputSystem, 2)
++REX_DECLARE_INTERFACE(IInputSystem, 3)
+   static constexpr u32 kMaxUsers = 4;
++  /** false gives the original HUD raw keyboard text; true restores controller bindings. */
++  virtual void SetKeyboardTranslation(bool enabled) = 0;
  
- void InputSystem::AddDriver(std::unique_ptr<InputDriver> driver) {
-   std::lock_guard lock(system_ui_input.mutex);
-+  driver->SetKeyboardTranslation(keyboard_translation_);
-   drivers_.push_back(std::move(driver));
+   /** The user value for GetKeystroke that takes a keystroke from any user. */
+   static constexpr u32 kAnyUser = 0xFF;
+diff --git a/src/hid/input_system.h b/src/hid/input_system.h
+--- a/src/hid/input_system.h
++++ b/src/hid/input_system.h
+@@ -29,6 +29,7 @@
+ class InputSystem final : public rex::hid::IInputSystem {
+  public:
+   InputSystem();
++  void SetKeyboardTranslation(bool enabled) override;
+   ~InputSystem() override;
+ 
+   rex::hid::InputSettings& GetSettings() override { return settings_; }
+diff --git a/src/hid/input_internal.h b/src/hid/input_internal.h
+--- a/src/hid/input_internal.h
++++ b/src/hid/input_internal.h
+@@ -224,6 +224,7 @@
+  public:
+   Result<rex::hid::PadState> PeekDeviceState(rex::hid::PadDeviceID id);
+   void Reset();
++  bool SetKeyboardTranslation(bool enabled);
+   KeyboardMousePad(rex::hid::InputSettings& settings, hid::IBindingSet& bindings,
+                    const std::atomic<bool>& focused);
+   ~KeyboardMousePad() override;
+@@ -274,6 +275,9 @@
+   std::array<std::vector<KeyChord>, kBindCount> binds_;
+   u32 bind_generation_ = 0;
+   bool key_down_[256] = {};
++  bool blocked_keys_[256] = {};
++  u16 keyboard_key_ = 0;
++  std::atomic<bool> keyboard_translation_{true};
+   f32 mouse_dx_ = 0.0f;
+   f32 mouse_dy_ = 0.0f;
+   std::deque<rex::hid::PadKeystroke> queue_;
+diff --git a/src/hid/input_system.cpp b/src/hid/input_system.cpp
+--- a/src/hid/input_system.cpp
++++ b/src/hid/input_system.cpp
+@@ -358,6 +358,14 @@
+   state.stale = true;
+   state.started = true;
+   return {};
 +}
 +
 +void InputSystem::SetKeyboardTranslation(bool enabled) {
-+  std::lock_guard lock(system_ui_input.mutex);
-+  keyboard_translation_ = enabled;
-+  for (auto& driver : drivers_) driver->SetKeyboardTranslation(enabled);
++  std::lock_guard lock(state_->mutex);
++  if (!state_->keyboard_mouse->SetKeyboardTranslation(enabled)) return;
++  state_->synth = {};
++  state_->consumed = {};
++  state_->stale = true;
  }
  
- void InputSystem::AttachWindow(rex::ui::Window* window) {
-diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
---- a/src/ui/imgui_drawer.cpp
-+++ b/src/ui/imgui_drawer.cpp
-@@ -500,7 +500,7 @@
-   // TODO(Triang3l): Accept the Unicode character.
-   unsigned int character = static_cast<unsigned int>(e.virtual_key());
-   if (character > 0 && character < 0x10000) {
--    io.AddInputCharacter(character);
-+    io.AddInputCharacterUTF16(uint16_t(character));
-     e.set_handled(true);
-   }
+ void InputSystem::Stop() {
+diff --git a/src/hid/keyboard_mouse_pad.cpp b/src/hid/keyboard_mouse_pad.cpp
+--- a/src/hid/keyboard_mouse_pad.cpp
++++ b/src/hid/keyboard_mouse_pad.cpp
+@@ -190,11 +190,11 @@
  }
-diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
---- a/src/ui/window_sdl.cpp
-+++ b/src/ui/window_sdl.cpp
-@@ -581,10 +581,14 @@
-   const char* end = text + std::strlen(text);
-   while (it < end) {
-     uint32_t codepoint = utf8::unchecked::next(it);
--    KeyEvent e(this, VirtualKey(codepoint), 1, false, false, false, false, false);
--    OnKeyChar(e, destruction_receiver);
--    if (destruction_receiver.IsWindowDestroyed()) {
--      return;
-+    // VirtualKey carries 16 bits, matching WM_CHAR / guest X_INPUT_KEYSTROKE.
-+    // Preserve supplementary characters as two UTF-16 units instead of truncating.
-+    const uint16_t units[] = {uint16_t(codepoint <= 0xFFFF ? codepoint : 0xD800 + ((codepoint - 0x10000) >> 10)),
-+                              uint16_t(0xDC00 + ((codepoint - 0x10000) & 0x3FF))};
-+    for (unsigned i = 0; i < (codepoint <= 0xFFFF ? 1u : 2u); ++i) {
-+      KeyEvent e(this, VirtualKey(units[i]), 1, false, false, false, false, false);
-+      OnKeyChar(e, destruction_receiver);
-+      if (destruction_receiver.IsWindowDestroyed()) return;
+ 
+ bool KeyboardMousePad::IsEnabled() const {
+-  return settings_.mnk_mode.Get() || settings_.mnk_passthrough.Get();
++  return settings_.mnk_mode.Get() || IsPassthrough();
+ }
+ 
+ bool KeyboardMousePad::IsPassthrough() const {
+-  return settings_.mnk_passthrough.Get();
++  return settings_.mnk_passthrough.Get() || !keyboard_translation_.load(std::memory_order_relaxed);
+ }
+ 
+ u64 KeyboardMousePad::GetDeviceRevision() const {
+@@ -403,7 +403,27 @@
+     return;
+   }
+   std::lock_guard lock(mutex_);
++  const auto key = static_cast<u16>(event.key);
++  if (key < 256) {
++    if (blocked_keys_[key]) {
++      if (down && event.repeat) return;
++      blocked_keys_[key] = false;
++      if (!down) { key_down_[key] = false; return; }
++    }
++    keyboard_key_ = key;
++  }
++  if (!keyboard_translation_.load(std::memory_order_relaxed)) {
++    if (key < 256) key_down_[key] = down;
++    if (key != 8 && key != 9 && key != 13 && key != 27 && !(key >= 33 && key <= 46)) return;
++    rex::hid::PadKeystroke stroke{};
++    stroke.virtual_key = key;
++    stroke.flags = down ? kKeystrokeKeyDown : kKeystrokeKeyUp;
++    if (down && event.repeat) stroke.flags |= kKeystrokeRepeat;
++    PushKeystroke(stroke);
++    return;
++  }
+   if (IsPassthrough()) {
++    if (key < 256) key_down_[key] = down;
+     rex::hid::PadKeystroke keystroke;
+     keystroke.virtual_key = static_cast<u16>(event.key);
+     keystroke.hid_code = VirtualKeyToHIDUsage(event.key);
+@@ -432,6 +452,27 @@
+     return;
+   }
+   std::lock_guard lock(mutex_);
++  if (!keyboard_translation_.load(std::memory_order_relaxed)) {
++    const u32 code = event.character;
++    if (!focused_.load(std::memory_order_relaxed) || code < 32 || code > 0x10FFFF ||
++        (code >= 0xD800 && code <= 0xDFFF) ||
++        HasFlags(event.modifiers, KeyModifiers::kCtrl) || HasFlags(event.modifiers, KeyModifiers::kAlt) ||
++        (keyboard_key_ < 256 && blocked_keys_[keyboard_key_])) return;
++    const auto push = [&](u16 character) {
++      rex::hid::PadKeystroke stroke{};
++      stroke.virtual_key = character >= 'a' && character <= 'z' ? character - ('a' - 'A') : character;
++      stroke.unicode = character;
++      stroke.flags = kKeystrokeKeyDown;
++      PushKeystroke(stroke);
++    };
++    if (code <= 0xFFFF) push(static_cast<u16>(code));
++    else {
++      const u32 pair = code - 0x10000;
++      push(static_cast<u16>(0xD800 + (pair >> 10)));
++      push(static_cast<u16>(0xDC00 + (pair & 0x3FF)));
++    }
++    return;
++  }
+   if (queue_.empty()) {
+     return;
+   }
+@@ -478,17 +519,33 @@
+   mouse_dy_ += event.dy;
+ }
+ 
++bool KeyboardMousePad::SetKeyboardTranslation(bool enabled) {
++  std::lock_guard lock(mutex_);
++  if (keyboard_translation_.exchange(enabled, std::memory_order_relaxed) == enabled) return false;
++  for (size_t i = 0; i < 256; ++i) blocked_keys_[i] |= key_down_[i];
++  std::memset(key_down_, 0, sizeof(key_down_));
++  queue_.clear();
++  mouse_dx_ = mouse_dy_ = 0.0f;
++  pointer_lock_.store(false, std::memory_order_relaxed);
++  return true;
++}
++
+ void KeyboardMousePad::Reset() {
+   pointer_lock_.store(false, std::memory_order_relaxed);
+   std::lock_guard lock(mutex_);
+   std::memset(key_down_, 0, sizeof(key_down_));
+   mouse_dx_ = mouse_dy_ = 0.0f;
+   queue_.clear();
++  std::memset(blocked_keys_, 0, sizeof(blocked_keys_));
++  keyboard_key_ = 0;
++  keyboard_translation_.store(true, std::memory_order_relaxed);
+ }
+ 
+ void KeyboardMousePad::OnFocusLost() {
+   pointer_lock_.store(false, std::memory_order_relaxed);
+   std::lock_guard lock(mutex_);
++  for (size_t i = 0; i < 256; ++i) blocked_keys_[i] |= key_down_[i];
++  if (!keyboard_translation_.load(std::memory_order_relaxed)) queue_.clear();
+   std::memset(key_down_, 0, sizeof(key_down_));
+   mouse_dx_ = 0.0f;
+   mouse_dy_ = 0.0f;
+diff --git a/include/rex/ui/ui_system.h b/include/rex/ui/ui_system.h
+--- a/include/rex/ui/ui_system.h
++++ b/include/rex/ui/ui_system.h
+@@ -151,9 +151,11 @@
+  * Window, ImGui, overlay and dialog calls belong on the UI thread. Calls marked "any thread" are
+  * safe everywhere.
+  */
+-REX_DECLARE_INTERFACE(IUISystem, 2)
++REX_DECLARE_INTERFACE(IUISystem, 3)
+ /** Returns the player's UI settings. */
+   virtual UISettings& GetSettings() = 0;
++  /** Original system text owns keyboard delivery before overlays. Any thread. */
++  virtual void SetSystemTextInputActive(bool active) = 0;
+ 
+   /**
+    * Reports whether there is no display. Any thread.
+diff --git a/src/ui/ui_system.h b/src/ui/ui_system.h
+--- a/src/ui/ui_system.h
++++ b/src/ui/ui_system.h
+@@ -61,6 +61,7 @@
+   void RaiseWindow() override;
+   bool IsUIThread() const override;
+   void PostTask(MoveOnlyFunction<void()> fn) override;
++  void SetSystemTextInputActive(bool active) override;
+   [[nodiscard]] bool RunSynchronous(MoveOnlyFunction<void()> fn) override;
+   [[nodiscard]] ScopeGuard AddEventListener(rex::ui::IUIEventListener& listener) override;
+   ImFontAtlas& GetFonts() override;
+diff --git a/src/ui/ui_state.h b/src/ui/ui_state.h
+--- a/src/ui/ui_state.h
++++ b/src/ui/ui_state.h
+@@ -81,6 +81,8 @@
+   std::atomic<bool> stopped{false};
+   std::atomic<bool> quit{false};
+   std::atomic<u32> dialog_count{0};
++  bool system_text_input = false;
++  bool imgui_text_input = false;
+   std::atomic<u32> overlay_visible_count{0};
+ 
+   std::mutex post_mutex;
+diff --git a/src/ui/ui_system.cpp b/src/ui/ui_system.cpp
+--- a/src/ui/ui_system.cpp
++++ b/src/ui/ui_system.cpp
+@@ -120,6 +120,21 @@
+       REXUI_ERROR("posted work failed, {}", error.what());
      }
    }
++}
++
++void UISystem::SetSystemTextInputActive(bool active) {
++  PostTask([this, active] {
++    State& s = *state_;
++    s.system_text_input = active;
++    if (s.driver && s.window_open.load()) {
++      s.driver->SetTextInputActive(active || s.imgui_text_input);
++      if (active) {
++        s.cursor_hidden_by_timeout = false;
++        s.driver->SetCursorShape(true, CursorShape::kArrow);
++      }
++      s.RefreshCapture();
++    }
++  });
  }
-diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
---- a/src/kernel/xam/xam_input.cpp
-+++ b/src/kernel/xam/xam_input.cpp
-@@ -640,7 +640,12 @@
+ 
+ void UISystem::PostTask(MoveOnlyFunction<void()> fn) {
+@@ -238,7 +253,10 @@
+ 
+ void UISystem::State::CreateImGui() {
+   ui::ImGuiHost::Hooks hooks;
+-  hooks.set_text_input = [this](bool active) { driver->SetTextInputActive(active); };
++  hooks.set_text_input = [this](bool active) {
++    imgui_text_input = active;
++    driver->SetTextInputActive(active || system_text_input);
++  };
+   hooks.set_mouse_capture = [this](bool captured) { driver->CaptureMouse(captured); };
+   hooks.get_clipboard = [this] { return driver->GetClipboardText(); };
+   hooks.set_clipboard = [this](std::string_view text) { driver->SetClipboardText(text); };
+@@ -325,6 +343,8 @@
+ }
+ 
+ void UISystem::State::CloseWindow() {
++  system_text_input = false;
++  imgui_text_input = false;
+   if (!window_open.load()) {
+     return;
+   }
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -54,13 +54,13 @@
+   if (!input || !window_open.load()) {
+     return;
+   }
+-  input->SetInputCaptured(IsCaptureActive());
+-  ApplyPointerMode(input->GetPointerModeToApply());
++  input->SetInputCaptured(system_text_input ? focused.load() : IsCaptureActive());
++  ApplyPointerMode(system_text_input ? PointerMode::kFree : input->GetPointerModeToApply());
+ }
+ 
+ void UISystem::State::UpdateCursorTimeout() {
+   const f64 seconds = owner.GetSettings().cursor_timeout.Get();
+-  if (!window_open.load() || seconds <= 0.0 || cursor_hidden_by_timeout ||
++  if (system_text_input || !window_open.load() || seconds <= 0.0 || cursor_hidden_by_timeout ||
+       applied_pointer_mode != PointerMode::kFree) {
+     return;
+   }
+@@ -88,6 +88,13 @@
+ 
+ void UISystem::State::OnInputEvent(InputEvent& event) {
+   using Type = InputEvent::Type;
++  if (system_text_input && input && (event.type == Type::kKeyDown ||
++      event.type == Type::kKeyUp || event.type == Type::kKeyChar)) {
++    input->OnInputEvent(event);
++    event.handled = true;
++    RefreshCapture();
++    return;
++  }
+   if (!IsHeldByOverlay(event)) {
+     std::lock_guard delivery(delivery_mutex);
+     std::vector<rex::ui::IUIEventListener*> snapshot;
+diff --git a/src/xam/xam_input.cpp b/src/xam/xam_input.cpp
+--- a/src/xam/xam_input.cpp
++++ b/src/xam/xam_input.cpp
+@@ -23,6 +23,7 @@
+ #include "xam/input_convert.h"
+ #include <rex/kernel/thread_state.h>
+ #include "xam/xam_state.h"
++#include <rex/ui/ui_system.h>
+ #include "xam/xam_bodies.h"
+ 
+ namespace rex {
+@@ -59,6 +60,13 @@
+ }
+ 
+ }  // namespace
++
++void XamInputSetKeyboardTranslationHud_entry(u32 enabled) {
++  if (auto* input = GetInput()) {
++    input->SetKeyboardTranslation(enabled != 0);
++    if (auto* ui = CurrentXAM().GetUI()) ui->SetSystemTextInputActive(enabled == 0);
++  }
++}
+ 
+ void XamResetInactivity_entry() {}
+ 
+@@ -214,7 +222,7 @@
+   if (!ui.visible || !ui.input_enabled || (user != ui.user && !(ui.user == 0xFF && user < 4))) return kernel::X_ERROR_EMPTY;
+   auto* input = GetInput();
+   if (!input) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+-  return TakeInputKeystroke(*input, user, 1, *stroke);
++  return TakeInputKeystroke(*input, user, kXInputFlagGamepad | kXInputFlagKeyboard, *stroke);
+ }
+ 
+ u32 XamInputGetKeystrokeHudEx_entry(u32 user, [[maybe_unused]] u32 flags,
+@@ -229,7 +237,7 @@
+   const u32 end = selected_user == 0xFF ? 4 : selected_user + 1;
+   for (u32 index = first; index < end; ++index) {
+     u32 selected = index;
+-    const auto result = TakeInputKeystroke(*input, selected, 1, *stroke);
++    const auto result = TakeInputKeystroke(*input, selected, kXInputFlagGamepad | kXInputFlagKeyboard, *stroke);
+     if (result == kernel::X_ERROR_SUCCESS) return result;
+     if (result != kernel::X_ERROR_EMPTY && result != kernel::X_ERROR_DEVICE_NOT_CONNECTED) return result;
+   }
+@@ -254,3 +262,5 @@
+ REX_XAM_BODY(__imp__XamInputGetKeystrokeHud, rex::xam::XamInputGetKeystrokeHud_entry)
+ 
+ REX_XAM_BODY(__imp__XamInputGetKeystrokeHudEx, rex::xam::XamInputGetKeystrokeHudEx_entry)
++
++REX_XAM_BODY(__imp__XamInputSetKeyboardTranslationHud, rex::xam::XamInputSetKeyboardTranslationHud_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1108,7 +1108,7 @@
  REX_EXPORT_STUB(__imp__XamInputSendStayAliveRequest);
  REX_EXPORT_STUB(__imp__XamInputSendXenonButtonPress);
  REX_EXPORT_STUB(__imp__XamInputSetKeyLocks);
 -REX_EXPORT_STUB(__imp__XamInputSetKeyboardTranslationHud);
-+// Original 17559 816F2A10 stores a boolean: 0 routes keyboard text to
-+// the HUD editor; vk restores 1 on focus loss/destruction (917D84D0).
-+extern "C" REX_FUNC(__imp__XamInputSetKeyboardTranslationHud) {
-+  if (auto* backend = rex::kernel::xam::input_system())
-+    backend->SetKeyboardTranslation(ctx.r3.u32 != 0);
-+}
++
  REX_EXPORT_STUB(__imp__XamInputSetLayoutKeyboard);
  REX_EXPORT_STUB(__imp__XamInputSetMinMaxAuthDelay);
  REX_EXPORT_STUB(__imp__XamInputSetTextMessengerIndicator);
-diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
---- a/src/input/mnk/mnk_input_driver.cpp
-+++ b/src/input/mnk/mnk_input_driver.cpp
-@@ -21,6 +21,7 @@
- #include <cmath>
- #include <cstdlib>
- #include <cstring>
-+#include <limits>
- #include <string_view>
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -384,3 +384,5 @@
+ REX_XAM_FORWARD(__imp__XamNetworkStorageDeviceHasCacheFile)
  
- REXCVAR_DEFINE_BOOL(mnk_mode, false, "Input", "Enable keyboard/mouse controller emulation");
-@@ -169,6 +170,7 @@
-     }
-     window->AddInputListener(this, window_z_order());
-     window->AddListener(this);
-+    ApplyKeyboardTranslationFromUIThread();
-   }
+ REX_XAM_FORWARD(__imp__XamShowBrandedKeyboardUI)
++
++REX_XAM_FORWARD(__imp__XamInputSetKeyboardTranslationHud)
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -1,4 +1,5 @@
+ #include "xam/xam_state.h"
++#include <rex/ui/ui_system.h>
+ 
+ #include <atomic>
+ #include <rex/memory/endian.h>
+@@ -148,6 +149,8 @@
+ 
+ void XAMState::DetachInput() {
+   pad_watch_ = {};
++  if (input_) input_->SetKeyboardTranslation(true);
++  if (ui_) ui_->SetSystemTextInputActive(false);
+   input_ = nullptr;
  }
  
-@@ -187,8 +189,13 @@
-       std::lock_guard lock(state_mutex_);
-       attached_window_ = nullptr;
-     }
--    if (mouse_capture_update_queued_.load(std::memory_order_relaxed)) {
-+    if (mouse_capture_update_queued_.load(std::memory_order_relaxed) ||
-+        keyboard_text_update_queued_.load(std::memory_order_relaxed)) {
-       window->app_context().ExecutePendingFunctionsFromUIThread();
-+    }
-+    if (keyboard_text_active_) {
-+      window->SetTextInputActive(previous_text_input_active_);
-+      keyboard_text_active_ = false;
-     }
-     ReleaseMouseCaptureFromUIThread(window);
-     window->RemoveInputListener(this);
-@@ -197,7 +204,7 @@
+diff --git a/tests/unit/hid/input_system_test.cpp b/tests/unit/hid/input_system_test.cpp
+--- a/tests/unit/hid/input_system_test.cpp
++++ b/tests/unit/hid/input_system_test.cpp
+@@ -595,3 +595,110 @@
+   CHECK(second->state.thumb_ry == 0);
+   app.Shutdown();
  }
- 
- bool MnkInputDriver::IsEnabled() const {
--  return REXCVAR_GET(mnk_mode);
-+  return REXCVAR_GET(mnk_mode) || !keyboard_translation_.load(std::memory_order_relaxed);
++
++
++REX_TEST_CASE("original text input preserves Unicode and editing keys independently of MNK settings", "[hid][original-text-input]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  auto& ui = app.GetUI();
++  REQUIRE(input.GetSettings().mnk_mode.Set(false));
++  REQUIRE(input.GetSettings().mnk_passthrough.Set(false));
++  input.SetKeyboardTranslation(false);
++  ui.SetSystemTextInputActive(true);
++  app.Pump();
++  CHECK(rex::test_ui::g_ui.text_input);
++  const auto character = [](rex::u32 code) {
++    rex::test_ui::Deliver([=](rex::ui::IUIEventListener& listener) {
++      rex::InputEvent e{.type = rex::InputEvent::Type::kKeyChar, .character = code};
++      listener.OnInputEvent(e);
++      CHECK(e.handled);
++    });
++  };
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kA);
++  character('a'); character(0xE7); character(0x1F600);
++  character(0xD800); character(0x110000); character(0x1F);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, rex::VirtualKey::kA);
++  app.Pump();
++  for (rex::u16 value : {0x61, 0xE7, 0xD83D, 0xDE00}) {
++    auto stroke = input.GetKeystroke(0, rex::hid::KeystrokeSource::kKeyboard);
++    REQUIRE(stroke);
++    CHECK(stroke->unicode == value);
++    CHECK(stroke->virtual_key == (value == 'a' ? 'A' : value));
++    CHECK(stroke->flags == 1);
++  }
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  const auto enter = static_cast<rex::VirtualKey>(13);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, enter);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, enter, true);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, enter);
++  app.Pump();
++  for (rex::u16 flags : {1, 5, 2}) {
++    auto stroke = input.GetKeystroke(0, rex::hid::KeystrokeSource::kKeyboard);
++    REQUIRE(stroke); CHECK(stroke->virtual_key == 13); CHECK(stroke->flags == flags);
++  }
++  character('x'); app.Pump();
++  input.SetKeyboardTranslation(false); // Reassertion must retain pending original text.
++  REQUIRE(input.GetKeystroke(0, rex::hid::KeystrokeSource::kKeyboard));
++  input.SetKeyboardTranslation(true);
++  ui.SetSystemTextInputActive(false);
++  app.Pump();
++  CHECK_FALSE(rex::test_ui::g_ui.text_input);
++  CHECK_FALSE(input.GetSettings().mnk_mode.Get());
++  CHECK_FALSE(input.GetSettings().mnk_passthrough.Get());
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  app.Shutdown();
++}
++
++REX_TEST_CASE("original text mode blocks held keys across restoration and focus loss", "[hid][original-text-input]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  REQUIRE(input.GetSettings().mnk_mode.Set(true));
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "hid.keybind_a", "G"));
++  input.SetKeyboardTranslation(false);
++  app.GetUI().SetSystemTextInputActive(true);
++  app.Pump();
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG);
++  app.Pump();
++  input.SetKeyboardTranslation(true);
++  app.GetUI().SetSystemTextInputActive(false);
++  app.Pump();
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG, true);
++  app.Pump();
++  CHECK(input.GetState(0)->state.buttons == 0);
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, rex::VirtualKey::kG);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG);
++  app.Pump();
++  CHECK((input.GetState(0)->state.buttons & rex::hid::kPadA) != 0);
++  auto down = input.GetKeystroke(0, kAllSources);
++  REQUIRE(down); CHECK(down->flags == 1);
++  input.SetKeyboardTranslation(true); // Reassertion cannot create another pad down.
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  input.SetKeyboardTranslation(false);
++  app.GetUI().SetSystemTextInputActive(true); app.Pump();
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kH);
++  app.Pump();
++  rex::test_ui::DeliverFocus(false); app.Pump();
++  rex::test_ui::DeliverFocus(true); app.Pump();
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kH, true);
++  rex::test_ui::Deliver([](rex::ui::IUIEventListener& listener) {
++    rex::InputEvent e{.type = rex::InputEvent::Type::kKeyChar, .character = 'h'};
++    listener.OnInputEvent(e);
++  });
++  app.Pump();
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, rex::VirtualKey::kH);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kH);
++  rex::test_ui::Deliver([](rex::ui::IUIEventListener& listener) {
++    rex::InputEvent e{.type = rex::InputEvent::Type::kKeyChar, .character = 'h'};
++    listener.OnInputEvent(e);
++  });
++  app.Pump();
++  auto fresh = input.GetKeystroke(0, rex::hid::KeystrokeSource::kKeyboard);
++  REQUIRE(fresh); CHECK(fresh->unicode == 'h');
++  app.Shutdown();
++}
+diff --git a/tests/unit/kernel/xam_input_test.cpp b/tests/unit/kernel/xam_input_test.cpp
+--- a/tests/unit/kernel/xam_input_test.cpp
++++ b/tests/unit/kernel/xam_input_test.cpp
+@@ -213,3 +213,31 @@
+     CHECK(static_cast<rex::u32>(caller.XAM("GetTickCount") - tick) < 10000);
+   });
  }
- 
- static bool IsBindPressed(const bool (&key_down)[256], const std::string& cvar_val) {
-@@ -261,10 +268,10 @@
- 
-   // Mouse look is opt in. Without this gate, keyboard input alone would hide
-   // and lock the cursor, breaking the ImGui overlays.
--  QueueMouseCaptureUpdate(IsEnabled() && REXCVAR_GET(mnk_mouse) && IsMouseLookActive() &&
-+  QueueMouseCaptureUpdate(keyboard_translation_.load(std::memory_order_relaxed) && IsEnabled() && REXCVAR_GET(mnk_mouse) && IsMouseLookActive() &&
-                           has_focus_ && is_active());
- 
--  if (!is_active() || !has_focus_) {
-+  if (!is_active() || !has_focus_ || !keyboard_translation_.load(std::memory_order_relaxed)) {
-     if (out_state) {
-       std::memset(out_state, 0, sizeof(*out_state));
-       out_state->packet_number = packet_number_;
-@@ -518,11 +525,84 @@
-   }
- }
- 
-+void MnkInputDriver::SetKeyboardTranslation(bool enabled) {
-+  std::lock_guard lock(state_mutex_);
-+  if (keyboard_translation_.exchange(enabled, std::memory_order_relaxed) == enabled) return;
-+  for (size_t i = 0; i < 256; ++i) blocked_keys_[i] |= key_down_[i];
-+  std::memset(key_down_, 0, sizeof(key_down_));
-+  keystroke_queue_ = {};
-+  if (!attached_window_) return;
-+  if (keyboard_text_update_queued_.exchange(true, std::memory_order_relaxed)) return;
-+  attached_window_->app_context().CallInUIThreadDeferred([this] {
-+    keyboard_text_update_queued_.store(false, std::memory_order_relaxed);
-+    ApplyKeyboardTranslationFromUIThread();
++
++
++REX_TEST_CASE("original HUD retrieves physical text without exposing it to the title", "[kernel][xam][original-text-input]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    auto& xam = rex::xam::CurrentXAM();
++    auto& input = fixture.GetInput();
++    xam.AttachInput(&input);
++    rex::ScopeGuard detach([&] { xam.DetachInput(); });
++    auto& ui = xam.GetSystemUI();
++    REQUIRE(ui.RegisterSystemApp({5, 2, 0x1234, 0}) == 0);
++    REQUIRE(ui.BeginSystemUi(5, 2, 0));
++    REQUIRE(ui.SetSystemUiVisible(5));
++    REQUIRE(c.XAM("XamEnableSystemAppInput", {255, 1}) == 0);
++    c.XAM("XamInputSetKeyboardTranslationHud", {0});
++    rex::InputEvent event{.type = rex::InputEvent::Type::kKeyChar, .character = 0xE7};
++    input.OnInputEvent(event);
++    const auto stroke = c.Alloc(sizeof(rex::xam::X_INPUT_KEYSTROKE));
++    CHECK(c.XAM("XamInputGetKeystroke", {0, 3, stroke}) == rex::kernel::X_ERROR_EMPTY);
++    REQUIRE(c.XAM("XamInputGetKeystrokeHudEx", {255, 1, stroke}) == 0);
++    CHECK(c.Load32(stroke) == 0x00E700E7);
++    CHECK(c.Load32(stroke + 4) >> 16 == 1);
++    input.OnInputEvent(event);
++    c.XAM("XamInputSetKeyboardTranslationHud", {1});
++    CHECK(c.XAM("XamInputGetKeystrokeHudEx", {255, 1, stroke}) == rex::kernel::X_ERROR_EMPTY);
++    REQUIRE(ui.EndSystemUi(5));
 +  });
 +}
-+
-+void MnkInputDriver::ApplyKeyboardTranslationFromUIThread() {
-+  rex::ui::Window* window;
-+  bool text;
-+  {
-+    std::lock_guard lock(state_mutex_);
-+    window = attached_window_;
-+    text = !keyboard_translation_.load(std::memory_order_relaxed);
-+  }
-+  if (!window) return;
-+  // The original modal owns PC text before diagnostic overlays. Restore the
-+  // normal listener order when vk releases focus.
-+  window->AddInputListener(this, text ? std::numeric_limits<size_t>::max() : window_z_order());
-+  if (text && !keyboard_text_active_) {
-+    previous_text_input_active_ = window->IsTextInputActive();
-+    keyboard_text_active_ = true;
-+    window->SetTextInputActive(true);
-+  } else if (!text && keyboard_text_active_) {
-+    keyboard_text_active_ = false;
-+    window->SetTextInputActive(previous_text_input_active_);
-+  }
-+}
-+
-+// Control keys carry no character. Printable keys arrive via SDL text input,
-+// already translated by the PC layout/IME, preserving UTF-16 and accents.
-+void MnkInputDriver::EnqueueKeyboardControl(uint16_t key, bool down, bool repeat) {
-+  if (key != 8 && key != 9 && key != 13 && key != 27 && !(key >= 33 && key <= 46)) return;
-+  X_INPUT_KEYSTROKE stroke{};
-+  stroke.virtual_key = key;
-+  stroke.flags = down ? X_INPUT_KEYSTROKE_KEYDOWN : X_INPUT_KEYSTROKE_KEYUP;
-+  if (repeat) stroke.flags = uint16_t(stroke.flags) | X_INPUT_KEYSTROKE_REPEAT;
-+  keystroke_queue_.push(stroke);
-+}
-+
-+void MnkInputDriver::OnKeyChar(rex::ui::KeyEvent& e) {
-+  if (keyboard_translation_.load(std::memory_order_relaxed) || !has_focus_ || !is_active()) return;
-+  const auto character = uint16_t(e.virtual_key());
-+  if (character < 32 || e.is_ctrl_pressed() || e.is_alt_pressed()) return;
-+  std::lock_guard lock(state_mutex_);
-+  if (keyboard_translation_.load(std::memory_order_relaxed) ||
-+      (keyboard_key_ < 256 && blocked_keys_[keyboard_key_])) return;
-+  X_INPUT_KEYSTROKE stroke{};
-+  stroke.virtual_key = character >= 'a' && character <= 'z' ? character - ('a'-'A') : character;
-+  stroke.unicode = character;
-+  stroke.flags = X_INPUT_KEYSTROKE_KEYDOWN;
-+  keystroke_queue_.push(stroke);
-+  e.set_handled(true);
-+}
-+
- void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
-   if (!IsEnabled() || !has_focus_)
-     return;
-   std::lock_guard lock(state_mutex_);
-   uint16_t vk = static_cast<uint16_t>(e.virtual_key());
-+  if (vk < 256) {
-+    // Mode/focus changes never turn a held editing key into a title button.
-+    // A fresh DOWN also heals a release missed while the window was unfocused.
-+    if (blocked_keys_[vk] && e.prev_state()) return;
-+    blocked_keys_[vk] = false;
-+    keyboard_key_ = vk;
-+  }
-+  if (!keyboard_translation_.load(std::memory_order_relaxed)) {
-+    if (vk < 256) key_down_[vk] = true;
-+    EnqueueKeyboardControl(vk, true, e.prev_state()); e.set_handled(true); return;
-+  }
-   SetKeyState(vk, true);
- }
- 
-@@ -531,6 +611,13 @@
-     return;
-   std::lock_guard lock(state_mutex_);
-   uint16_t vk = static_cast<uint16_t>(e.virtual_key());
-+  if (vk < 256 && blocked_keys_[vk]) {
-+    blocked_keys_[vk] = false; key_down_[vk] = false; return;
-+  }
-+  if (!keyboard_translation_.load(std::memory_order_relaxed)) {
-+    if (vk < 256) key_down_[vk] = false;
-+    EnqueueKeyboardControl(vk, false, false); e.set_handled(true); return;
-+  }
-   SetKeyState(vk, false);
- }
- 
-@@ -605,8 +692,10 @@
-     std::lock_guard lock(state_mutex_);
-     bool previous[256];
-     std::memcpy(previous, key_down_, sizeof(previous));
-+    for (size_t i = 0; i < 256; ++i) blocked_keys_[i] |= key_down_[i];
-     std::memset(key_down_, 0, sizeof(key_down_));
--    QueueButtonTransitions(previous);
-+    if (!keyboard_translation_.load(std::memory_order_relaxed)) keystroke_queue_ = {};
-+    else QueueButtonTransitions(previous);
-     mouse_dx_ = 0.0f;
-     mouse_dy_ = 0.0f;
-   }
-diff --git a/include/rex/input/input_driver.h b/include/rex/input/input_driver.h
---- a/include/rex/input/input_driver.h
-+++ b/include/rex/input/input_driver.h
-@@ -44,6 +44,9 @@
-   virtual X_RESULT GetDeviceKeystroke(DeviceId id, uint32_t flags,
-                                       X_INPUT_KEYSTROKE* out_keystroke) = 0;
- 
-+  // Original XAM switches the host keyboard between pad shortcuts and text.
-+  virtual void SetKeyboardTranslation(bool /*enabled*/) {}
-+
-   virtual void OnWindowAvailable(rex::ui::Window* /*window*/) {}
- 
-   void set_is_active_callback(std::function<bool()> is_active_callback) {
-diff --git a/include/rex/input/input_system.h b/include/rex/input/input_system.h
---- a/include/rex/input/input_system.h
-+++ b/include/rex/input/input_system.h
-@@ -73,6 +73,7 @@
- 
-   void AddDriver(std::unique_ptr<InputDriver> driver);
-   void AttachWindow(rex::ui::Window* window);
-+  void SetKeyboardTranslation(bool enabled);
-   void SetActiveCallback(std::function<bool()> callback);
- 
-   /// Replaces any previous assignment. Call before the guest starts polling.
-@@ -90,6 +91,7 @@
-   InputDriver* DriverForDevice(DeviceId id);
-   const DeviceInfo* DeviceInfoFor(DeviceId id) const;
- 
-+  bool keyboard_translation_ = true;
-   rex::ui::Window* window_ = nullptr;
- 
-   std::vector<std::unique_ptr<InputDriver>> drivers_;
-diff --git a/include/rex/input/mnk/mnk_input_driver.h b/include/rex/input/mnk/mnk_input_driver.h
---- a/include/rex/input/mnk/mnk_input_driver.h
-+++ b/include/rex/input/mnk/mnk_input_driver.h
-@@ -45,6 +45,8 @@
-   void OnWindowAvailable(rex::ui::Window* window) override;
- 
-   // WindowInputListener
-+  void SetKeyboardTranslation(bool enabled) override;
-+  void OnKeyChar(rex::ui::KeyEvent& e) override;
-   void OnKeyDown(rex::ui::KeyEvent& e) override;
-   void OnKeyUp(rex::ui::KeyEvent& e) override;
-   void OnMouseDown(rex::ui::MouseEvent& e) override;
-@@ -58,6 +60,8 @@
- 
-  private:
-   bool IsEnabled() const;
-+  void ApplyKeyboardTranslationFromUIThread();
-+  void EnqueueKeyboardControl(uint16_t key, bool down, bool repeat);
-   void SetKeyState(uint16_t vk, bool down);
-   void QueueButtonTransitions(const bool (&previous)[256]);
-   void EnqueueKeystroke(uint16_t vk_pad, bool down);
-@@ -76,6 +80,11 @@
- 
-   std::mutex state_mutex_;
-   bool key_down_[256] = {};
-+  bool blocked_keys_[256] = {};
-+  uint16_t keyboard_key_ = 0;
-+  std::atomic<bool> keyboard_translation_{true};
-+  std::atomic<bool> keyboard_text_update_queued_{false};
-+  bool keyboard_text_active_ = false, previous_text_input_active_ = false;
- 
-   // Mouse delta tracking. Fractional because relative motion arrives in
-   // fractions of a pixel, and truncating each event drops slow movement.

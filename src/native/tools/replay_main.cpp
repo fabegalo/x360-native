@@ -16,21 +16,25 @@
 #include "../capture/frame_replay.h"
 #include "../commands/scanout_backend.h"
 #include "../../../tests/native/probe_main.h"
-#include <rex/cvar.h>
-#include <rex/kernel/init.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/ui/presenter.h>
-#include <rex/graphics/register_file.h>
+#include "../../gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/ppc/image.h>
+#include <rex/path_settings.h>
+#include <rex/string/text.h>
+#include <rex/logging/logger.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
+#include <gpu/xenos/host/presenter.h>
+#include <rex/xenos/register.h>
 #include <optional>
 #if X360N_NATIVE_VULKAN
 #include "../vulkan/vulkan_backend.h"
-#include <rex/ui/vulkan/provider.h>
+#include <gpu/xenos/host/vulkan/vulkan_provider.h>
 #endif
 #if X360N_NATIVE_D3D12
-#include <rex/ui/d3d12/d3d12_provider.h>
+#include <gpu/xenos/host/d3d12/d3d12_provider.h>
 #endif
-#include <fmt/format.h>
+#include <format>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -39,7 +43,7 @@
 #include <string>
 #include "../../supervisor/fs_io.h"
 using namespace x360n::native;
-using rex::X_STATUS;
+extern "C" rex::IInterface* ReXCreateInterface(const char*, rex::u32);
 namespace {
 std::string Narrow(const ProbeChar* text) { return std::filesystem::path(text).string(); }
 }
@@ -71,7 +75,7 @@ X360N_PROBE_MAIN {
     std::optional<capture::Reader> loaded;
     try {
       loaded.emplace(capture_path);
-      capture::ValidateFile(*loaded, rex::graphics::RegisterFile::kRegisterCount);
+      capture::ValidateFile(*loaded, rex::xenos::RegisterFile::kRegisterCount);
     } catch (const std::runtime_error& error) {
       std::cerr << "invalid capture: " << error.what() << '\n';
       return 2;
@@ -79,41 +83,48 @@ X360N_PROBE_MAIN {
     capture::Reader& reader = *loaded;
     if (backend_name.empty()) backend_name = reader.header().backend;
     x360n::io::create_directories(output);
-    rex::InitLogging((output / "replay.log").string().c_str());
-    rex::Runtime runtime(output, output / "user");
-    rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    if (runtime.Setup(std::move(config)) != X_STATUS_SUCCESS) throw std::runtime_error("runtime setup");
+    auto* module = static_cast<rex::IModule*>(ReXCreateInterface(
+        rex::IModule::kInterface.name, rex::IModule::kInterface.version));
+    if (!module) throw std::runtime_error("Native replay module unavailable");
+    // The linked Native module owns the settings consumed by this replay's backend.
+    x360n::GPUProbeApp app(output, "rexgpu-native", "native-" + backend_name, module);
+    std::vector<std::string> launch_options{
+        "--app.user_root=" + rex::string::PathToUTF8(output / "user"),
+        "--log.file_name=" + rex::string::PathToUTF8(std::filesystem::absolute(output / "replay.log"))};
     if (stats) {
-      // Counters with fence waits and GPU timestamps (renderer diagnostics).
-      rex::cvar::SetFlagByName("native_stats", "true");
-      rex::cvar::SetFlagByName("native_vulkan_perf", "true");
+      launch_options.emplace_back("--native_stats=true");
+      launch_options.emplace_back("--native_vulkan_perf=true");
     }
-    for (const auto& [name, value] : cvars)
-      if (!rex::cvar::SetFlagByName(name, value)) throw std::invalid_argument("unknown cvar or value: " + name);
-    std::unique_ptr<rex::ui::GraphicsProvider> provider;
+    for (const auto& [name, value] : cvars) launch_options.emplace_back("--" + name + "=" + value);
+    const auto initialized = app.Init(rex::CLIArgList::Parse(launch_options));
+    if (!initialized) throw std::runtime_error(initialized.error().GetDescription());
+    auto& graphics = static_cast<rex::gpu::IGraphicsDriver&>(app.GetProbeDriver());
+    auto* xenos = graphics.AsXenos();
+    if (!xenos) throw std::runtime_error("Native replay requires a Xenos-family driver");
+    auto& driver = *static_cast<rex::gpu::XenosGraphicsDriverBase*>(xenos);
+    const auto ready = graphics.SetSurface({});
+    if (!ready) throw std::runtime_error(ready.error().GetDescription());
+    auto* provider = driver.GetProvider();
+    if (!provider) throw std::runtime_error("Native replay graphics provider unavailable");
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    auto& paths = runtime.GetTitlePaths();
+    const auto game = paths.game_root.Set(output);
+    const auto entry = paths.entry.Set(std::string{});
+    if (!game || !entry) throw std::runtime_error("Native replay paths unavailable");
+    const auto runtime_loaded = runtime.Load();
+    if (!runtime_loaded) throw std::runtime_error(runtime_loaded.error().GetDescription());
+    auto& physical = runtime.GetPhysicalMemory();
+    auto& watch = runtime.GetPhysicalWriteWatch();
     std::unique_ptr<ScanoutBackend> backend;
 #if X360N_NATIVE_VULKAN
-    if (backend_name == "vulkan") {
-      provider = rex::ui::vulkan::VulkanProvider::Create(true, present);
-      if (!provider) throw std::runtime_error("Vulkan provider unavailable");
-      backend = CreateVulkanScanout(*provider);
-    }
+    if (backend_name == "vulkan") backend = CreateVulkanScanout(*provider, driver, watch);
 #endif
 #if X360N_NATIVE_D3D12
-    if (backend_name == "d3d12") {
-      provider = rex::ui::d3d12::D3D12Provider::Create();
-      if (!provider) throw std::runtime_error("D3D12 provider unavailable");
-      backend = CreateD3D12Scanout(*provider);
-    }
+    if (backend_name == "d3d12") backend = CreateD3D12Scanout(*provider, driver, watch);
 #endif
     if (!backend) throw std::runtime_error("backend '" + backend_name + "' is not built on this host");
-    // Offscreen presenter: gamma LUT, overlay plane and post effects run as in
-    // the title, and their output is compared with the capture's.
-    std::unique_ptr<rex::ui::Presenter> presenter;
-    if (present) {
-      presenter = provider->CreatePresenter();
-      if (!presenter) throw std::runtime_error("offscreen presenter unavailable");
-    }
+    auto* presenter = present ? driver.GetHostPresenter() : nullptr;
+    if (present && !presenter) throw std::runtime_error("offscreen presenter unavailable");
     x360n::io::ofstream csv(output / "frames.csv");
     csv << "pass," << FrameStatsCsvHeader() << '\n';
     ReplayOptions options;
@@ -123,7 +134,7 @@ X360N_PROBE_MAIN {
     if (drop_output && !present) throw std::invalid_argument("--drop-output needs the presenter");
     if (!present) std::cerr << "warning: --no-present: the composed image is not checked\n";
     options.tamper_memory_record = tamper_memory;
-    options.presenter = presenter.get();
+    options.presenter = presenter;
     std::vector<double> warm_frame_ms;
     // Means over warm passes (all passes when there is only one): the
     // renderer's cost per frame by phase, for bottleneck attribution.
@@ -143,12 +154,11 @@ X360N_PROBE_MAIN {
       add(all, frame);
     };
     const auto start = std::chrono::steady_clock::now();
-    const auto result = ReplayCapture(reader, *backend, *runtime.memory(), options);
+    const auto result = ReplayCapture(reader, *backend, physical, runtime.GetGuestHeap(), options);
     const double total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     backend->Drain();
     backend.reset();
-    presenter.reset();
-    provider.reset();
+    app.ReleaseProbeDriver();
     std::sort(warm_frame_ms.begin(), warm_frame_ms.end());
     // Nearest-rank percentile of the warm frames.
     auto percentile = [&](double q) {
@@ -167,8 +177,8 @@ X360N_PROBE_MAIN {
       bottleneck = std::max_element(std::begin(phases), std::end(phases))->second;
       if (m.gpu && mean(m.gpu_ms) >= 0.8 * mean(m.frame)) bottleneck = "gpu";
     }
-    auto optional = [](bool valid, double value) { return valid ? fmt::format("{:.3f}", value) : std::string("null"); };
-    const auto summary = fmt::format(
+    auto optional = [](bool valid, double value) { return valid ? std::format("{:.3f}", value) : std::string("null"); };
+    const auto summary = std::format(
         "{{\"frames\":{},\"frame_ms\":{:.3f},\"renderer_ms\":{:.3f},\"draw_ms\":{:.3f},\"resolve_ms\":{:.3f},"
         "\"sync_ms\":{:.3f},\"sample_ms\":{:.3f},\"present_ms\":{:.3f},\"shader_ms\":{:.3f},\"draws\":{:.1f},"
         "\"resolves\":{:.1f},\"guest_syncs\":{:.1f},\"submissions\":{:.2f},\"fence_waits\":{},\"fence_wait_ms\":{},"
@@ -178,8 +188,8 @@ X360N_PROBE_MAIN {
         optional(m.measured, mean(m.fence_waits)), optional(m.measured, mean(m.fence_ms)), optional(m.gpu, mean(m.gpu_ms)),
         optional(m.gpu, mean(m.frame) - mean(m.gpu_ms)), bottleneck);
     std::string mismatches;
-    for (const auto& text : result.mismatches) mismatches += fmt::format("{}\"{}\"", mismatches.empty() ? "" : ",", text);
-    const auto json = fmt::format(
+    for (const auto& text : result.mismatches) mismatches += std::format("{}\"{}\"", mismatches.empty() ? "" : ",", text);
+    const auto json = std::format(
         "{{\"capture\":\"{}\",\"backend\":\"{}\",\"passes\":{},\"frames\":{},\"visual_checked\":{},\"total_ms\":{:.3f},"
         "\"warm_frame_ms_p50\":{:.3f},\"warm_frame_ms_p95\":{:.3f},\"warm_frame_ms_p99\":{:.3f},\"equivalent\":{},\"repeatable\":{},"
         "\"frontbuffer_checks\":{},\"frontbuffer_mismatches\":{},\"written_checks\":{},\"written_mismatches\":{},"
@@ -191,8 +201,9 @@ X360N_PROBE_MAIN {
         result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, summary, mismatches);
     x360n::io::ofstream(output / "replay.json") << json;
     std::cout << json;
-    runtime.Shutdown();
-    rex::FlushLogging();
+    backend.reset(); // Release physical write watches before the canonical runtime unloads.
+    runtime.Unload();
+    app.Shutdown();
     return result.equivalent() && result.repeatable() ? 0 : 3;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

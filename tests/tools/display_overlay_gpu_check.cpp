@@ -4,7 +4,7 @@
 #include <wrl/client.h>
 #include <array>
 #include <cmath>
-#include <rex/graphics/display_overlay.h>
+#include <rex/xenos/display_overlay.h>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -18,18 +18,19 @@ void Check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D12 HRESULT
 // Offscreen compute only: no HWND, swapchain, guest image, profile or game.
 int main(int argc, char** argv) try {
   if (argc < 2 || argc > 3) return 2;
-  using namespace rex::graphics;
+  using namespace rex::gpu;
+  using namespace rex::xenos;
   RegisterFile regs{};
-  regs[XE_GPU_REG_D1OVL_ENABLE] = 1;
-  regs[XE_GPU_REG_D1OVL_SURFACE_ADDRESS] = 0x1000;
-  regs[XE_GPU_REG_D1OVL_PITCH] = 32;
-  regs[XE_GPU_REG_D1OVL_END] = (4 << 16) | 4;
+  regs[rex::xenos::Register::D1OVL_ENABLE] = 1;
+  regs[rex::xenos::Register::D1OVL_SURFACE_ADDRESS] = 0x1000;
+  regs[rex::xenos::Register::D1OVL_PITCH] = 32;
+  regs[rex::xenos::Register::D1OVL_END] = (4 << 16) | 4;
   auto plane = DecodeDisplayOverlay(regs);
   if (!plane.valid) throw std::runtime_error("Invalid fixture surface");
   // Negative control reproduces the previous scanout decoder, not a different shader.
   if (argc == 3 && std::string(argv[2]) == "--legacy-fetch") {
-    plane.fetch.endianness = xenos::Endian::k8in32;
-    plane.fetch.swizzle = xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA;
+    plane.fetch.endianness = rex::xenos::Endian::k8in32;
+    plane.fetch.swizzle = rex::xenos::REXGPU_SWIZZLE_RGBA;
   }
   // Little-endian ARGB surface words: transparent white, opaque red/blue,
   // translucent green, grayscale and a fully transparent colored texel.
@@ -75,7 +76,7 @@ int main(int argc, char** argv) try {
   uint8_t* data = nullptr; Check(upload->Map(0, nullptr, reinterpret_cast<void**>(&data)));
   for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x) {
     const float blue[]{0, 0, 1, 1};
-    const auto packed = xenos::GpuSwap(pixels[y * 4 + x], plane.fetch.endianness);
+    const auto packed = rex::xenos::GPUSwap(pixels[y * 4 + x], plane.fetch.endianness);
     std::memcpy(data + y * 256 + x * 16, blue, 16);
     std::memcpy(data + 1024 + y * 256 + x * 4, &packed, 4);
   }

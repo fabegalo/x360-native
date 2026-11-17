@@ -1,0 +1,391 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -97,6 +97,17 @@
+   std::optional<ContentDeviceInfo> GetDevice(u32 id) const override;
+   std::vector<ContentDeviceInfo> GetDevices() const override;
+   std::filesystem::path DeviceRoot(u32 id) const override;
++  struct TransferRequest {
++    std::atomic<bool> cancelled{false};
++    std::atomic<u32> worker_handle{0};
++    std::mutex mutex;
++    bool completed = false;
++  };
++  Result<std::shared_ptr<TransferRequest>> BeginTransfer(u32 overlapped);
++  bool CancelTransfer(u32 overlapped, bool wait);
++  void CancelAllTransfers();
++  void FinishTransfer(u32 overlapped, const std::shared_ptr<TransferRequest>& request,
++      const std::function<void()>& complete);
+   using TransferProgress = std::function<bool(u64, u64, bool)>;
+   enum class TransferStage { Prepared, PackagePublished, HeaderPublished, SourcePrepared, SourcePackageRetired, SourceHeaderRetired, SourceRetired };
+   using TransferCheckpoint = std::function<void(TransferStage)>;
+@@ -206,6 +217,9 @@
+   std::filesystem::path root_path_;
+   std::vector<ContentDeviceInfo> devices_;
+   bool devices_valid_ = true;
++  std::mutex transfers_mutex_;
++  std::unordered_map<u32, std::shared_ptr<TransferRequest>> transfers_;
++  bool transfers_stopped_ = false;
+   mutable std::mutex staging_mutex_, recovery_mutex_;
+   mutable std::unordered_map<std::filesystem::path, u32> active_transfers_;
+   mutable std::unordered_set<u32> recovered_devices_;
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -746,6 +746,53 @@
+ 
+ ContentManager::~ContentManager() = default;
+ 
++Result<std::shared_ptr<ContentManager::TransferRequest>> ContentManager::BeginTransfer(u32 overlapped) {
++  std::lock_guard lock(transfers_mutex_);
++  if (transfers_stopped_) return Err<std::shared_ptr<TransferRequest>>(kernel::XResultError(kernel::X_ERROR_CANCELLED));
++  auto request = std::make_shared<TransferRequest>();
++  if (!transfers_.emplace(overlapped, request).second) return Err<std::shared_ptr<TransferRequest>>(kernel::XResultError(kernel::X_ERROR_IO_PENDING));
++  return request;
++}
++
++bool ContentManager::CancelTransfer(u32 overlapped, bool wait) {
++  std::shared_ptr<TransferRequest> request;
++  {
++    std::lock_guard lock(transfers_mutex_);
++    const auto it = transfers_.find(overlapped);
++    if (it == transfers_.end()) return false;
++    request = it->second;
++    request->cancelled.store(true, std::memory_order_release);
++  }
++  // A progress callback cannot wait for the worker it is currently executing on.
++  if (wait && request->worker_handle.load(std::memory_order_acquire) !=
++                  title_.threads.GetCallingThread()->GetHandle()) {
++    for (;;) {
++      { std::lock_guard lock(request->mutex); if (request->completed) break; }
++      title_.threads.SleepCurrentThread(std::chrono::milliseconds(1));
++    }
++  }
++  return true;
++}
++
++void ContentManager::CancelAllTransfers() {
++  std::lock_guard lock(transfers_mutex_);
++  transfers_stopped_ = true;
++  for (const auto& [overlapped, request] : transfers_) request->cancelled.store(true, std::memory_order_release);
++}
++
++void ContentManager::FinishTransfer(u32 overlapped, const std::shared_ptr<TransferRequest>& request,
++    const std::function<void()>& complete) {
++  rex::ScopeGuard release([&] {
++    std::lock_guard request_lock(request->mutex);
++    std::lock_guard registry_lock(transfers_mutex_);
++    const auto it = transfers_.find(overlapped);
++    if (it != transfers_.end() && it->second == request) transfers_.erase(it);
++    request->completed = true;
++  });
++  // A new submission cannot reuse the OVERLAPPED before completion publication.
++  complete();
++}
++
+ bool ContentManager::ValidName(std::string_view name) {
+   if (name.empty() || name == "." || name == ".." || name.back() == '.' || name.back() == ' ') return false;
+   if (std::any_of(name.begin(), name.end(), [](unsigned char ch) { return ch >= 128; }) &&
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -96,6 +96,7 @@
+ }
+ 
+ void XAMState::ReleaseApps() {
++  content_manager_->CancelAllTransfers();
+   app_manager_.reset();
+ }
+ 
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -65,6 +65,7 @@
+ class SystemUIState {
+  public:
+   std::atomic<u32> launch_request_callback{0}, launch_request_internal_flags{0};
++  std::atomic<u32> content_change_callback{0};
+   std::function<u32()> launch_display_transition;
+   SystemUiInputState input_ownership;
+   std::function<void(u32)> capture_opening, capture_closing;
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -98,7 +98,7 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 7)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 8)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -41,6 +41,135 @@
+ namespace xam {
+ 
+ using namespace rex::kernel;
++
++void XamContentRegisterChangeCallback_entry(u32 callback) {
++  CurrentXAM().GetSystemUI().content_change_callback.store(callback);
++}
++
++static void NotifyContentChange(u32 reason, const XCONTENT_AGGREGATE_DATA& data) {
++  const auto callback = CurrentXAM().GetSystemUI().content_change_callback.load();
++  if (!callback) return;
++  auto& title = CurrentTitle();
++  auto* thread = title.threads.GetCallingThread();
++  if (!thread->CanCallGuestFunction(callback)) {
++    REXXAM_ERROR("Content change callback {:08X} is not registered in this title", callback);
++    return;
++  }
++  const auto item = title.heap.SystemHeapAlloc(512);
++  if (!item) { REXXAM_ERROR("Content change callback: allocation failed"); return; }
++  rex::ScopeGuard release([&] { title.heap.SystemHeapFree(item); });
++  auto* bytes = title.membase.TranslateVirtual(item);
++  std::memset(bytes, 0, 512);
++  std::memcpy(bytes, &data, sizeof(data));
++  if (reason == 0) {
++    std::array<u8, 36> attributes{};
++    if (!CurrentXAM().GetContentManager().GetContentAttributes(data, attributes.data())) {
++      std::memcpy(bytes + 0x148, attributes.data() + 28, 8);
++      std::memcpy(bytes + 0x150, attributes.data() + 4, 8);
++    }
++  }
++  u64 args[] = {reason, item};
++  thread->CallGuestFunction(callback, args);
++}
++
++// Retail 17559 816EEA78: optional owner/device pointers, a 512-byte item,
++// CopyProgressRoutine callback/context, reserved r8 and OVERLAPPED in r9.
++static u32 ContentTransfer(u32 owner_ptr, u32 device_ptr, u32 item, u32 callback,
++    u32 context, u32 overlapped, bool move) {
++  auto& title = CurrentTitle();
++  auto& manager = CurrentXAM().GetContentManager();
++  const auto readable = [&](u32 address, u32 size) {
++    return address && title.heap.IsGuestRangeAccessible(address, size, kMemoryProtectRead);
++  };
++  if ((!owner_ptr && !device_ptr) || !readable(item, 512) ||
++      (owner_ptr && !readable(owner_ptr, 8)) || (device_ptr && !readable(device_ptr, 4)) ||
++      (overlapped && !title.heap.IsGuestRangeAccessible(overlapped, sizeof(XOVERLAPPED),
++          kMemoryProtectRead | kMemoryProtectWrite))) return X_ERROR_INVALID_PARAMETER;
++  std::shared_ptr<ContentManager::TransferRequest> request;
++  if (overlapped) {
++    auto registered = manager.BeginTransfer(overlapped);
++    if (!registered) return kernel::ToXResult(registered);
++    request = *registered;
++  }
++  XCONTENT_AGGREGATE_DATA source;
++  std::memcpy(&source, title.membase.TranslateVirtual(item), sizeof(source));
++  const auto user = CurrentXAM().GetUserProfile().GetXUID();
++  const u64 owner = owner_ptr ? memory::load_and_swap<u64>(title.membase.TranslateVirtual(owner_ptr)) : 0;
++  const u32 device = device_ptr ? memory::load_and_swap<u32>(title.membase.TranslateVirtual(device_ptr)) : u32(source.device_id);
++  auto run = [&manager, &title, source, user, owner, device, move, callback, context, request]() -> u32 {
++    ContentManager::TransferProgress progress;
++    if (callback || request) {
++      progress = [&title, callback, context, request, quiet = false](u64 done, u64 total, bool first) mutable {
++        if (request && request->cancelled.load(std::memory_order_acquire)) return false;
++        if (!callback || quiet) return true;
++        u64 args[] = {total, done, total, done, 1, first ? 1u : 0u, 0, 0, context};
++        u64 reply = 0;
++        if (!title.threads.GetCallingThread()->CallGuestFunction(callback, args, &reply)) return false;
++        quiet = u32(reply) == 3;
++        return (u32(reply) == 0 || quiet) && !(request && request->cancelled.load(std::memory_order_acquire));
++      };
++    }
++    bool committed = false, removed = false;
++    const auto result = manager.TransferContent(user, source, device, owner, move, progress, &committed, {}, &removed);
++    if (committed) {
++      auto destination = source;
++      destination.device_id = device;
++      destination.xuid = owner ? owner : ((source.xuid && source.xuid != u64(-1)) ? u64(source.xuid) : user);
++      NotifyContentChange(0, destination);
++      if (move && removed) NotifyContentChange(1, source);
++    }
++    return result;
++  };
++  if (!overlapped) return run();
++  title.overlapped_dispatcher.Publish([&] {
++    auto* io = title.membase.TranslateVirtual<XOVERLAPPED*>(overlapped);
++    XOverlappedSetResult(io, X_ERROR_IO_PENDING);
++    XOverlappedSetContext(io, title.threads.GetCallingThread()->GetHandle());
++  });
++  auto finish = [&manager, &title, overlapped, request](u32 result) {
++    manager.FinishTransfer(overlapped, request, [&] {
++      title.overlapped_dispatcher.Complete(overlapped,
++          {.result = result, .extended_error = u32(XHRESULTFromWin32(result)), .length = 0, .preserve_context = true});
++    });
++  };
++  // Long content copies must not block the kernel's deferred completion dispatcher.
++  auto launched = title.threads.LaunchHostThread("XAM content transfer", 256 * 1024,
++      [run = std::move(run), request, finish]() {
++        request->worker_handle.store(CurrentTitle().threads.GetCallingThread()->GetHandle(), std::memory_order_release);
++        u32 result;
++        try { result = run(); }
++        catch (...) { finish(X_ERROR_CANCELLED); throw; }
++        finish(result);
++        return 0;
++      });
++  if (!launched) { finish(X_ERROR_FUNCTION_FAILED); return X_ERROR_FUNCTION_FAILED; }
++  kernel::CloseOwned(title.objects, *launched);
++  return X_ERROR_IO_PENDING;
++}
++
++u32 XamContentCopyInternal_entry(u32 owner, u32 device, u32 item, u32 callback,
++    u32 context, [[maybe_unused]] u32 reserved, u32 overlapped) {
++  return ContentTransfer(owner, device, item, callback, context, overlapped, false);
++}
++u32 XamContentMoveInternal_entry(u32 owner, u32 device, u32 item, u32 callback,
++    u32 context, [[maybe_unused]] u32 reserved, u32 overlapped) {
++  return ContentTransfer(owner, device, item, callback, context, overlapped, true);
++}
++
++X_HRESULT DispatchContentTransfer(u32 packet, u32 length) {
++  auto& title = CurrentTitle();
++  if (length != 552 || !packet || !title.heap.IsGuestRangeAccessible(packet, length, kMemoryProtectRead))
++    return X_E_INVALIDARG;
++  const auto word = [&](u32 offset) { return memory::load_and_swap<u32>(title.membase.TranslateVirtual(packet + offset)); };
++  const auto flags = word(532);
++  if ((flags & ~7u) || !(flags & 6u)) return X_E_INVALIDARG;
++  // Meaning of this extra service argument remains unverified.
++  if (word(544)) return XHRESULTFromWin32(50);
++  const auto result = ContentTransfer(flags & 4 ? packet : 0, flags & 2 ? packet + 8 : 0,
++      packet + 16, word(536), word(540), word(528), (flags & 1) != 0);
++  return result == X_ERROR_IO_PENDING ? X_E_SUCCESS : XHRESULTFromWin32(result);
++}
++
+ 
+ u32 XamContentGetAttributesInternal_entry(MappedVoid content, MappedVoid attributes, MappedVoid overlapped) {
+   u32 result = kernel::X_ERROR_INVALID_PARAMETER;
+@@ -521,8 +650,9 @@
+   kernel::XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.As<kernel::XCONTENT_DATA*>();
+   if (const auto error = ContentUser(user_index, content_data, xuid)) return error;
+ 
+-  auto result =
+-      kernel::ToXResult(CurrentXAM().GetContentManager().DeleteContent(xuid, content_data));
++  bool removed = false;
++  const auto result = CurrentXAM().GetContentManager().DeleteContent(xuid, content_data, &removed);
++  if (removed) NotifyContentChange(1, content_data);
+ 
+   if (overlapped_ptr) {
+     CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr.GetGuestAddress(),
+@@ -534,13 +664,16 @@
+ }
+ 
+ u32 XamContentDeleteInternal_entry(MappedVoid content_data_ptr, MappedVoid overlapped_ptr) {
++  if (!content_data_ptr || !CurrentTitle().heap.IsGuestRangeAccessible(content_data_ptr.GetGuestAddress(),
++      sizeof(kernel::XCONTENT_AGGREGATE_DATA), kernel::kMemoryProtectRead)) return kernel::X_ERROR_INVALID_PARAMETER;
+   // Internal variants wrap the public call with 0xFE as the user index.
+   u64 xuid = CurrentXAM().GetUserProfile().GetXUID();
+   kernel::XCONTENT_AGGREGATE_DATA content_data =
+       *content_data_ptr.As<kernel::XCONTENT_AGGREGATE_DATA*>();
+ 
+-  auto result =
+-      kernel::ToXResult(CurrentXAM().GetContentManager().DeleteContent(xuid, content_data));
++  bool removed = false;
++  const auto result = CurrentXAM().GetContentManager().DeleteContent(xuid, content_data, &removed);
++  if (removed) NotifyContentChange(1, content_data);
+ 
+   if (overlapped_ptr) {
+     CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr.GetGuestAddress(),
+@@ -665,3 +798,7 @@
+ REX_XAM_BODY(__imp__XamContentGetMetaDataInternal, rex::xam::XamContentGetMetaDataInternal_entry)
+ 
+ REX_XAM_BODY(__imp__XamLoaderRegisterLaunchRequestCallback, rex::xam::XamLoaderRegisterLaunchRequestCallback_entry)
++
++REX_XAM_BODY(__imp__XamContentCopyInternal, rex::xam::XamContentCopyInternal_entry)
++REX_XAM_BODY(__imp__XamContentMoveInternal, rex::xam::XamContentMoveInternal_entry)
++REX_XAM_BODY(__imp__XamContentRegisterChangeCallback, rex::xam::XamContentRegisterChangeCallback_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1047,7 +1047,6 @@
+ REX_EXPORT_STUB(__imp__XamAvatarSetMocks);
+ REX_EXPORT_STUB(__imp__XamAvatarWearNow);
+ REX_EXPORT_STUB(__imp__XamContentClosePackageFile);
+-REX_EXPORT_STUB(__imp__XamContentCopyInternal);
+ REX_EXPORT_STUB(__imp__XamContentCreateAndMountPackage);
+ REX_EXPORT_STUB(__imp__XamContentCreateEnumeratorInternal);
+ REX_EXPORT_STUB(__imp__XamContentDismountAndClosePackage);
+@@ -1071,11 +1070,9 @@
+ REX_EXPORT_STUB(__imp__XamContentLockUnlockPackageHeaders);
+ REX_EXPORT_STUB(__imp__XamContentMountInstalledGame);
+ REX_EXPORT_STUB(__imp__XamContentMountPackage);
+-REX_EXPORT_STUB(__imp__XamContentMoveInternal);
+ REX_EXPORT_STUB(__imp__XamContentOpenFileInternal);
+ REX_EXPORT_STUB(__imp__XamContentOpenPackageFile);
+ REX_EXPORT_STUB(__imp__XamContentQueryLicenseInternal);
+-REX_EXPORT_STUB(__imp__XamContentRegisterChangeCallback);
+ REX_EXPORT_STUB(__imp__XamContentResolveInternal);
+ REX_EXPORT_STUB(__imp__XamContentSetAttributes);
+ REX_EXPORT_STUB(__imp__XamContentSetMediaMetaDataInternal);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -429,3 +429,7 @@
+ 
+ REX_XAM_FORWARD(__imp__XamContentGetDefaultDevice)
+ REX_XAM_FORWARD(__imp__XamContentGetLocalizedDeviceData)
++
++REX_XAM_FORWARD(__imp__XamContentCopyInternal)
++REX_XAM_FORWARD(__imp__XamContentMoveInternal)
++REX_XAM_FORWARD(__imp__XamContentRegisterChangeCallback)
+diff --git a/src/xam/app/xam_app.cpp b/src/xam/app/xam_app.cpp
+--- a/src/xam/app/xam_app.cpp
++++ b/src/xam/app/xam_app.cpp
+@@ -30,6 +30,7 @@
+ namespace xam {
+ 
+ using namespace rex::kernel;
++X_HRESULT DispatchContentTransfer(u32 packet, u32 length);
+ namespace apps {
+ using namespace rex::kernel;
+ 
+@@ -39,6 +40,7 @@
+ kernel::X_HRESULT XAMApp::DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) {
+   auto buffer = membase_.TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x0002000C: return DispatchContentTransfer(buffer_ptr, buffer_length);
+     case 0x0002100B:
+     case 0x00021005:
+     case 0x00021010:
+diff --git a/src/xam/xam_msg.cpp b/src/xam/xam_msg.cpp
+--- a/src/xam/xam_msg.cpp
++++ b/src/xam/xam_msg.cpp
+@@ -59,6 +59,13 @@
+ kernel::X_HRESULT XMsgStartIORequestEx(u32 app, u32 message, u32 overlapped_ptr, u32 buffer_ptr,
+                                        u32 buffer_length,
+                                        [[maybe_unused]] XMSGSTARTIOREQUEST_UNKNOWNARG* unknown) {
++  if (app == 0xFE && message == 0x2000C) {
++    // The packet owns the pending operation; XMsg acknowledges without completing it.
++    if (buffer_length != 552 || !buffer_ptr || !AchievementGuestSpan(buffer_ptr, buffer_length, kernel::kMemoryProtectRead) ||
++        memory::load_and_swap<u32>(CurrentTitle().membase.TranslateVirtual(buffer_ptr + 528)) != overlapped_ptr)
++      return kernel::X_E_INVALIDARG;
++    return CurrentXAM().GetAppManager().DispatchMessageAsync(app, message, buffer_ptr, buffer_length);
++  }
+   if (app == 0xFB && message == 0xB0008) {
+     if (overlapped_ptr && !AchievementGuestSpan(overlapped_ptr, sizeof(kernel::XOVERLAPPED),
+         kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite)) return kernel::X_E_INVALIDARG;
+@@ -103,12 +110,14 @@
+ }
+ 
+ u32 XMsgCancelIORequest_entry(GuestPtrT<kernel::XOVERLAPPED> overlapped_ptr, u32 wait) {
+-  kernel::X_HANDLE event_handle = kernel::XOverlappedGetEvent(overlapped_ptr);
+-  if (event_handle && wait) {
+-    CurrentTitle().threads.GetObjectWaiter().WaitGuestObject(event_handle, 0, 0, true, nullptr);
+-  }
+-
+-  return 0;
++  if (!overlapped_ptr || !CurrentTitle().heap.IsGuestRangeAccessible(overlapped_ptr.GetGuestAddress(),
++      sizeof(kernel::XOVERLAPPED), kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  if (CurrentXAM().GetContentManager().CancelTransfer(overlapped_ptr.GetGuestAddress(), wait != 0))
++    return kernel::X_ERROR_SUCCESS;
++  const auto result = CurrentTitle().overlapped_dispatcher.Observe([&] { return kernel::XOverlappedGetResult(overlapped_ptr); });
++  return result != kernel::X_ERROR_IO_PENDING ? kernel::X_ERROR_SUCCESS : 50;
++
+ }
+ 
+ u32 XMsgCompleteIORequest_entry(GuestPtrT<kernel::XOVERLAPPED> overlapped_ptr, u32 result,

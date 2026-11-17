@@ -1,17 +1,20 @@
 // patch 0195: with ROV/FSI, a color target aliasing the depth buffer disables
 // depth/stencil only if it writes bits those tests use (Xenia Canary
 // 9da693480). CPU-only.
-#include <rex/graphics/pipeline/render_target/cache.h>
+#include "gpu/xenos/pipeline/render_target/cache.h"
+#include <catch2/catch_test_macros.hpp>
 
 #include <iostream>
 
-using namespace rex::graphics;
+using namespace rex::gpu;
+namespace xenos = rex::xenos;
+namespace reg = rex::xenos::reg;
 
 namespace {
 bool Overlaps(xenos::ColorRenderTargetFormat format, uint32_t write_mask, bool z, bool stencil) {
   float clamp[4];
   uint32_t keep_low, keep_high;
-  RenderTargetCache::GetPSIColorFormatInfo(format, write_mask, clamp[0], clamp[1], clamp[2],
+  RenderTargetCache::GetPSIColorClampsAndKeepMasks(format, write_mask, clamp[0], clamp[1], clamp[2],
                                            clamp[3], keep_low, keep_high);
   reg::RB_DEPTHCONTROL depth_control{};
   depth_control.z_enable = z;
@@ -20,14 +23,10 @@ bool Overlaps(xenos::ColorRenderTargetFormat format, uint32_t write_mask, bool z
 }
 }  // namespace
 
-int main() {
-  int failures = 0, checks = 0;
-  auto check = [&](bool ok, const char* name) {
-    ++checks;
-    if (!ok) {
-      ++failures;
-      std::cerr << "FAIL " << name << '\n';
-    }
+TEST_CASE("Aliased color writes preserve independent depth and stencil bits", "[sdk][gpu][edram-alias]") {
+  auto check = [](bool ok, const char* name) {
+    INFO(name);
+    CHECK(ok);
   };
   constexpr auto k8888 = xenos::ColorRenderTargetFormat::k_8_8_8_8;
   // Red of 8_8_8_8 is bits 0:7, the stencil byte of a D24S8 sample.
@@ -38,6 +37,4 @@ int main() {
   check(!Overlaps(k8888, 0b0000, true, true), "no color write keeps both tests");
   check(Overlaps(xenos::ColorRenderTargetFormat::k_16_16_16_16, 0b1000, true, false),
         "64bpp writes are conservatively overlapping");
-  std::cout << (checks - failures) << '/' << checks << " checks passed\n";
-  return failures ? 1 : 0;
 }

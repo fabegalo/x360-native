@@ -5,8 +5,9 @@
 #include <memory>
 #include <span>
 #include <vector>
-#include <rex/graphics/command_processor.h>
-namespace rex::ui { class GraphicsProvider; class Presenter; }
+#include <gpu/xenos/command_processor.h>
+#include <gpu/xenos/xenos_settings.h>
+namespace rex::gpu { class GraphicsProvider; class Presenter; }
 namespace x360n::native {
 // Guest-observable point that requires recorded resolve results in guest memory.
 enum GuestSync : unsigned { kGuestSyncEvent, kGuestSyncPacket, kGuestSyncWait, kGuestSyncBufferEnd, kGuestSyncPresent, kGuestSyncSources };
@@ -36,7 +37,7 @@ class ScanoutBackend {
   virtual ~ScanoutBackend() = default;
   // lut: 256 packed RGB10 entries for RGBA8; 128 RGB base/delta triples for RGB10A2.
   // overlay/overlay_pixels: enabled D1OVL plane and its guest surface, or null.
-  virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
+  virtual void Present(rex::gpu::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut, const ScanoutOverlay* overlay,
                        const void* overlay_pixels, ScanoutPostEffect = ScanoutPostEffect::kNone) = 0;
   virtual void Drain() = 0;
@@ -47,10 +48,10 @@ class ScanoutBackend {
   // The command processor reads guest memory: only overlapping resolve
   // results must be in guest memory first.
   virtual void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) = 0;
-  virtual rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t) = 0;
-  virtual void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
-      rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest) = 0;
-  virtual void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&) = 0;
+  virtual rex::gpu::Shader* LoadShader(rex::xenos::ShaderType, const uint32_t*, uint32_t) = 0;
+  virtual void Draw(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&, rex::gpu::Shader*, rex::gpu::Shader*,
+      rex::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest) = 0;
+  virtual void Resolve(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&) = 0;
   // Snapshot cumulative guest sample counters, waiting for counted work only.
   // No shader instrumentation is used when no query remains active.
   virtual SampleCounts ReadSampleCounts(bool counting_after) = 0;
@@ -68,6 +69,6 @@ class ScanoutBackend {
   // Cumulative counters (native_stats / native_vulkan_perf enable timing).
   virtual BackendCounters Counters() { return {}; }
 };
-using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::ui::GraphicsProvider&);
-std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider);
+using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::gpu::GraphicsProvider&, const rex::gpu::XenosSettings&, rex::IPhysicalWriteWatch&);
+std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::gpu::GraphicsProvider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch);
 }

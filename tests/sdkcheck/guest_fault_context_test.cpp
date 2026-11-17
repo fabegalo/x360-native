@@ -2,9 +2,10 @@
 #include "../../titles/common/guest_fault_context.h"
 #include "../supervisor/scratch.h"
 #include "child_process.h"
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
+#include "kernel/kernel_fixture.h"
 #include <fstream>
+#include <charconv>
+#include <format>
 
 namespace {
 struct Directory {
@@ -43,7 +44,18 @@ TEST_CASE("Guest fault diagnostic records PPC context without handling the real 
     } else {
       CHECK(result.exit_code == 0xC0000005u);
       REQUIRE(result.crash.captured);
-      CHECK(result.crash.access == "read 0x0000000100000005");
+      const auto stdout_text = Read(spec.stdout_file);
+      constexpr std::string_view marker = "Guest memory mapped at virtual base 0x";
+      const auto start = stdout_text.find(marker);
+      REQUIRE(start != std::string::npos);
+      const auto offset = start + marker.size();
+      REQUIRE(stdout_text.size() >= offset + 16);
+      uint64_t guest_base = 0;
+      const auto parsed = std::from_chars(stdout_text.data() + offset,
+          stdout_text.data() + offset + 16, guest_base, 16);
+      REQUIRE(parsed.ec == std::errc{});
+      REQUIRE(parsed.ptr == stdout_text.data() + offset + 16);
+      CHECK(result.crash.access == std::format("read 0x{:016x}", guest_base + 5));
       CHECK_FALSE(result.crash.frames.empty());
     }
     const auto path = root / "fault.ppc.txt";
@@ -74,22 +86,19 @@ TEST_CASE("Guest fault diagnostic records PPC context without handling the real 
 TEST_CASE("Guest fault diagnostic preserves previous evidence and rejects unavailable destinations",
           "[sdk][guest-fault-context]") {
   Directory directory;
-  rex::Runtime runtime(directory.path, directory.path);
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(runtime.Setup(std::move(config)) == 0);
+  rex::test::KernelFixture fixture;
+  auto& runtime = fixture.GetRuntime();
   const auto path = directory.path / "existing.txt";
   { std::ofstream file(path); file << "preserve"; }
   x360n::GuestFaultContext diagnostic;
-  CHECK_FALSE(diagnostic.Start(*runtime.memory(), path));
+  CHECK_FALSE(diagnostic.Start(runtime, path));
   CHECK(Read(path) == "preserve");
-  CHECK_FALSE(diagnostic.Start(*runtime.memory(), directory.path / "missing" / "fault.txt"));
-  CHECK_FALSE(diagnostic.Start(*runtime.memory(), {}));
-  REQUIRE(diagnostic.Start(*runtime.memory(), directory.path / "new.txt"));
-  CHECK_FALSE(diagnostic.Start(*runtime.memory(), directory.path / "other.txt"));
+  CHECK_FALSE(diagnostic.Start(runtime, directory.path / "missing" / "fault.txt"));
+  CHECK_FALSE(diagnostic.Start(runtime, {}));
+  REQUIRE(diagnostic.Start(runtime, directory.path / "new.txt"));
+  CHECK_FALSE(diagnostic.Start(runtime, directory.path / "other.txt"));
   CHECK_FALSE(std::filesystem::exists(directory.path / "other.txt"));
   diagnostic.Stop();
   diagnostic.Stop();
-  REQUIRE(diagnostic.Start(*runtime.memory(), directory.path / "after-stop.txt"));
+  REQUIRE(diagnostic.Start(runtime, directory.path / "after-stop.txt"));
 }

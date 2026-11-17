@@ -1,6 +1,6 @@
 #include "child_process.h"
 
-#include <fmt/format.h>
+#include <format>
 #include <algorithm>
 #include <cstring>
 #include <unordered_set>
@@ -82,9 +82,9 @@ std::string DescribeExitCode(uint32_t code) {
     case 0xC0000409: return "STATUS_STACK_BUFFER_OVERRUN (also __fastfail / abort)";
     default: break;
   }
-  if ((code & 0xC0000000u) == 0xC0000000u) return fmt::format("NTSTATUS error 0x{:08X}", code);
+  if ((code & 0xC0000000u) == 0xC0000000u) return std::format("NTSTATUS error 0x{:08X}", code);
 #endif
-  return fmt::format("exit code {}", int32_t(code));
+  return std::format("exit code {}", int32_t(code));
 }
 
 #ifdef _WIN32
@@ -104,7 +104,7 @@ struct Handle {
 };
 
 std::string LastError(const char* what) {
-  return fmt::format("{} failed (Win32 error {})", what, GetLastError());
+  return std::format("{} failed (Win32 error {})", what, GetLastError());
 }
 
 HANDLE OpenForChild(const std::filesystem::path& p, bool write) {
@@ -138,7 +138,7 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
     const char* kind = er.ExceptionInformation[0] == 0   ? "read"
                        : er.ExceptionInformation[0] == 8 ? "execute"
                                                          : "write";
-    crash.access = fmt::format("{} 0x{:016X}", kind, uint64_t(er.ExceptionInformation[1]));
+    crash.access = std::format("{} 0x{:016X}", kind, uint64_t(er.ExceptionInformation[1]));
   }
 
   Handle thread(OpenThread(THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, ev.dwThreadId));
@@ -232,7 +232,7 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
       break;
     }
     DWORD64 pc = frame.AddrPC.Offset;
-    std::string line = fmt::format("#{:<2} 0x{:016X}", i, pc);
+    std::string line = std::format("#{:<2} 0x{:016X}", i, pc);
     IMAGEHLP_MODULEW64 mod{};
     mod.SizeOfStruct = sizeof(mod);
     std::string module = SymGetModuleInfoW64(process, pc, &mod) ? WideToUtf8(mod.ModuleName) : "?";
@@ -242,15 +242,15 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
     sym->MaxNameLen = 512;
     DWORD64 disp = 0;
     if (SymFromAddrW(process, pc, &disp, sym)) {
-      line += fmt::format(" {}!{}+0x{:X}", module, WideToUtf8(sym->Name), disp);
+      line += std::format(" {}!{}+0x{:X}", module, WideToUtf8(sym->Name), disp);
     } else {
-      line += fmt::format(" {}+0x{:X}", module, pc - (mod.BaseOfImage ? mod.BaseOfImage : pc));
+      line += std::format(" {}+0x{:X}", module, pc - (mod.BaseOfImage ? mod.BaseOfImage : pc));
     }
     IMAGEHLP_LINEW64 src{};
     src.SizeOfStruct = sizeof(src);
     DWORD line_disp = 0;
     if (SymGetLineFromAddrW64(process, pc, &line_disp, &src)) {
-      line += fmt::format(" ({}:{})", WideToUtf8(src.FileName), src.LineNumber);
+      line += std::format(" ({}:{})", WideToUtf8(src.FileName), src.LineNumber);
     }
     crash.frames.push_back(std::move(line));
   }

@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(../../cmake/sdk/x360n_title_sdk.cmake)
-x360n_include_rexglue(generated/rexglue.cmake)
+x360n_setup_rexglue(${PROJECT_NAME} OUTPUT_DIR generated/default)
 
 # x360-native: fixes for the pinned SDK commit, applied from outside the SDK
 # tree (see cmake/sdk/x360n_sdk_backports.cmake). Only meaningful with REXSDK_DIR.
@@ -22,6 +22,7 @@ endif()
 set(CASTLECRASHERS_SOURCES
     src/main.cpp
     ../common/launch_handoff.cpp
+    ../common/guest_fault_context.cpp
 )
 
 if(WIN32)
@@ -32,10 +33,10 @@ endif()
 
 # GPU emulation is a runtime-loaded plugin (cvar gpu_plugin, empty = disabled);
 # stage it next to the executable so --gpu_plugin=xenos can load it.
-rexglue_setup_target(castle_crashers GPU_PLUGINS xenos)
+rexglue_setup_target(castle_crashers )
 
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every
 # build, not only when it relinks (see cmake/sdk/x360n_sdk_backports.cmake).
 if(REXSDK_DIR)
-    x360n_stage_runtime_dlls(castle_crashers PLUGIN_TARGETS rexgpu-xenos)
+    x360n_stage_runtime_dlls(castle_crashers )
 endif()

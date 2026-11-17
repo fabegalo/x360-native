@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/graphics/memexport_readback.h>
+#include "gpu/xenos/memexport_readback.h"
 #include <array>
 #include <limits>
 
-using namespace rex::graphics;
-using Range = draw_util::MemExportRange;
+using namespace rex::gpu;
+using Range = draw_state::MemExportRange;
 
-TEST_CASE("MEMEXPORT snapshot merge preserves unwritten 8 and 16 bit neighbors", "[memexport]") {
+TEST_CASE("MEMEXPORT snapshot merge preserves unwritten 8 and 16 bit neighbors", "[sdk][gpu][memexport]") {
   const std::array<uint8_t, 9> before{1, 2, 3, 4, 5, 6, 7, 8, 9};
   const std::array<uint8_t, 9> after{1, 42, 3, 4, 64, 65, 7, 8, 9};
   std::array<uint8_t, 9> guest{91, 92, 93, 94, 95, 96, 97, 98, 99};
@@ -15,7 +15,7 @@ TEST_CASE("MEMEXPORT snapshot merge preserves unwritten 8 and 16 bit neighbors",
   REQUIRE(guest == expected);
 }
 
-TEST_CASE("MEMEXPORT delayed slots require identical complete range layouts", "[memexport]") {
+TEST_CASE("MEMEXPORT delayed slots require identical complete range layouts", "[sdk][gpu][memexport]") {
   const std::vector<Range> first{Range{0x100, 16}, Range{0x200, 16}};
   const std::vector<Range> different_second{Range{0x100, 16}, Range{0x300, 16}};
   const std::vector<Range> different_lengths{Range{0x100, 8}, Range{0x200, 24}};
@@ -25,7 +25,7 @@ TEST_CASE("MEMEXPORT delayed slots require identical complete range layouts", "[
   REQUIRE_FALSE(SameMemexportReadbackRanges(first, {Range{0x100, 32}}));
 }
 
-TEST_CASE("MEMEXPORT readback allocation is exact and bounded", "[memexport]") {
+TEST_CASE("MEMEXPORT readback allocation is exact and bounded", "[sdk][gpu][memexport]") {
   uint32_t size = 0;
   REQUIRE(GetMemexportReadbackSize({Range{0x100, 1}, Range{0x200, 2}, Range{0x300, 5}}, size));
   REQUIRE(size == 8);

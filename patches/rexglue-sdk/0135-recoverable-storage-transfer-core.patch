@@ -1,0 +1,645 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -12,6 +12,9 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <functional>
++#include <condition_variable>
++#include <unordered_set>
+ #include <filesystem>
+ #include <memory>
+ #include <optional>
+@@ -94,6 +97,13 @@
+   std::optional<ContentDeviceInfo> GetDevice(u32 id) const override;
+   std::vector<ContentDeviceInfo> GetDevices() const override;
+   std::filesystem::path DeviceRoot(u32 id) const override;
++  using TransferProgress = std::function<bool(u64, u64, bool)>;
++  enum class TransferStage { Prepared, PackagePublished, HeaderPublished, SourcePrepared, SourcePackageRetired, SourceHeaderRetired, SourceRetired };
++  using TransferCheckpoint = std::function<void(TransferStage)>;
++  u32 TransferContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& source,
++      u32 destination_device, u64 destination_xuid, bool move,
++      const TransferProgress& progress = {}, bool* destination_committed = nullptr,
++      const TransferCheckpoint& checkpoint = {}, bool* source_removed = nullptr);
+   void RetireStaleSaves();
+   static bool ValidName(std::string_view name);
+   u32 FlushContent(std::string_view root_name);
+@@ -194,6 +204,17 @@
+   std::filesystem::path root_path_;
+   std::vector<ContentDeviceInfo> devices_;
+   bool devices_valid_ = true;
++  mutable std::mutex staging_mutex_, recovery_mutex_;
++  mutable std::unordered_map<std::filesystem::path, u32> active_transfers_;
++  mutable std::unordered_set<u32> recovered_devices_;
++  std::atomic<u64> transfer_sequence_{0};
++  u32 RecoverTransferStagingLocked(const ContentDeviceInfo& device) const;
++  u32 RecoverTransferStaging(const ContentDeviceInfo& device) const;
++  bool SignedInProfile(const kernel::XCONTENT_AGGREGATE_DATA& data) const;
++  u32 RetireContent(const ContentDeviceInfo& device, const kernel::XCONTENT_AGGREGATE_DATA& data,
++      const std::filesystem::path& package, const std::filesystem::path& header,
++      const TransferCheckpoint& checkpoint, bool& removed, bool require_package);
++
+   std::unordered_map<u32, std::shared_ptr<std::recursive_mutex>> volume_locks_;
+   rex::xam::UserProfile& user_profile_;
+ 
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -271,6 +271,7 @@
+     u64 xuid = 0;
+     std::string name;
+     u32 signin_state = 0;
++    u32 device_id = 1;
+   };
+   REX_XAM_API Identity identity() const;
+   u64 GetXUID() const { std::lock_guard lock(identity_mutex_); return identity_.xuid; }
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -98,7 +98,7 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 6)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 7)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -12,6 +12,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
++#include <rex/hash.h>
+ #include <toml++/toml.hpp>
+ #if REX_PLATFORM_WIN32
+ #include <windows.h>
+@@ -50,6 +51,7 @@
+ #include <rex/filesystem/stfs.h>
+ 
+ namespace rex::xam {
++using namespace rex::kernel;
+ 
+ bool IsUnlinkedStoragePath(const std::filesystem::path& path) {
+   if (path.empty()) return false;
+@@ -234,10 +236,497 @@
+   }
+ }
+ 
++bool ContentManager::SignedInProfile(const kernel::XCONTENT_AGGREGATE_DATA& data) const {
++  if (data.content_type != kernel::XContentType::kProfile) return false;
++  const auto account = user_profile_.identity();
++  return account.signin_state && account.device_id == data.device_id &&
++      data.GetFileName() == std::format("{:016X}", account.xuid);
++}
++
++// Staging directories of transfers in progress. With none active, a leftover
++// one comes from an interrupted process and is removed before the next copy.
++// Protect only transfer startup/cleanup, never the copy loop or kernel state.
++static constexpr const char* kTransferStagingDirName = ".x360n-transfer";
++
++// The ready header is a commit intent: it is renamed only after every copied
++// file and the complete header have been closed successfully. Its checksum
++// detects corruption; it is not authentication and never authorizes a path.
++static bool UnlinkedTransferTree(const std::filesystem::path& path) {
++  namespace fs = std::filesystem;
++  std::error_code ec;
++  if (!IsUnlinkedStoragePath(path)) return false;
++  if (!fs::exists(path, ec)) return !ec;
++  if (!fs::is_directory(path, ec)) return !ec && fs::is_regular_file(path, ec) && !ec;
++  for (fs::recursive_directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) {
++    if (!IsUnlinkedStoragePath(it->path())) return false;
++    if (!it->is_directory(ec) && !it->is_regular_file(ec)) return false;
++    if (ec) return false;
++  }
++  return !ec;
++}
++
++// Restore an uncommitted source retirement without replacing any new content.
++// All conflict checks precede the first rename; a partial rollback is retryable.
++static X_RESULT RestoreRetiredSource(const std::filesystem::path& staging,
++                                    const std::filesystem::path& package,
++                                    const std::filesystem::path& header, uint8_t shape) {
++  namespace fs = std::filesystem;
++  std::error_code ec;
++  const std::array<std::pair<fs::path, fs::path>, 2> paths{{
++      {staging / "package", package}, {staging / "header", header}}};
++  for (size_t i = 0; i != paths.size(); ++i) {
++    const auto& [from, to] = paths[i];
++    const bool exists = fs::exists(from, ec);
++    if (ec || !IsUnlinkedStoragePath(from) || !IsUnlinkedStoragePath(to)) return X_ERROR_ACCESS_DENIED;
++    // A missing original component must remain absent during restoration.
++    if (shape && !(shape & (1u << i))) {
++      if (exists) return kernel::XResultFromWin32(13);
++      if (fs::exists(to, ec)) return X_ERROR_ALREADY_EXISTS;
++      if (ec) return X_ERROR_ACCESS_DENIED;
++      continue;
++    }
++    if (!exists) continue;
++    if ((i == 0 ? (!fs::is_directory(from, ec) && !fs::is_regular_file(from, ec))
++                : !fs::is_regular_file(from, ec)) || ec)
++      return kernel::XResultFromWin32(13);
++    if (fs::exists(to, ec)) return X_ERROR_ALREADY_EXISTS;
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  for (const auto& [from, to] : paths) {
++    const bool exists = fs::exists(from, ec);
++    if (ec) return X_ERROR_ACCESS_DENIED;
++    if (!exists) continue;
++    fs::create_directories(to.parent_path(), ec);
++    if (ec || !IsUnlinkedStoragePath(to.parent_path())) return X_ERROR_ACCESS_DENIED;
++    fs::rename(from, to, ec);
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  return X_ERROR_SUCCESS;
++}
++
++// Call with staging_mutex_ held and no active transfer on this volume.
++u32 ContentManager::RecoverTransferStagingLocked(const ContentDeviceInfo& device) const try {
++  namespace fs = std::filesystem;
++  constexpr X_RESULT kInvalidData = kernel::XResultFromWin32(13);
++  std::error_code ec;
++  const auto volume_root = fs::absolute(device.root).lexically_normal();
++  if (!IsUnlinkedStoragePath(volume_root) || !fs::is_directory(volume_root, ec))
++    return X_ERROR_DEVICE_NOT_CONNECTED;
++  const auto staging_root = volume_root / kTransferStagingDirName;
++  if (!fs::exists(staging_root, ec)) return ec ? X_ERROR_ACCESS_DENIED : X_ERROR_SUCCESS;
++  if (!IsUnlinkedStoragePath(staging_root) || !fs::is_directory(staging_root, ec) || ec)
++    return X_ERROR_ACCESS_DENIED;
++  std::vector<fs::path> entries;
++  for (fs::directory_iterator it(staging_root, ec), end; !ec && it != end; it.increment(ec))
++    entries.push_back(it->path());
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  for (const auto& staging : entries) {
++    // Nothing read from the journal may choose a host path outside this volume.
++    if (staging.lexically_normal().parent_path() != staging_root || !UnlinkedTransferTree(staging))
++      return X_ERROR_ACCESS_DENIED;
++    std::optional<fs::path> ready;
++    if (fs::is_directory(staging, ec)) {
++      for (fs::directory_iterator it(staging, ec), end; !ec && it != end; it.increment(ec)) {
++        if (it->path().extension() != ".ready") continue;
++        if (ready) return kInvalidData;
++        ready = it->path();
++      }
++      if (ec) return X_ERROR_ACCESS_DENIED;
++    }
++    if (ready) {
++      const auto name = rex::string::PathToUTF8(ready->filename());
++      const bool retire = name.starts_with("retire-");
++      const bool retired = name.starts_with("retired-");
++      const size_t prefix = retired ? 8 : 7;
++      if ((!retire && !retired && !name.starts_with("header-")) ||
++          name.size() != prefix + 38 || !name.ends_with(".ready") ||
++          !std::all_of(name.begin() + prefix, name.begin() + prefix + 32, [](char c) {
++            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
++          }) || !fs::is_regular_file(*ready, ec) || ec) return kInvalidData;
++      const auto digest = rex::HashFile(*ready);
++      if (digest.empty()) return X_ERROR_ACCESS_DENIED;
++      if (digest != name.substr(prefix, 32)) return kInvalidData;
++      XCONTENT_AGGREGATE_DATA data{};
++      auto* file = rex::platform::OpenFile(*ready, "rb");
++      if (!file) return X_ERROR_ACCESS_DENIED;
++      const bool read = fread(&data, 1, sizeof(data), file) == sizeof(data);
++      uint8_t shape = 0;  // prior move intents contain only the aggregate
++      bool valid_shape = true;
++      if (retire || retired) {
++        const int value = fgetc(file);
++        if (value != EOF) {
++          shape = uint8_t(value);
++          valid_shape = value >= 1 && value <= 3 && fgetc(file) == EOF;
++        }
++        if (ferror(file)) valid_shape = false;
++      }
++      const bool closed = fclose(file) == 0;
++      if (!read || !closed || !valid_shape || uint32_t(data.device_id) != device.device_id ||
++          (!retire && !retired && uint32_t(data.title_id) == kernel::kRunningTitleID) ||
++          !ContentManager::ValidName(data.GetFileName()))
++        return kInvalidData;
++      const uint64_t owner = data.content_type == XContentType::kMarketplaceContent ? 0 : uint64_t(data.xuid);
++      const auto title_root = volume_root / std::format("{:016X}", owner) /
++                              std::format("{:08X}", uint32_t(data.title_id));
++      const auto type = std::format("{:08X}", uint32_t(XContentType(data.content_type)));
++      const auto destination = title_root / type / data.GetFileName();
++      const auto header = title_root / "Headers" / type / (data.GetFileName() + ".header");
++      if (!IsUnlinkedStoragePath(destination) || !IsUnlinkedStoragePath(header))
++        return X_ERROR_ACCESS_DENIED;
++      if (retire || retired) {
++        // Before the commit marker, restore both original names. After it,
++        // cleanup touches only this private tree, even if new content now
++        // occupies the old public name. Never expose partially deleted bytes.
++        if (retire) {
++          const auto restored = RestoreRetiredSource(staging, destination, header, shape);
++          if (restored) return restored;
++        }
++      } else {
++        // Never replace another package or header, even when recovery is retried.
++        const bool header_exists = fs::exists(header, ec);
++        if (ec) return X_ERROR_ACCESS_DENIED;
++        if (header_exists) return X_ERROR_ALREADY_EXISTS;
++        const auto package = staging / "package";
++        const bool staged = fs::exists(package, ec);
++        if (ec) return X_ERROR_ACCESS_DENIED;
++        if (staged) {
++          if (!fs::is_directory(package, ec) || ec) return kInvalidData;
++          const bool exists = fs::exists(destination, ec);
++          if (ec) return X_ERROR_ACCESS_DENIED;
++          if (exists) return X_ERROR_ALREADY_EXISTS;
++          fs::create_directories(destination.parent_path(), ec);
++          if (ec || !IsUnlinkedStoragePath(destination.parent_path())) return X_ERROR_ACCESS_DENIED;
++          fs::rename(package, destination, ec);
++          if (ec) return X_ERROR_ACCESS_DENIED;
++        } else if (!fs::is_directory(destination, ec) || ec) return kInvalidData;
++        fs::create_directories(header.parent_path(), ec);
++        if (ec || !IsUnlinkedStoragePath(header.parent_path())) return X_ERROR_ACCESS_DENIED;
++        fs::rename(*ready, header, ec);
++        if (ec) return X_ERROR_ACCESS_DENIED;
++      }
++    }
++    // Unmarked partial copies are abandoned; committed copies now have both
++    // names. Only a validated immediate child of our private staging is removed.
++    fs::remove_all(staging, ec);
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  fs::remove(staging_root, ec);
++  return ec ? X_ERROR_ACCESS_DENIED : X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
++u32 ContentManager::RecoverTransferStaging(const ContentDeviceInfo& device) const {
++  std::lock_guard lock(staging_mutex_);
++  const auto staging = std::filesystem::absolute(device.root).lexically_normal() / kTransferStagingDirName;
++  const auto active = active_transfers_.find(staging);
++  if (active != active_transfers_.end() && active->second) return X_ERROR_SUCCESS;
++  return RecoverTransferStagingLocked(device);
++}
++
++// Retire content privately; moves call this after publishing their destination.
++// The ready intent allows rollback until both source names have been hidden.
++// The retired intent commits their removal; restart cleans only private bytes.
++u32 ContentManager::RetireContent(const ContentDeviceInfo& device,
++                                 const XCONTENT_AGGREGATE_DATA& data,
++                                 const std::filesystem::path& package,
++                                 const std::filesystem::path& header,
++                                 const ContentManager::TransferCheckpoint& checkpoint,
++                                 bool& removed, bool require_package) try {
++  namespace fs = std::filesystem;
++  std::error_code ec;
++  removed = false;
++  if (!IsUnlinkedStoragePath(package) || !IsUnlinkedStoragePath(header)) return X_ERROR_ACCESS_DENIED;
++  const bool package_exists = fs::exists(package, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  const bool header_exists = fs::exists(header, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  if (!package_exists && !header_exists) return X_ERROR_FILE_NOT_FOUND;
++  if (require_package && !fs::is_directory(package, ec))
++    return ec ? X_ERROR_ACCESS_DENIED : X_ERROR_FILE_NOT_FOUND;
++  if (package_exists && !fs::is_directory(package, ec) && !fs::is_regular_file(package, ec))
++    return X_ERROR_ACCESS_DENIED;
++  if (ec || (header_exists && !fs::is_regular_file(header, ec)) || ec) return X_ERROR_ACCESS_DENIED;
++  const auto root = fs::absolute(device.root).lexically_normal() / kTransferStagingDirName;
++  X_RESULT recovered = X_ERROR_SUCCESS;
++  {
++    std::lock_guard lock(staging_mutex_);
++    auto& active = active_transfers_[root];
++    if (!active) recovered = RecoverTransferStagingLocked(device);
++    ++active;
++  }
++  auto active = rex::ScopeGuard([&, active_root = root] {
++    std::lock_guard lock(staging_mutex_);
++    const auto it = active_transfers_.find(active_root);
++    if (--it->second == 0) active_transfers_.erase(it);
++  });
++  if (recovered) return recovered;
++  const auto staging = root / std::format("retire-{:016X}-{:08X}",
++      uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()),
++      uint32_t(transfer_sequence_.fetch_add(1)));
++  struct Cleanup {
++    fs::path root, path;
++    bool keep = false;
++    ~Cleanup() {
++      if (keep || path.parent_path() != root || !UnlinkedTransferTree(path)) return;
++      std::error_code e;
++      fs::remove_all(path, e);
++      fs::remove(root, e);
++    }
++  } cleanup{root, staging};
++  if (!fs::create_directories(staging, ec) || !IsUnlinkedStoragePath(staging))
++    return X_ERROR_ACCESS_DENIED;
++  const auto journal = staging / "journal";
++  auto* file = rex::platform::OpenFile(journal, "wb");
++  if (!file) return X_ERROR_ACCESS_DENIED;
++  // Record both original components so recovery cannot pair an old header or
++  // package with newly created content in a previously absent public name.
++  const uint8_t shape = (package_exists ? 1 : 0) | (header_exists ? 2 : 0);
++  std::array<char, sizeof(data) + 1> journal_bytes{};
++  std::memcpy(journal_bytes.data(), &data, sizeof(data));
++  journal_bytes.back() = char(shape);
++  const bool written = fwrite(journal_bytes.data(), 1, journal_bytes.size(), file) == journal_bytes.size();
++  const bool closed = fclose(file) == 0;
++  if (!written || !closed) return X_ERROR_ACCESS_DENIED;
++  const auto digest = rex::HashBytes(std::string_view(journal_bytes.data(), journal_bytes.size()));
++  const auto prepared = staging / ("retire-" + digest + ".ready");
++  const auto committed = staging / ("retired-" + digest + ".ready");
++  fs::rename(journal, prepared, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  if (checkpoint) checkpoint(ContentManager::TransferStage::SourcePrepared);
++  auto rollback = [&] {
++    const auto result = RestoreRetiredSource(staging, package, header, shape);
++    cleanup.keep = result != X_ERROR_SUCCESS;
++    return X_ERROR_ACCESS_DENIED;
++  };
++  cleanup.keep = true;
++  if (package_exists) {
++    fs::rename(package, staging / "package", ec);
++    if (ec) return rollback();
++  }
++  if (checkpoint) checkpoint(ContentManager::TransferStage::SourcePackageRetired);
++  if (header_exists) {
++    fs::rename(header, staging / "header", ec);
++    if (ec) return rollback();
++  }
++  if (checkpoint) checkpoint(ContentManager::TransferStage::SourceHeaderRetired);
++  fs::rename(prepared, committed, ec);
++  if (ec) return rollback();
++  removed = true;
++  if (checkpoint) checkpoint(ContentManager::TransferStage::SourceRetired);
++  // A failed physical cleanup remains private and recoverable, never a
++  // partially deleted save in the public catalog. Report the actual error.
++  if (!UnlinkedTransferTree(staging)) return X_ERROR_ACCESS_DENIED;
++  fs::remove_all(staging, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  cleanup.keep = false;
++  return X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
++X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
++                                         uint32_t destination_device, uint64_t destination_xuid,
++                                         bool move, const TransferProgress& progress,
++                                         bool* destination_committed,
++                                         const TransferCheckpoint& checkpoint,
++                                         bool* source_removed) try {
++  if (destination_committed) *destination_committed = false;
++  if (source_removed) *source_removed = false;
++  namespace fs = std::filesystem;
++  constexpr X_RESULT kDiskFull = kernel::XResultFromWin32(112);
++  std::error_code ec;
++  const uint64_t owner =
++      (source.xuid != uint64_t(-1) && source.xuid != 0) ? uint64_t(source.xuid) : xuid;
++  XCONTENT_AGGREGATE_DATA destination = source;
++  destination.device_id = destination_device;
++  destination.xuid = destination_xuid ? destination_xuid : owner;
++  auto device = GetDevice(destination_device);
++  if (!device) return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (device->device_type == DeviceType::kODD) return X_ERROR_ACCESS_DENIED;
++  if (const auto recovered = RecoverTransferStaging(*device)) return recovered;
++  if (source.title_id == kernel::kRunningTitleID) return X_ERROR_INVALID_PARAMETER;
++  fs::path source_path, source_header, destination_path, destination_header;
++  {
++    auto global_lock = user_profile_.LockSettings();
++    if (move && (IsContentOpen(source) || SignedInProfile(source)))
++      return X_ERROR_ACCESS_DENIED;  // as DeleteContent
++    source_path = ResolvePackagePath(xuid, source);
++    source_header = ResolvePackageHeaderPath(source.GetFileName(), owner, source.title_id,
++                                             source.content_type, source.device_id);
++    destination_path = ResolvePackagePath(destination.xuid, destination);
++    destination_header = ResolvePackageHeaderPath(destination.GetFileName(), destination.xuid,
++                                                  destination.title_id, destination.content_type,
++                                                  destination_device);
++  }
++  if (!fs::is_directory(source_path, ec)) return X_ERROR_FILE_NOT_FOUND;
++  // Never overwrite: the same item already at the destination is a conflict.
++  if (fs::exists(destination_path, ec) || fs::exists(destination_header, ec))
++    return X_ERROR_ALREADY_EXISTS;
++
++  std::vector<std::pair<fs::path, uint64_t>> files;
++  std::vector<fs::path> directories;
++  uint64_t total = 0;
++  for (fs::recursive_directory_iterator it(source_path, ec), end; !ec && it != end; it.increment(ec)) {
++    if (!IsUnlinkedStoragePath(it->path())) return X_ERROR_ACCESS_DENIED;
++    const auto relative = it->path().lexically_relative(source_path);
++    if (it->is_directory(ec)) { directories.push_back(relative); continue; }
++    if (!it->is_regular_file(ec)) return X_ERROR_ACCESS_DENIED;
++    const auto size = it->file_size(ec);
++    if (ec || size > UINT64_MAX - total) return X_ERROR_ACCESS_DENIED;
++    files.emplace_back(relative, size);
++    total += size;
++  }
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  std::vector<uint8_t> header;
++  if (fs::exists(source_header, ec)) {
++    auto file = rex::platform::OpenFile(source_header, "rb");
++    if (!file) return X_ERROR_ACCESS_DENIED;
++    header.resize(size_t(fs::file_size(source_header, ec)));
++    const bool read = !ec && fread(header.data(), 1, header.size(), file) == header.size();
++    fclose(file);
++    if (!read) return X_ERROR_ACCESS_DENIED;
++  }
++  if (header.size() < sizeof(destination)) header.resize(sizeof(destination));
++  std::memcpy(header.data(), &destination, sizeof(destination));
++  total += header.size();
++  const auto staging_root = fs::absolute(DeviceRoot(destination_device)).lexically_normal() / kTransferStagingDirName;
++  X_RESULT recovered = X_ERROR_SUCCESS;
++  {
++    std::lock_guard lock(staging_mutex_);
++    // A different volume's active transfer must not prevent recovery here.
++    // Serialize cleanup and registration so no newcomer stages into a root
++    // while its predecessor is removing interrupted work.
++    auto& active = active_transfers_[staging_root];
++    if (active == 0) recovered = RecoverTransferStagingLocked(*device);
++    ++active;
++  }
++  auto active = rex::ScopeGuard([&, active_root = staging_root] {
++    std::lock_guard lock(staging_mutex_);
++    const auto it = active_transfers_.find(active_root);
++    if (--it->second == 0) active_transfers_.erase(it);
++  });
++  if (recovered != X_ERROR_SUCCESS) return recovered;
++  const auto staging = staging_root / std::format(
++      "{:016X}-{:08X}", uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()),
++      uint32_t(transfer_sequence_.fetch_add(1)));
++  struct Cleanup {
++    fs::path root, path;
++    bool keep = false;
++    ~Cleanup() {
++      // A published package still needing its header must survive errors.
++      if (keep || path.parent_path() != root || !UnlinkedTransferTree(path)) return;
++      std::error_code e;
++      fs::remove_all(path, e);
++      fs::remove(root, e);  // only when no other transfer still stages there
++    }
++  } cleanup{staging_root, staging};
++  // Reclaim interrupted bytes before the quota snapshot. Otherwise a failed
++  // copy can permanently make its own retry appear to have insufficient space.
++  {
++    auto snapshot = *device;
++    if (const auto queried = QueryContentDeviceSpace(snapshot)) return queried;
++    if (total > snapshot.free_bytes) return kDiskFull;
++  }
++
++  const auto staged_package = staging / "package";
++  const auto staged_header = staging / "header";
++  if (!fs::create_directories(staged_package, ec) || !IsUnlinkedStoragePath(staged_package))
++    return X_ERROR_ACCESS_DENIED;
++  for (const auto& dir : directories) {
++    fs::create_directories(staged_package / dir, ec);
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  uint64_t done = 0;
++  if (progress && !progress(0, total, true)) return X_ERROR_CANCELLED;
++  std::vector<uint8_t> buffer(1024 * 1024);
++  for (const auto& [relative, size] : files) {
++    auto in = rex::platform::OpenFile(source_path / relative, "rb");
++    if (!in) return X_ERROR_ACCESS_DENIED;
++    auto out = rex::platform::OpenFile(staged_package / relative, "wb");
++    if (!out) { fclose(in); return X_ERROR_ACCESS_DENIED; }
++    bool ok = true, cancelled = false;
++    for (uint64_t left = size; ok && left;) {
++      const size_t chunk = size_t(std::min<uint64_t>(left, buffer.size()));
++      ok = fread(buffer.data(), 1, chunk, in) == chunk && fwrite(buffer.data(), 1, chunk, out) == chunk;
++      left -= chunk;
++      done += chunk;
++      if (ok && progress && !progress(done, total, false)) { cancelled = true; break; }
++    }
++    fclose(in);
++    if (fclose(out)) ok = false;
++    if (cancelled) return X_ERROR_CANCELLED;
++    if (!ok) return X_ERROR_ACCESS_DENIED;
++  }
++  {
++    auto out = rex::platform::OpenFile(staged_header, "wb");
++    if (!out) return X_ERROR_ACCESS_DENIED;
++    const bool written = fwrite(header.data(), 1, header.size(), out) == header.size();
++    if (fclose(out) || !written) return X_ERROR_ACCESS_DENIED;
++    done += header.size();
++    if (progress && !progress(done, total, false)) return X_ERROR_CANCELLED;
++  }
++
++  auto global_lock = user_profile_.LockSettings();
++  if (fs::exists(destination_path, ec) || fs::exists(destination_header, ec))
++    return X_ERROR_ALREADY_EXISTS;
++  if (move && (IsContentOpen(source) || SignedInProfile(source)))
++    return X_ERROR_ACCESS_DENIED;
++  fs::create_directories(destination_path.parent_path(), ec);
++  fs::create_directories(destination_header.parent_path(), ec);
++  if (!IsUnlinkedStoragePath(destination_path.parent_path()) ||
++      !IsUnlinkedStoragePath(destination_header.parent_path()))
++    return X_ERROR_ACCESS_DENIED;
++  const auto ready_header = staging / ("header-" + rex::HashBytes(std::string_view(
++      reinterpret_cast<const char*>(header.data()), header.size())) + ".ready");
++  fs::rename(staged_header, ready_header, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  if (checkpoint) checkpoint(TransferStage::Prepared);
++  fs::rename(staged_package, destination_path, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  cleanup.keep = true;
++  if (checkpoint) checkpoint(TransferStage::PackagePublished);
++  fs::rename(ready_header, destination_header, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;  // retain the complete pair for recovery
++  cleanup.keep = false;
++  if (destination_committed) *destination_committed = true;
++  if (checkpoint) checkpoint(TransferStage::HeaderPublished);
++  if (move) {
++    const auto source_device = GetDevice(source.device_id);
++    auto normalized_source = source;
++    normalized_source.xuid = owner;
++    bool ignored_removed = false;
++    bool& removed = source_removed ? *source_removed : ignored_removed;
++    const auto deleted = source_device
++        ? RetireContent(*source_device, normalized_source, source_path, source_header, checkpoint, removed, true)
++        : X_ERROR_DEVICE_NOT_CONNECTED;
++    if (deleted != X_ERROR_SUCCESS) {
++      // Restore uncommitted retirement, or finish private cleanup on the next
++      // device access/restart. The destination remains complete in both cases.
++      {
++        std::lock_guard lock(recovery_mutex_);
++        recovered_devices_.erase(source.device_id);
++      }
++      NotifyContentChanged();
++      return deleted;
++    }
++  }
++  NotifyContentChanged();
++  return X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
+ std::optional<ContentDeviceInfo> ContentManager::GetDevice(uint32_t id) const {
+   if (!devices_valid_) return std::nullopt;
+   const auto it = std::find_if(devices_.begin(), devices_.end(), [&](const auto& d) { return d.device_id == id; });
+   if (it == devices_.end()) return std::nullopt;
++  {
++    std::lock_guard lock(recovery_mutex_);
++    if (!recovered_devices_.contains(id)) {
++      const auto error = RecoverTransferStaging(*it);
++      if (error != kernel::X_ERROR_SUCCESS) {
++        if (error != kernel::X_ERROR_DEVICE_NOT_CONNECTED)
++          REXSYS_ERROR("Interrupted content recovery on device {} failed: {:08X}", id, error);
++        return std::nullopt;
++      }
++      recovered_devices_.insert(id);
++    }
++  }
+   auto snapshot = *it;
+   if (QueryContentDeviceSpace(snapshot)) return std::nullopt;
+   return snapshot;
+diff --git a/tests/unit/kernel/kernel_fixture.h b/tests/unit/kernel/kernel_fixture.h
+--- a/tests/unit/kernel/kernel_fixture.h
++++ b/tests/unit/kernel/kernel_fixture.h
+@@ -135,10 +135,12 @@
+    * @param audio_driver The audio driver to select, or empty for none.
+    * @param ui_driver The UI driver to select, or empty for none.
+    * @param input_driver The input driver to select, or empty for none.
++   * @param content_root Caller-owned synthetic root for restart tests; never removed by the fixture.
+    */
+   explicit KernelFixture(const std::function<void(const std::filesystem::path&)>& populate = {},
+                          std::vector<IModule*> providers = {}, std::string audio_driver = {},
+-                         std::string ui_driver = {}, std::string input_driver = {});
++                         std::string ui_driver = {}, std::string input_driver = {},
++                         const std::filesystem::path& content_root = {});
+   ~KernelFixture();
+ 
+   rex::kernel::TitleRuntime& GetRuntime();
+diff --git a/tests/unit/kernel/kernel_fixture.cpp b/tests/unit/kernel/kernel_fixture.cpp
+--- a/tests/unit/kernel/kernel_fixture.cpp
++++ b/tests/unit/kernel/kernel_fixture.cpp
+@@ -269,23 +269,25 @@
+   };
+ 
+   Impl(const std::function<void(const std::filesystem::path&)>& populate,
+-       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver, std::string input_driver)
+-      : app("kernel_fixture", app_root.path, std::move(providers), std::move(audio_driver),
++       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver, std::string input_driver, const std::filesystem::path& requested_root)
++      : content_root(requested_root.empty() ? root.path : requested_root),
++        app("kernel_fixture", app_root.path, std::move(providers), std::move(audio_driver),
+             std::move(ui_driver), std::move(input_driver)),
+-        tool((ReleaseTestMemory(), BuildTool(app, root.path, populate))) {}
++        tool((ReleaseTestMemory(), BuildTool(app, content_root, populate))) {}
+ 
+   ThreadDrain drain;
+   test::TempFolder root{"rexglue_kernel_fixture_"};
+   test::TempFolder app_root{"rexglue_kernel_fixture_app_"};
++  std::filesystem::path content_root;
+   FixtureApp app;
+   codegen::ToolRuntime tool;
+ };
+ 
+ KernelFixture::KernelFixture(const std::function<void(const std::filesystem::path&)>& populate,
+                              std::vector<IModule*> providers, std::string audio_driver,
+-                             std::string ui_driver, std::string input_driver)
++                             std::string ui_driver, std::string input_driver, const std::filesystem::path& content_root)
+     : impl_(std::make_unique<Impl>(populate, std::move(providers), std::move(audio_driver),
+-                                   std::move(ui_driver), std::move(input_driver))) {
++                                   std::move(ui_driver), std::move(input_driver), content_root)) {
+   auto* dispatcher = &kernel::GetFunctionDispatcher(GetRuntime());
+   REQUIRE(dispatcher->InitializeFunctionTable(kCodeBase, kCodeSize, kCodeBase, kImageSize,
+                                               /*is_entrypoint=*/true));
+@@ -317,7 +319,7 @@
+ }
+ 
+ const std::filesystem::path& KernelFixture::GetRoot() const {
+-  return impl_->root.path;
++  return impl_->content_root;
+ }
+ 
+ KernelFixture::~KernelFixture() {

@@ -1,102 +1,158 @@
-diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
-index 949d185..ee4d0f8 100644
---- a/include/rex/system/xam/content_manager.h
-+++ b/include/rex/system/xam/content_manager.h
-@@ -148,6 +148,10 @@ class ContentManager {
-                                                    XContentType content_type,
-                                                    uint32_t title_id = -1);
- 
-+  // Explicit all-types aggregate requests, optionally restricted to a title.
-+  std::vector<XCONTENT_AGGREGATE_DATA> ListContentAllTypes(
-+      uint32_t device_id, uint64_t xuid, uint32_t title_filter = 0);
-+
-   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, uint64_t xuid,
-                                                  const XCONTENT_AGGREGATE_DATA& data);
- 
-diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
-index bd6c797..ea5ab75 100644
---- a/src/system/xam/content_manager.cpp
-+++ b/src/system/xam/content_manager.cpp
-@@ -155,9 +155,9 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
-       continue;
-     }
- 
--    XCONTENT_AGGREGATE_DATA content_data;
--    if (XSUCCEEDED(ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
--                                         content_type, content_data))) {
-+    XCONTENT_AGGREGATE_DATA content_data{};
-+    if (ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
-+                              content_type, content_data) == X_ERROR_SUCCESS) {
-       result.emplace_back(std::move(content_data));
-     } else {
-       content_data.device_id = device_id;
-@@ -173,6 +173,40 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -90,6 +90,8 @@
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContent(u32 device_id, u64 xuid,
+                                                            rex::kernel::XContentType content_type,
+                                                            u32 title_id = 0xFFFFFFFF) override;
++  std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContentAllTypes(
++      u32 device_id, u64 xuid, u32 title_filter = 0);
+   bool HasContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) override;
+   [[nodiscard]] Result<void> CreateContent(std::string_view root_name, u64 xuid,
+                                            const kernel::XCONTENT_AGGREGATE_DATA& data) override;
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -206,6 +206,47 @@
    return result;
  }
  
-+std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContentAllTypes(
-+    uint32_t device_id, uint64_t xuid, uint32_t title_filter) {
-+  std::vector<XCONTENT_AGGREGATE_DATA> result;
-+  // Only canonical title/type directory names belong to the content catalog.
-+  // In particular, Headers is metadata, never a content type.
-+  auto hex_id = [](const std::filesystem::path& name, uint32_t& value) {
-+    const auto s = rex::path_to_utf8(name);
-+    if (s.size() != 8) return false;
++std::vector<kernel::XCONTENT_AGGREGATE_DATA> ContentManager::ListContentAllTypes(
++    u32 device_id, u64 xuid, u32 title_filter) {
++  std::vector<kernel::XCONTENT_AGGREGATE_DATA> result;
++  auto hex_id = [](const std::filesystem::path& name, u32& value) {
++    const auto text = rex::string::PathToUTF8(name);
++    if (text.size() != 8) return false;
 +    value = 0;
-+    for (const char c : s) {
-+      const int n = c >= '0' && c <= '9' ? c - '0' :
-+                    c >= 'a' && c <= 'f' ? c - 'a' + 10 :
-+                    c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-+      if (n < 0) return false;
-+      value = (value << 4) | uint32_t(n);
++    for (const char ch : text) {
++      const int digit = ch >= '0' && ch <= '9' ? ch - '0' :
++          ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
++      if (digit < 0) return false;
++      value = (value << 4) | static_cast<u32>(digit);
 +    }
 +    return true;
 +  };
-+  const auto user_root = root_path_ / fmt::format("{:016X}", xuid);
-+  for (const auto& title : rex::filesystem::ListFiles(user_root)) {
-+    uint32_t title_id;
-+    if (title.type != rex::filesystem::FileInfo::Type::kDirectory ||
-+        !hex_id(title.name, title_id) || (title_filter && title_id != title_filter)) continue;
-+    for (const auto& type : rex::filesystem::ListFiles(user_root / title.name)) {
-+      uint32_t content_type;
-+      if (type.type != rex::filesystem::FileInfo::Type::kDirectory ||
-+          !hex_id(type.name, content_type)) continue;
-+      auto items = ListContent(device_id, xuid, XContentType(content_type), title_id);
-+      result.insert(result.end(), items.begin(), items.end());
++  const auto user_root = root_path_ / std::format("{:016X}", xuid);
++  std::error_code error;
++  std::filesystem::directory_iterator title(user_root, error), end;
++  while (!error && title != end) {
++    u32 title_id;
++    if (title->is_directory(error) && !error && hex_id(title->path().filename(), title_id) &&
++        (!title_filter || title_filter == title_id)) {
++      std::error_code type_error;
++      std::filesystem::directory_iterator type(title->path(), type_error);
++      while (!type_error && type != end) {
++        u32 content_type;
++        if (type->is_directory(type_error) && !type_error && hex_id(type->path().filename(), content_type)) {
++          auto items = ListContent(device_id, xuid, static_cast<kernel::XContentType>(content_type), title_id);
++          result.insert(result.end(), items.begin(), items.end());
++        }
++        type.increment(type_error);
++      }
++      if (type_error) REXSYS_DEBUG("Content type enumeration failed: {}", type_error.message());
 +    }
++    title.increment(error);
 +  }
++  if (error && error != std::errc::no_such_file_or_directory)
++    REXSYS_WARN("Content title enumeration failed: {}", error.message());
 +  return result;
 +}
 +
  std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
-     const std::string_view root_name, uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+     const std::string_view root_name, u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
    auto package_path = ResolvePackagePath(xuid, data);
-diff --git a/src/kernel/xam/xam_content_aggregate.cpp b/src/kernel/xam/xam_content_aggregate.cpp
-index de4a527..bb3b1c8 100644
---- a/src/kernel/xam/xam_content_aggregate.cpp
-+++ b/src/kernel/xam/xam_content_aggregate.cpp
-@@ -98,6 +98,24 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
-   extra->magic = kXObjSignature;
-   extra->handle = e->handle();
+diff --git a/src/xam/xam_content_aggregate.cpp b/src/xam/xam_content_aggregate.cpp
+--- a/src/xam/xam_content_aggregate.cpp
++++ b/src/xam/xam_content_aggregate.cpp
+@@ -71,7 +71,7 @@
+ }
  
-+  // xam 17559 export 0x279: type -1 accepts all types (0x81681F08),
-+  // and the fourth argument is an optional title filter (0x81681EA0).
-+  // Keep the existing typed-content path below; this increment covers the
-+  // explicit all-types query used by system content consumers.
-+  if (content_type == 0xFFFFFFFF) {
-+    if (device_info && device_info->device_type == DeviceType::ODD) {
-+      // No installed HDD packages belong to the optical device.
-+    } else {
-+      auto items = REX_KERNEL_STATE()->content_manager()->ListContentAllTypes(
-+          static_cast<uint32_t>(DummyDeviceId::HDD), xuid, unk3);
-+      for (const auto& item : items) *e->AppendItem() = item;
+ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 content_type,
+-                                              [[maybe_unused]] u32 unk3, MappedU32 handle_out) {
++                                              u32 title_filter, MappedU32 handle_out) {
+   REX_ASSERT(handle_out != nullptr);
+ 
+   auto device_info = device_id == 0 ? nullptr : rex::xam::GetPlaceholderDevice(device_id);
+@@ -81,6 +81,13 @@
+ 
+   StaticItemList items(1, sizeof(kernel::XCONTENT_AGGREGATE_DATA));
+ 
++  if (content_type == 0xFFFFFFFFu) {
++    if (!device_info || device_info->device_type != rex::xam::DeviceType::kODD) {
++      auto contents = CurrentXAM().GetContentManager().ListContentAllTypes(
++          std::to_underlying(rex::xam::DummyDeviceID::kHDD), xuid, title_filter);
++      for (const auto& content : contents) *items.Append<kernel::XCONTENT_AGGREGATE_DATA>() = content;
 +    }
-+    REXKRNL_DEBUG("XamContentAggregateCreateEnumerator: all types xuid={:016X} device={} title={:08X}, {} items",
-+                  uint64_t(xuid), uint32_t(device_id), uint32_t(unk3), e->item_count());
-+    *handle_out = e->handle();
-+    return X_ERROR_SUCCESS;
++  } else {
+   auto content_type_enum = static_cast<rex::kernel::XContentType>(content_type);
+ 
+   u64 profile_xuid = CurrentXAM().GetUserProfile().GetXUID();
+@@ -123,6 +130,8 @@
+     AddODDContent(items, content_type_enum);
+   }
+ 
 +  }
 +
-   auto content_type_enum = XContentType(uint32_t(content_type));
+   REXXAM_DEBUG("XamContentAggregateCreateEnumerator: added {} items to enumerator",
+                items.GetItemCount());
  
-   uint64_t userxuid = REX_KERNEL_STATE()->user_profile()->xuid();
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -28,6 +28,7 @@
+ #include "kernel/title_state.h"
+ #include "xam/xam_state.h"
+ #include "xam/enumerator_object.h"
++#include <set>
+ #include <atomic>
+ #include <rex/kernel/title_exit.h>
+ #include <rex/kernel/xboxkrnl.h>
+@@ -969,3 +970,48 @@
+     CHECK(profile.identity().xuid == first);
+   });
+ }
++
++
++REX_TEST_CASE("all-type content enumeration filters canonical directories and preserves full owner XUIDs", "[kernel][xam][aggregate-content]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++    REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++    for (const char* path : {"0000000000000000/584108B7/000D0000/package-a",
++        "0000000000000000/12345678/00080000/package-b",
++        "0000000000000000/invalid/000D0000/not-a-title",
++        "0000000000000000/584108B7/Headers/000D0000",
++        "E000000000000001/584108B7/000D0000/owned"})
++      std::filesystem::create_directories(root / path);
++  });
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto handle_ptr = caller.Alloc(4), count_ptr = caller.Alloc(4);
++    const auto buffer = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    auto query = [&](u64 owner, u32 title, u32 device = 1) {
++      REQUIRE(caller.XAM("XamContentAggregateCreateEnumerator", {owner, device, 0xFFFFFFFF, title, handle_ptr}) == 0);
++      const auto handle = caller.Load32(handle_ptr);
++      REQUIRE(handle != 0);
++      std::set<std::pair<u32, u32>> found;
++      bool ended = false;
++      for (unsigned i = 0; i < 8; ++i) {
++        const auto result = caller.XAM("XamEnumerate", {handle, 0, buffer, sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA), count_ptr, 0});
++        if (result == rex::kernel::X_ERROR_NO_MORE_FILES) { ended = true; break; }
++        REQUIRE(result == 0);
++        REQUIRE(caller.Load32(count_ptr) == 1);
++        const auto* item = reinterpret_cast<const rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + buffer);
++        CHECK(static_cast<u64>(item->xuid) == owner);
++        found.emplace(static_cast<u32>(item->title_id), std::to_underlying(static_cast<rex::kernel::XContentType>(item->content_type)));
++      }
++      CHECK(ended);
++      CHECK(caller.Kernel("NtClose", {handle}) == 0);
++      return found;
++    };
++    const std::set<std::pair<u32, u32>> shared{{0x584108B7, 0xD0000}, {0x12345678, 0x80000}};
++    const std::set<std::pair<u32, u32>> single{{0x584108B7, 0xD0000}};
++    CHECK(query(0, 0) == shared);
++    CHECK(query(0, 0x584108B7) == single);
++    CHECK(query(0xE000000000000001ull, 0) == single);
++    CHECK(query(1, 0).empty());
++    CHECK(query(0, 0xAAAAAAAA).empty());
++    CHECK(query(0, 0, 2).empty());
++  });
++}

@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <rex/memory/ring_buffer.h>
-#include <rex/graphics/registers.h>
-#include <rex/graphics/register_file.h>
+#include <rex/memory/stream.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/register.h>
 #include <stdexcept>
 #include <vector>
 #include "../../src/native/commands/scanout_backend.h"
@@ -17,20 +17,20 @@ void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t) {
   ++guest_range_reads; last_read_address = address; last_read_length = length;
 }
 }
-namespace rex::graphics {
+namespace rex::gpu {
 void ValidatePacketForBackend(uint32_t, const rex::memory::RingBuffer&);
 }
 namespace {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using namespace rex::xenos;
 void Validate(unsigned opcode, std::initializer_list<uint32_t> words, unsigned declared = 0) {
   std::vector<uint32_t> data;
   for (auto word : words) data.push_back(rex::byte_swap(word));
   data.push_back(0); // distinguish full from empty in the ring cursor
   rex::memory::RingBuffer ring(reinterpret_cast<uint8_t*>(data.data()), data.size() * 4);
-  ring.set_write_offset(words.size() * 4);
+  ring.SetWriteOffset(words.size() * 4);
   ValidatePacketForBackend(0xc0000000 | (((declared ? declared : unsigned(words.size())) - 1) << 16) | (opcode << 8), ring);
-  REQUIRE(ring.read_offset() == 0);
+  REQUIRE(ring.GetReadOffset() == 0);
 }
 }
 TEST_CASE("Native validates shader payload before the shared decoder", "[native-packet]") {
@@ -115,9 +115,9 @@ TEST_CASE("Native register polls do not publish guest memory", "[native-packet]"
   auto& drains = x360n::native::guest_write_drains;
   Validate(PM4_SET_CONSTANT, {1u << 16, 0}); // Consume the previous case's epoch.
   drains = 0;
-  Validate(PM4_WAIT_REG_MEM, {3, XE_GPU_REG_COHER_STATUS_HOST, 0, 0xffffffff, 0x100});
+  Validate(PM4_WAIT_REG_MEM, {3, uint32_t(rex::xenos::Register::COHER_STATUS_HOST), 0, 0xffffffff, 0x100});
   CHECK(drains == 0);
-  Validate(PM4_WAIT_REG_MEM, {7, XE_GPU_REG_SCRATCH_REG0, 0, 0, 0});
+  Validate(PM4_WAIT_REG_MEM, {7, uint32_t(rex::xenos::Register::SCRATCH_REG0), 0, 0, 0});
   CHECK(drains == 0);
   Validate(PM4_SET_CONSTANT, {1u << 16, 0});
   CHECK(drains == 0); // Neither poll created a guest-memory publication epoch.

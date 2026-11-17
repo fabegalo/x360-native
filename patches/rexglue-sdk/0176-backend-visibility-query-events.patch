@@ -1,12 +1,19 @@
-diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
---- a/include/rex/graphics/command_processor.h
-+++ b/include/rex/graphics/command_processor.h
-@@ -223,7 +223,7 @@
-                                             uint32_t packet, uint32_t count);
-   bool ExecutePacketType3_INVALIDATE_STATE(memory::RingBuffer* reader, uint32_t packet,
-                                            uint32_t count);
--  bool ExecutePacketType3_VIZ_QUERY(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
-+  virtual bool ExecutePacketType3_VIZ_QUERY(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
+diff --git a/src/gpu/xenos/command_processor.h b/src/gpu/xenos/command_processor.h
+--- a/src/gpu/xenos/command_processor.h
++++ b/src/gpu/xenos/command_processor.h
+@@ -378,14 +378,7 @@
  
-   virtual Shader* LoadShader(xenos::ShaderType shader_type, uint32_t guest_address,
-                              const uint32_t* host_address, uint32_t dword_count) = 0;
+                                             u32 packet, u32 count);
+   bool ExecutePacketType3_INVALIDATE_STATE(memory::RingBuffer* reader, u32 packet, u32 count);
+-  /**
+-   * Executes the begin and end initiator for viz query extent processing. Beginning a query clears
+-   * the scan converter state, which the register does not reflect. At the end the result written
+-   * back to the register is faked as visible.
+-   *
+-   * @return True when the packet executed.
+-   */
+-  bool ExecutePacketType3_VIZ_QUERY(memory::RingBuffer* reader, u32 packet, u32 count);
++  virtual bool ExecutePacketType3_VIZ_QUERY(memory::RingBuffer* reader, u32 packet, u32 count);
+ 
+   // TODO(boma): Add tracking for EVENT_WRITE_EXT reports.
+   using ReportHandle = u64;

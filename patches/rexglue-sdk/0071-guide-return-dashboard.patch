@@ -1,0 +1,96 @@
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -312,6 +312,26 @@
+ 
+   // This function does not return.
+   CurrentTitle().exit.TerminateTitle();
++}
++
++u32 XamLoaderRebootToDash_entry(MappedVoid context) {
++  constexpr u32 size = 1020;
++  if (!CurrentTitle().heap.IsGuestRangeAccessible(context.GetGuestAddress(), size,
++                                                 kernel::kMemoryProtectRead))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  const auto* bytes = context.As<const u8*>();
++  const auto reason = memory::load_and_swap<u32>(bytes + 4);
++  const auto user = memory::load_and_swap<u32>(bytes + 8);
++  auto& loader = CurrentXAM().GetLoaderState();
++  loader.launch_data.assign(bytes, bytes + size);
++  loader.launch_data_present = true;
++  loader.launch_path.clear();
++  loader.launch_flags = reason == 72 ? 0x100000 : 0;
++  loader.exit_request = XAMLoaderState::ExitRequest::Dashboard;
++  REXXAM_INFO("XamLoaderRebootToDash: reason={} user={:08X} flags={:08X} data_size={}",
++      reason, user, loader.launch_flags, loader.launch_data.size());
++  CurrentTitle().exit.TerminateTitle();
++  return kernel::X_ERROR_SUCCESS;
+ }
+ 
+ void XamLoaderTerminateTitle_entry() {
+@@ -590,3 +610,5 @@
+ 
+ REX_XAM_BODY(__imp__XamAppLoad, rex::xam::XamAppLoad_entry)
+ REX_XAM_BODY(__imp__XamAppRequestLoad, rex::xam::XamAppRequestLoad_entry)
++
++REX_XAM_BODY(__imp__XamLoaderRebootToDash, rex::xam::XamLoaderRebootToDash_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -532,7 +532,7 @@
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleEx);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleForReason);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleOnDvd);
+-REX_EXPORT_STUB(__imp__XamLoaderRebootToDash);
++
+ REX_EXPORT_STUB(__imp__XamLoaderRebootToServerDash);
+ REX_EXPORT_STUB(__imp__XamLoaderRegisterLaunchRequestCallback);
+ REX_EXPORT_STUB(__imp__XamLoaderSetClearCache);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -386,3 +386,5 @@
+ REX_XAM_FORWARD(__imp__XamShowBrandedKeyboardUI)
+ 
+ REX_XAM_FORWARD(__imp__XamInputSetKeyboardTranslationHud)
++
++REX_XAM_FORWARD(__imp__XamLoaderRebootToDash)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1826,3 +1826,35 @@
+     CHECK(profile.GetSetting(0x10040118)->load_failed);
+   });
+ }
++
++
++REX_TEST_CASE("Guide dashboard return preserves the complete original context and selected reason", "[kernel][xam][guide-dashboard-return]") {
++  for (const u32 reason : {0u, 72u, 0xFFFFFFFFu}) {
++    KernelFixture fixture;
++    auto& loader = rex::xam::CurrentXAM().GetLoaderState();
++    loader.launch_path = "old.xex"; loader.launch_flags = 42;
++    loader.launch_data_present = true; loader.launch_data = {1, 2};
++    fixture.RunOnGuestThread([&](Caller& c) {
++      for (const u32 bad : {0u, 0x7F100000u, 0xFFFFFFF0u})
++        CHECK(c.XAM("XamLoaderRebootToDash", {bad}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++      CHECK(loader.launch_path == "old.xex"); CHECK(loader.launch_flags == 42);
++      CHECK(loader.launch_data == std::vector<u8>{1, 2});
++    });
++    std::vector<u8> expected(1020);
++    for (u32 i = 0; i < expected.size(); ++i) expected[i] = static_cast<u8>(i);
++    bool returned = false;
++    fixture.RunUntilGuestThreadEnds([&](Caller& c) {
++      const auto context = c.Alloc(8192) + 4096 - 8;
++      std::memcpy(c.GetBase() + context, expected.data(), expected.size());
++      c.Store32(context + 4, reason); c.Store32(context + 8, 0x12345678);
++      std::memcpy(expected.data(), c.GetBase() + context, expected.size());
++      c.XAM("XamLoaderRebootToDash", {context});
++      returned = true;
++    });
++    CHECK_FALSE(returned);
++    CHECK(loader.exit_request == rex::xam::XAMLoaderState::ExitRequest::Dashboard);
++    CHECK(loader.launch_flags == (reason == 72 ? 0x100000u : 0u));
++    CHECK(loader.launch_path.empty()); CHECK(loader.launch_data_present);
++    CHECK(loader.launch_data == expected);
++  }
++}

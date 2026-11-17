@@ -1,0 +1,39 @@
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -1084,6 +1084,35 @@
+ 
+ u32 ContentManager::GetContentMetadata(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output) try {
+   if (!output || !ValidName(data.GetFileName())) return kernel::X_ERROR_INVALID_PARAMETER;
++  if (data.content_type == kernel::XContentType::kSavedGame || data.content_type == kernel::XContentType::kProfile) {
++    // Local packages contain persisted aggregate identity and bytes, not a signed STFS certificate.
++    auto stored = ReadContentHeaderFile(data.GetFileName(), data.xuid, data.title_id, data.content_type, data.device_id);
++    if (!stored) return kernel::ToXResult(stored);
++    if (stored->xuid != data.xuid || stored->title_id != data.title_id ||
++        stored->content_type != data.content_type || stored->GetFileName() != data.GetFileName()) return 13;
++    std::array<u8, 36> attributes{};
++    if (const auto error = GetContentAttributes(data, attributes.data())) return error;
++    filesystem::XContentMetadata metadata{};
++    metadata.content_type = stored->content_type;
++    metadata.metadata_version = 2;
++    metadata.content_size = memory::load_and_swap<u64>(attributes.data() + 28);
++    metadata.execution_info.title_id = stored->title_id;
++    metadata.profile_id = stored->xuid;
++    // Original PPC ABI mask: device transfer is allowed, profile reassignment is not.
++    metadata.flags.as_byte = 0x40;
++    for (u32 language = 1; language <= filesystem::XContentMetadata::kNumLanguagesV2; ++language)
++      metadata.SetDisplayName(static_cast<kernel::XLanguage>(language), stored->GetDisplayName());
++    auto thumbnail = GetContentThumbnail(data.xuid, data);
++    if (!thumbnail && kernel::ToXResult(thumbnail) != kernel::X_ERROR_FILE_NOT_FOUND)
++      return kernel::ToXResult(thumbnail);
++    if (thumbnail) {
++      if (thumbnail->size() > filesystem::XContentMetadata::kThumbLengthV2) return 13;
++      metadata.thumbnail_size = static_cast<u32>(thumbnail->size());
++      if (!thumbnail->empty()) std::memcpy(metadata.thumbnail, thumbnail->data(), thumbnail->size());
++    }
++    std::memcpy(output, &metadata, sizeof(metadata));
++    return kernel::X_ERROR_SUCCESS;
++  }
+   const auto type = std::to_underlying(static_cast<kernel::XContentType>(data.content_type));
+   if (type != 0x4000 && type != 0x7000 && type != 0x80000 && type != 0xD0000) return kernel::XResultFromWin32(50);
+   const auto path = ResolvePackagePath(data.xuid, data) / "default.xex";

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <rex/exception_handler.h>
-#include <rex/memory.h>
+#include <rex/platform/exception_handler.h>
+#include <rex/kernel/title_runtime.h>
 #include <atomic>
 #include <filesystem>
 
@@ -15,12 +15,13 @@ class GuestFaultContext {
   ~GuestFaultContext() { Stop(); }
   GuestFaultContext(const GuestFaultContext&) = delete;
   GuestFaultContext& operator=(const GuestFaultContext&) = delete;
-  bool Start(rex::memory::Memory& memory, const std::filesystem::path& path);
+  bool Start(rex::kernel::TitleRuntime& runtime, const std::filesystem::path& path);
   void Stop();
 
  private:
-  static bool Observe(rex::arch::Exception* exception, void* data);
-  rex::memory::Memory* memory_ = nullptr;
+  static bool Observe(rex::platform::Exception* exception, void* data);
+  rex::kernel::TitleRuntime* runtime_ = nullptr;
+  uintptr_t guest_base_ = 0;
   void* file_ = nullptr;
   std::atomic_flag writing_ = ATOMIC_FLAG_INIT;
   unsigned records_ = 0;  // guarded by writing_; bounded even if a later handler resumes

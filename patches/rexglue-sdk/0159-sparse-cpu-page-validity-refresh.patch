@@ -1,22 +1,22 @@
-diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
---- a/include/rex/graphics/shared_memory.h
-+++ b/include/rex/graphics/shared_memory.h
-@@ -186,6 +186,11 @@
-   // Subset of valid pages containing data written by the GPU.
-   std::vector<uint64_t> system_page_flags_valid_and_gpu_written_;
-   uint32_t num_system_page_flags_ = 0;
+diff --git a/src/gpu/xenos/shared_memory.h b/src/gpu/xenos/shared_memory.h
+--- a/src/gpu/xenos/shared_memory.h
++++ b/src/gpu/xenos/shared_memory.h
+@@ -191,6 +191,11 @@
+   std::vector<u64> system_page_flags_valid_;
+   std::vector<u64> system_page_flags_valid_and_gpu_written_;
+   u32 num_system_page_flags_ = 0;
 +  // Words containing CPU-uploaded pages since the last frame refresh. Keep the
 +  // original refresh policy, but avoid copying untouched validity words and
 +  // invalidating all cached bindings when no valid page actually changes.
-+  std::vector<uint32_t> cpu_validity_refresh_words_;
-+  std::vector<uint8_t> cpu_validity_refresh_queued_;
++  std::vector<u32> cpu_validity_refresh_words_;
++  std::vector<u8> cpu_validity_refresh_queued_;
  
-   static std::pair<uint32_t, uint32_t> MemoryInvalidationCallbackThunk(
-       void* context_ptr, uint32_t physical_address_start, uint32_t length, bool exact_range);
-diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
---- a/src/graphics/shared_memory.cpp
-+++ b/src/graphics/shared_memory.cpp
-@@ -34,6 +34,9 @@
+   struct GlobalWatch {
+     GlobalWatchCallback callback;
+diff --git a/src/gpu/xenos/shared_memory.cpp b/src/gpu/xenos/shared_memory.cpp
+--- a/src/gpu/xenos/shared_memory.cpp
++++ b/src/gpu/xenos/shared_memory.cpp
+@@ -37,6 +37,9 @@
    num_system_page_flags_ = ((kBufferSize >> page_size_log2_) + 63) / 64;
    system_page_flags_valid_.assign(num_system_page_flags_, 0);
    system_page_flags_valid_and_gpu_written_.assign(num_system_page_flags_, 0);
@@ -24,9 +24,9 @@ diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
 +  cpu_validity_refresh_words_.reserve(num_system_page_flags_);
 +  cpu_validity_refresh_queued_.assign(num_system_page_flags_, 0);
  
-   memory_invalidation_callback_handle_ =
-       memory_.RegisterPhysicalMemoryInvalidationCallback(MemoryInvalidationCallbackThunk, this);
-@@ -87,11 +90,19 @@
+   write_listener_ = write_watch_.AddWriteListener(*this);
+   write_listener_registered_ = true;
+@@ -84,11 +87,19 @@
    system_page_flags_valid_and_gpu_written_.clear();
    system_page_flags_valid_and_gpu_written_.shrink_to_fit();
    num_system_page_flags_ = 0;
@@ -37,18 +37,18 @@ diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
  }
  
  void SharedMemory::InvalidateAllPages() {
-   auto global_lock = global_critical_region_.Acquire();
+   auto lock = AcquireLock();
  
-+  for (uint32_t word : cpu_validity_refresh_words_) {
++  for (u32 word : cpu_validity_refresh_words_) {
 +    cpu_validity_refresh_queued_[word] = 0;
 +  }
 +  cpu_validity_refresh_words_.clear();
-   std::fill(system_page_flags_valid_.begin(), system_page_flags_valid_.end(), uint64_t(0));
+   std::fill(system_page_flags_valid_.begin(), system_page_flags_valid_.end(), static_cast<u64>(0));
    std::fill(system_page_flags_valid_and_gpu_written_.begin(),
-             system_page_flags_valid_and_gpu_written_.end(), uint64_t(0));
-@@ -101,10 +112,20 @@
- void SharedMemory::SetSystemPageBlocksValidWithGpuDataWritten() {
-   auto global_lock = global_critical_region_.Acquire();
+             system_page_flags_valid_and_gpu_written_.end(), static_cast<u64>(0));
+@@ -98,10 +109,20 @@
+ void SharedMemory::SetSystemPageFlagsValidWithGPUDataWritten() {
+   auto lock = AcquireLock();
  
 -  // Pages that are valid only because the CPU uploaded them lose their valid
 -  // bit here, so the next frame re-reads them from guest memory.
@@ -58,8 +58,8 @@ diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
 +  // pages and untouched words need no work, and an empty refresh need not
 +  // invalidate otherwise coherent vertex binding residency.
 +  bool changed = false;
-+  for (uint32_t word : cpu_validity_refresh_words_) {
-+    const uint64_t gpu_valid = system_page_flags_valid_and_gpu_written_[word];
++  for (u32 word : cpu_validity_refresh_words_) {
++    const u64 gpu_valid = system_page_flags_valid_and_gpu_written_[word];
 +    changed |= system_page_flags_valid_[word] != gpu_valid;
 +    system_page_flags_valid_[word] = gpu_valid;
 +    cpu_validity_refresh_queued_[word] = 0;
@@ -71,9 +71,9 @@ diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
  }
  
  void SharedMemory::ClearCache() {
-@@ -308,6 +329,10 @@
+@@ -294,6 +315,10 @@
        system_page_flags_valid_[i] |= valid_bits;
-       uint64_t& gpu_written = system_page_flags_valid_and_gpu_written_[i];
+       u64& gpu_written = system_page_flags_valid_and_gpu_written_[i];
        gpu_written = written_by_gpu ? (gpu_written | valid_bits) : (gpu_written & ~valid_bits);
 +      if (!written_by_gpu && !cpu_validity_refresh_queued_[i]) {
 +        cpu_validity_refresh_queued_[i] = 1;

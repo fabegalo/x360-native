@@ -1,12 +1,14 @@
 #include "../../src/native/commands/occlusion_query.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <rex/memory/ring_buffer.h>
-#include <rex/graphics/xenos.h>
-namespace rex::graphics {
+#include <rex/memory/stream.h>
+#include <rex/xenos/state.h>
+#include <rex/xenos/packet.h>
+namespace rex::gpu {
 void ValidatePacketForBackend(uint32_t, const rex::memory::RingBuffer&);
 }
 using namespace x360n::native;
+namespace xenos = rex::xenos;
 TEST_CASE("Native visibility queries accumulate independently and reset on BEGIN", "[native-zpd]") {
   VisibilityQueries queries;
   for (unsigned id = 0; id < 64; ++id) queries.Begin(id);
@@ -54,14 +56,14 @@ TEST_CASE("Native ZPD uses the D3D pending token and preserves overlapping query
   CHECK(queries.active() == 0);
 }
 TEST_CASE("Native validates ZPD packets before execution", "[native-zpd]") {
-  using namespace rex::graphics;
+  using namespace rex::gpu;
   uint32_t payload[]{rex::byte_swap(uint32_t(xenos::ZPASS_DONE)), 0, 0};
   rex::memory::RingBuffer ring(reinterpret_cast<uint8_t*>(payload), sizeof(payload));
-  ring.set_write_offset(4);
+  ring.SetWriteOffset(4);
   const uint32_t header = 0xC0000000 | (uint32_t(xenos::PM4_EVENT_WRITE_ZPD) << 8);
   CHECK_NOTHROW(ValidatePacketForBackend(header, ring));
-  CHECK(ring.read_offset() == 0);
+  CHECK(ring.GetReadOffset() == 0);
   CHECK_THROWS_WITH(ValidatePacketForBackend(header | (1u << 16), ring), "truncated PM4 packet");
-  ring.set_write_offset(8);
+  ring.SetWriteOffset(8);
   CHECK_THROWS_WITH(ValidatePacketForBackend(header | (1u << 16), ring), "invalid PM4 payload size");
 }

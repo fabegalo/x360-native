@@ -1,26 +1,25 @@
 // Executes the synthetic XEX's actual generated C++, including host dispatch.
 #include "byte_ctr_init.h"
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include "codegen/tool_runtime.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/guest_memory.h>
 #include <cstdio>
 
-using rex::X_STATUS;
 
 int main() {
-  rex::Runtime runtime(X360N_CTR_FIXTURE);
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
+  rex::codegen::ToolApp app("ctr_dispatch_native", X360N_CTR_FIXTURE);
+  if (!app.Start()) return 1;
   const PPCFuncMapping functions[] = {
       {0x82010000, xstart}, {0x8201003C, sub_8201003C}, {0, nullptr}};
-  const rex::PPCImageInfo image{0x82010000, 0x200, 0x82000000, 0x20000, functions};
-  if (runtime.Setup(image, std::move(config), true) != X_STATUS_SUCCESS ||
-      runtime.LoadXexImage("game:\\test.xex") != X_STATUS_SUCCESS) return 1;
-  auto* base = runtime.memory()->virtual_membase();
+  const rex::ppc::PPCImage image{0x82010000, 0x200, 0x82000000, 0x20000, functions};
+  rex::kernel::TitleRuntime runtime(image, true);
+  if (!runtime.GetTitlePaths().game_root.Set(X360N_CTR_FIXTURE) ||
+      !runtime.GetTitlePaths().entry.Set("test.xex") || !runtime.Load()) return 1;
+  auto* base = runtime.GetMembase().GetBase();
   // Only this synthetic fixture is made writable for the post-AOT mutation test.
-  if (!runtime.memory()->LookupHeap(0x82000000)->Protect(0x82000000, 0x10000,
-      rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite)) return 3;
+  if (!runtime.GetGuestMemory().Protect(0x82000000, 0x10000,
+      rex::kernel::GuestProtect::kReadWrite)) return 3;
   unsigned checks = 0;
   // Include indices beyond both the original two slots and the old 512-slot
   // guess. Mutate table data after AOT: dispatch must use the byte actually read.

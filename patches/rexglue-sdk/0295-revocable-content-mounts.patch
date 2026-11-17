@@ -1,0 +1,374 @@
+diff --git a/include/rex/filesystem/mount.h b/include/rex/filesystem/mount.h
+--- a/include/rex/filesystem/mount.h
++++ b/include/rex/filesystem/mount.h
+@@ -38,6 +38,7 @@
+ enum class MountFlags : u8 {
+   kNone = 0,     /**< Read only. */
+   kWritable = 1, /**< Writes, creation and deletion are allowed. */
++  kRevokeOnUnmount = 2, /**< Outstanding files become inaccessible when the mount is removed. */
+ };
+ 
+ struct MountEntry {
+diff --git a/include/rex/filesystem/file.h b/include/rex/filesystem/file.h
+--- a/include/rex/filesystem/file.h
++++ b/include/rex/filesystem/file.h
+@@ -27,6 +27,9 @@
+ class IFile : public NonCopyable {
+  public:
+   virtual ~IFile() = default;
++
++  /** False for an outstanding file whose revocable mount has been removed. */
++  [[nodiscard]] virtual bool IsAccessible() const { return true; }
+ 
+   [[nodiscard]] virtual FileStat GetInfo() const = 0;
+ 
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 4)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 5)
+ /**
+  * Creates an empty mount table.
+  *
+diff --git a/src/filesystem/provider.h b/src/filesystem/provider.h
+--- a/src/filesystem/provider.h
++++ b/src/filesystem/provider.h
+@@ -14,6 +14,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include <atomic>
+ #include <mutex>
+ #include <string>
+ #include <string_view>
+@@ -38,6 +39,12 @@
+   virtual ~Provider();
+ 
+   [[nodiscard]] const MountEntry& GetEntry() const { return entry_; }
++  [[nodiscard]] bool IsAccessible() const { return !revoked_.load(std::memory_order_acquire); }
++  void Revoke() { revoked_.store(true, std::memory_order_release); }
++  [[nodiscard]] std::unique_lock<std::recursive_mutex> LockAccess() const {
++    if (HasFlags(entry_.flags, MountFlags::kRevokeOnUnmount)) return std::unique_lock(mutex_);
++    return {};
++  }
+ 
+   [[nodiscard]] const std::string& GetMountPath() const { return entry_.path; }
+ 
+@@ -76,6 +83,7 @@
+ 
+  private:
+   MountEntry entry_;
++  std::atomic<bool> revoked_{false};
+   mutable std::recursive_mutex mutex_;
+   std::vector<std::unique_ptr<Node>> detached_;
+ };
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -136,6 +136,8 @@
+   const std::string canonical = string::utf8_canonicalize_guest_path(requested);
+   const std::string_view path = canonical;
+   const auto mount_lock = root ? std::unique_lock(root->GetProvider().GetMutex()) : LockMount(path);
++  if (root && !root->GetProvider().IsAccessible())
++    return Err<Opened>(BuildError(FileSystemError::kAccessDenied, "the root mount was revoked"));
+   Access access = ExpandAccess(options.access);
+   auto not_found = [&] {
+     return Err<Opened>(
+@@ -282,6 +284,9 @@
+     return Err(BuildError(FileSystemError::kNoMount, std::format("'{}' is not mounted", path)));
+   }
+   REXFS_DEBUG("unmounted '{}'", path);
++  const auto provider = *it;
++  const std::unique_lock provider_lock(provider->GetMutex());
++  if (HasFlags(provider->GetEntry().flags, MountFlags::kRevokeOnUnmount)) provider->Revoke();
+   providers_.erase(it);
+   return Ok();
+ }
+@@ -444,6 +449,8 @@
+ }
+ 
+ Result<void> FileSystem::Move(Node& node, std::string_view to, bool replace_existing, Node* root) {
++  if (!node.GetProvider().IsAccessible() || (root && !root->GetProvider().IsAccessible()))
++    return Err(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   const std::string target = string::utf8_canonicalize_guest_path(to);
+   const std::string base = string::utf8_find_base_guest_path(target);
+   const std::string name(string::utf8_find_name_from_guest_path(target));
+diff --git a/src/filesystem/node_file.h b/src/filesystem/node_file.h
+--- a/src/filesystem/node_file.h
++++ b/src/filesystem/node_file.h
+@@ -42,6 +42,7 @@
+   ~NodeFile() override;
+ 
+   [[nodiscard]] Node& GetNode() const { return *node_; }
++  [[nodiscard]] bool IsAccessible() const override;
+ 
+   [[nodiscard]] FileStat GetInfo() const override;
+   void Refresh() override;
+diff --git a/src/filesystem/node_file.cpp b/src/filesystem/node_file.cpp
+--- a/src/filesystem/node_file.cpp
++++ b/src/filesystem/node_file.cpp
+@@ -24,12 +24,15 @@
+   node_->ReleaseOpen();
+ }
+ 
++bool NodeFile::IsAccessible() const { return provider_->IsAccessible(); }
++
+ FileStat NodeFile::GetInfo() const {
+   return node_->GetInfo();
+ }
+ 
+ void NodeFile::Refresh() {
+-  node_->Refresh();
++  const auto access_lock = provider_->LockAccess();
++  if (IsAccessible()) node_->Refresh();
+ }
+ 
+ VolumeStat NodeFile::GetVolume() const {
+@@ -37,34 +40,49 @@
+ }
+ 
+ Result<size_t> NodeFile::Read(std::span<u8> buffer, u64 offset) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<size_t>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return stream_->Read(buffer, offset);
+ }
+ 
+ Result<size_t> NodeFile::Write(std::span<const u8> buffer, u64 offset) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<size_t>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return stream_->Write(buffer, offset);
+ }
+ 
+ Result<void> NodeFile::SetLength(u64 length) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<void>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return stream_->SetLength(length);
+ }
+ 
+ Result<void> NodeFile::Flush() {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<void>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return stream_->Flush();
+ }
+ 
+ Result<void> NodeFile::SetAttributes(FileAttributes attributes) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<void>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return node_->SetAttributes(attributes);
+ }
+ 
+ Result<void> NodeFile::SetTimes(const FileTimes& times) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<void>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return node_->SetTimes(times);
+ }
+ 
+ void NodeFile::SetDeleteOnClose(bool delete_on_close) {
+-  node_->SetDeleteOnClose(delete_on_close);
++  const auto access_lock = provider_->LockAccess();
++  if (IsAccessible()) node_->SetDeleteOnClose(delete_on_close);
+ }
+ 
+ Result<std::unique_ptr<IDirectory>> NodeFile::List(std::string_view pattern) {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<std::unique_ptr<IDirectory>>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   if (!node_->IsDirectory()) {
+     return Err<std::unique_ptr<IDirectory>>(
+         BuildError(FileSystemError::kNotDirectory,
+@@ -74,6 +92,8 @@
+ }
+ 
+ Result<std::span<const u8>> NodeFile::View() {
++  const auto access_lock = provider_->LockAccess();
++  if (!IsAccessible()) return Err<std::span<const u8>>(BuildError(FileSystemError::kAccessDenied, "the mount was revoked"));
+   return stream_->View();
+ }
+ 
+@@ -87,6 +107,8 @@
+ }
+ 
+ std::optional<FileStat> NodeDirectory::Next() {
++  const auto access_lock = provider_->LockAccess();
++  if (!provider_->IsAccessible()) return std::nullopt;
+   Node* child = node_->IterateChildren(matcher_, &index_);
+   if (!child) {
+     return std::nullopt;
+diff --git a/src/filesystem/node.cpp b/src/filesystem/node.cpp
+--- a/src/filesystem/node.cpp
++++ b/src/filesystem/node.cpp
+@@ -143,7 +143,7 @@
+   for (Node* node = this; node; node = node->parent_) {
+     --node->open_count_;
+   }
+-  if (open_count_ == 0 && delete_on_close_ && parent_) {
++  if (open_count_ == 0 && delete_on_close_ && parent_ && provider.IsAccessible()) {
+     if (auto deleted = parent_->DeleteChild(*this); !deleted) {
+       REXFS_WARN("delete on close of '{}' failed, {}", info_.absolute_path,
+                  deleted.error().message);
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+@@ -72,6 +72,7 @@
+   }
+ 
+   REX_KERNEL_LOOKUP(file, FileObject, file_handle);
++  if (!file->file->IsAccessible()) return X_STATUS_INVALID_HANDLE;
+ 
+   info_ptr.Zero(info_length);
+ 
+@@ -196,6 +197,7 @@
+   }
+ 
+   REX_KERNEL_LOOKUP(file, FileObject, file_handle);
++  if (!file->file->IsAccessible()) return X_STATUS_INVALID_HANDLE;
+ 
+   X_STATUS result = X_STATUS_SUCCESS;
+   u32 out_length;
+@@ -342,6 +344,7 @@
+   }
+ 
+   REX_KERNEL_LOOKUP(file, FileObject, file_handle);
++  if (!file->file->IsAccessible()) return X_STATUS_INVALID_HANDLE;
+ 
+   info_ptr.Zero(info_length);
+ 
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io.cpp b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+@@ -132,7 +132,7 @@
+   // 0xFFFFFFFD is ObDosDevices.
+   if (object_attrs->root_directory != 0xFFFFFFFD && object_attrs->root_directory != 0) {
+     root_file = kernel::GetCurrent().GetObjectTable().Get<FileObject>(object_attrs->root_directory);
+-    if (!root_file) {
++    if (!root_file || !root_file->file->IsAccessible()) {
+       return X_STATUS_INVALID_HANDLE;
+     }
+   }
+@@ -463,7 +463,7 @@
+   // 0xFFFFFFFD is ObDosDevices.
+   if (object_attrs->root_directory != 0xFFFFFFFD && object_attrs->root_directory != 0) {
+     root_file = kernel::GetCurrent().GetObjectTable().Get<FileObject>(object_attrs->root_directory);
+-    if (!root_file) {
++    if (!root_file || !root_file->file->IsAccessible()) {
+       return X_STATUS_INVALID_HANDLE;
+     }
+   }
+diff --git a/src/kernel/object/file_object.cpp b/src/kernel/object/file_object.cpp
+--- a/src/kernel/object/file_object.cpp
++++ b/src/kernel/object/file_object.cpp
+@@ -145,6 +145,7 @@
+ 
+ X_STATUS FileObject::QueryDirectory(TitleRuntime&, X_FILE_DIRECTORY_INFORMATION* out_info,
+                                     size_t length, std::string_view file_name, bool restart) {
++  if (!file->IsAccessible()) return X_STATUS_ACCESS_DENIED;
+   std::lock_guard<std::mutex> lock(file_lock);
+   REX_ASSERT(out_info != nullptr);
+ 
+diff --git a/tests/unit/filesystem/file_system_test.cpp b/tests/unit/filesystem/file_system_test.cpp
+--- a/tests/unit/filesystem/file_system_test.cpp
++++ b/tests/unit/filesystem/file_system_test.cpp
+@@ -382,3 +382,35 @@
+   CHECK_FALSE(created);
+   CHECK_FALSE(std::filesystem::exists(fixture.GetTemp() / "game" / "new.txt"));
+ }
++
++
++REX_TEST_CASE("revocable mounts deny stale streams without reviving them on a new mount", "[filesystem][mount-revocation]") {
++  Fixture fixture;
++  WriteHost(fixture.GetTemp() / "save.bin", "original");
++  WriteHost(fixture.GetTemp() / "folder" / "child.bin", "child");
++  auto& fs = fixture.GetFileSystem();
++  fixture.MountTemp(kRoot, MountFlags::kWritable | MountFlags::kRevokeOnUnmount);
++  auto old = fixture.Open("\\Device\\Test\\save.bin", {.access = Access::kReadAccess | Access::kWriteAccess});
++  auto root = fixture.Open("\\Device\\Test\\folder");
++  auto walk = root.file->List(""); REQUIRE(walk);
++  CHECK(old.file->IsAccessible());
++  REQUIRE(old.file->Flush());
++  REQUIRE(fs.Unmount(kRoot));
++  CHECK_FALSE(old.file->IsAccessible());
++  std::array<u8, 8> bytes{};
++  auto denied = old.file->Read(bytes, 0); REQUIRE_FALSE(denied);
++  CHECK(CodeOf(denied.error()) == FileSystemError::kAccessDenied);
++  CHECK_FALSE(old.file->Write(bytes, 0)); CHECK_FALSE(old.file->SetLength(0));
++  CHECK_FALSE(old.file->Flush()); CHECK_FALSE(old.file->SetAttributes(rex::filesystem::FileAttributes::kNone));
++  CHECK_FALSE(fs.Rename(*old.file, "replacement.bin", false));
++  CHECK_FALSE(old.file->SetTimes({})); CHECK_FALSE(old.file->View());
++  CHECK_FALSE(root.file->List("")); CHECK_FALSE((*walk)->Next());
++  CHECK_FALSE(fs.OpenRelative(*root.file, "child.bin", {}));
++  REQUIRE(fs.Mount({std::string(kRoot), ProviderType::kHostDirectory, fixture.GetTemp(), MountFlags::kWritable, {}}));
++  auto fresh = fixture.Open("\\Device\\Test\\save.bin");
++  CHECK(ReadText(*fresh.file) == "original"); CHECK_FALSE(old.file->IsAccessible());
++  old.file->SetDeleteOnClose(true); old.file.reset();
++  CHECK(std::filesystem::exists(fixture.GetTemp() / "save.bin"));
++  REQUIRE(fs.Unmount(kRoot));
++  CHECK(fresh.file->IsAccessible()); CHECK(ReadText(*fresh.file) == "original");
++}
+diff --git a/tests/unit/kernel/files_test.cpp b/tests/unit/kernel/files_test.cpp
+--- a/tests/unit/kernel/files_test.cpp
++++ b/tests/unit/kernel/files_test.cpp
+@@ -69,14 +69,14 @@
+   return static_cast<bool>(c.GetRuntime().GetObjectTable().GetByAddress(address));
+ }
+ 
+-void MountScratch(KernelFixture& fixture) {
++void MountScratch(KernelFixture& fixture, rex::filesystem::MountFlags flags = rex::filesystem::MountFlags::kWritable) {
+   namespace fs = rex::filesystem;
+   auto* file_system = StateOf(fixture.GetRuntime()).GetFileSystem();
+   REQUIRE(file_system);
+   REQUIRE(file_system->Mount({"\\Device\\Scratch",
+                               fs::ProviderType::kHostDirectory,
+                               fixture.GetRoot() / "scratch",
+-                              fs::MountFlags::kWritable,
++                              flags,
+                               {}}));
+   REQUIRE(file_system->Link("scratch:", "\\Device\\Scratch"));
+ }
+@@ -1266,3 +1266,44 @@
+     CHECK(CallingThread(c).GetLastError() == NtToDos(rex::kernel::X_STATUS_OBJECT_NAME_NOT_FOUND));
+   });
+ }
++
++
++REX_TEST_CASE("revoked mount handles retain NT error codes and never revive after remount", "[kernel][files][filesystem][mount-revocation]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    WriteScratch(root, "data.bin", 8);
++    std::filesystem::create_directories(root / "scratch" / "folder");
++  });
++  namespace fs = rex::filesystem;
++  MountScratch(fixture, fs::MountFlags::kWritable | fs::MountFlags::kRevokeOnUnmount);
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto* system = StateOf(fixture.GetRuntime()).GetFileSystem();
++    const auto out = c.Alloc(4), copy = c.Alloc(4), status = c.Alloc(8), data = c.Alloc(256), offset = c.AllocQuad(0);
++    REQUIRE(c.Kernel("NtCreateFile", {out, kReadWriteAccess, c.AllocAttributes("scratch:\\data.bin"), status, 0, 0, 3, 1, 0x20}) == 0);
++    const auto original = c.Load32(out);
++    REQUIRE(c.Kernel("NtDuplicateObject", {original, copy, 0}) == 0);
++    const auto duplicate = c.Load32(copy);
++    REQUIRE(c.Kernel("NtClose", {original}) == 0);
++    REQUIRE(c.Kernel("NtCreateFile", {out, 0x80100000, c.AllocAttributes("scratch:\\folder"), status, 0, 0, 3, 1, 1}) == 0);
++    const auto directory = c.Load32(out);
++    REQUIRE(system->Unmount("\\Device\\Scratch"));
++    c.Store32(data, 0xDEADBEEF);
++    c.Store32(status, 0xCAFEBABE); c.Store32(status + 4, 0xCAFEBABE);
++    CHECK(c.Kernel("NtReadFile", {duplicate, 0, 0, 0, status, data, 4, offset}) == rex::kernel::X_STATUS_ACCESS_DENIED);
++    // Immediate NT read errors leave IOSB untouched, like the official EOF/error regressions.
++    CHECK(c.Load32(status) == 0xCAFEBABE); CHECK(c.Load32(status + 4) == 0xCAFEBABE);
++    CHECK(c.Load32(data) == 0xDEADBEEF);
++    CHECK(c.Kernel("NtWriteFile", {duplicate, 0, 0, 0, status, data, 4, offset}) == rex::kernel::X_STATUS_ACCESS_DENIED);
++    CHECK(c.Kernel("NtFlushBuffersFile", {duplicate, status}) == rex::kernel::X_STATUS_ACCESS_DENIED);
++    CHECK(c.Kernel("NtQueryInformationFile", {duplicate, status, data, 8, 14}) == rex::kernel::X_STATUS_INVALID_HANDLE);
++    CHECK(c.Kernel("NtSetInformationFile", {duplicate, status, data, 8, 14}) == rex::kernel::X_STATUS_INVALID_HANDLE);
++    CHECK(c.Kernel("NtQueryDirectoryFile", {directory, 0, 0, 0, status, data, 256, 0, 0}) == rex::kernel::X_STATUS_ACCESS_DENIED);
++    REQUIRE(system->Mount({"\\Device\\Scratch", fs::ProviderType::kHostDirectory, fixture.GetRoot() / "scratch", fs::MountFlags::kWritable, {}}));
++    CHECK(c.Kernel("NtReadFile", {duplicate, 0, 0, 0, status, data, 4, offset}) == rex::kernel::X_STATUS_ACCESS_DENIED);
++    REQUIRE(c.Kernel("NtCreateFile", {out, kReadWriteAccess, c.AllocAttributes("scratch:\\data.bin"), status, 0, 0, 3, 1, 0x20}) == 0);
++    const auto fresh = c.Load32(out);
++    CHECK(c.Kernel("NtReadFile", {fresh, 0, 0, 0, status, data, 4, offset}) == 0);
++    CHECK(c.Load32(data) == 0x78787878);
++    CHECK(c.Kernel("NtClose", {fresh}) == 0); CHECK(c.Kernel("NtClose", {duplicate}) == 0);
++    CHECK(c.Kernel("NtClose", {directory}) == 0);
++  });
++}

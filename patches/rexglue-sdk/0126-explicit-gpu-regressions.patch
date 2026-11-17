@@ -1,0 +1,45 @@
+diff --git a/tests/unit/base/driver_select_test.cpp b/tests/unit/base/driver_select_test.cpp
+--- a/tests/unit/base/driver_select_test.cpp
++++ b/tests/unit/base/driver_select_test.cpp
+@@ -73,10 +73,13 @@
+   std::span<const rex::DriverRegistration> GetDrivers() const override { return kDrivers; }
+ 
+  private:
+-  static constexpr std::array<rex::DriverRegistration, 3> kDrivers = {
++  static constexpr std::array<rex::DriverRegistration, 6> kDrivers = {
+       rex::DriverRegistration{rex::DriverType::kInput, "a", {}, &Create<'a'>},
+       rex::DriverRegistration{rex::DriverType::kInput, "b", {}, &Create<'b'>},
+-      rex::DriverRegistration{rex::DriverType::kInput, "bad", {}, &CreateFailing}};
++      rex::DriverRegistration{rex::DriverType::kInput, "bad", {}, &CreateFailing},
++      rex::DriverRegistration{rex::DriverType::kGraphics, "d3d12", {}, &Create<'d'>},
++      rex::DriverRegistration{rex::DriverType::kGraphics, "vulkan", {}, &Create<'v'>},
++      rex::DriverRegistration{rex::DriverType::kGraphics, "bad", {}, &CreateFailing}};
+ };
+ 
+ struct Fixture {
+@@ -170,3 +173,25 @@
+   CHECK_FALSE(other_accepted);
+   CHECK_FALSE(other_ran);
+ }
++
++REX_TEST_CASE_METHOD(Fixture, "explicit graphics selection never substitutes a backend",
++                     "[sdk][driver_select][explicit-gpu]") {
++  for (const auto& [name, expected] : std::array<std::pair<std::string_view, std::string_view>, 2>{
++           std::pair{"d3d12", "d"}, std::pair{"vulkan", "v"}}) {
++    g_events.clear();
++    auto selected = rex::SelectDrivers(group, rex::DriverType::kGraphics, name, context);
++    REQUIRE(selected); REQUIRE(selected->size() == 1);
++    CHECK(selected->front()->GetName() == expected);
++    REQUIRE(g_events.size() == 1);
++    CHECK(g_events.front() == std::string("init ") + std::string(expected));
++    CHECK(rex::GetDriverModules(rex::DriverType::kGraphics, name, rex::GraphicsFamily::kXenos) ==
++          std::vector<std::string>{"rexgpu-xenos-" + std::string(name)});
++  }
++  for (std::string_view name : {"missing", "bad"}) {
++    g_events.clear();
++    auto selected = rex::SelectDrivers(group, rex::DriverType::kGraphics, name, context);
++    REQUIRE_FALSE(selected);
++    CHECK(selected.error().message.find(name) != std::string::npos);
++    CHECK(g_events.empty());
++  }
++}

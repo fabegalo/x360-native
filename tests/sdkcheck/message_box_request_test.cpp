@@ -1,12 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/runtime.h>
-#include <rex/cvar.h>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/system/xio.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/types/io.h>
+#include <rex/ppc/recompiled_code.h>
+#include <rex/xam/title_lifecycle.h>
+#include <rex/xam/system_ui.h>
+#include "xam/xam_state.h"
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -17,7 +21,6 @@
 extern "C" REX_FUNC(__imp__XamShowMessageBoxUI);
 extern "C" REX_FUNC(__imp__XMsgCompleteIORequest);
 extern "C" REX_FUNC(__imp__XamShowDeviceSelectorUI);
-REXCVAR_DECLARE(bool, headless);
 
 TEST_CASE("Message boxes use the selected original HUD with their own request ABI",
           "[sdk][message-box-request]") {
@@ -30,13 +33,9 @@ TEST_CASE("Message boxes use the selected original HUD with their own request AB
 
 TEST_CASE("Message boxes transport original owned requests instead of choosing a default",
           "[sdk][message-box-request]") {
-  const bool previous=REXCVAR_GET(headless);
-  struct Restore { bool value; ~Restore(){REXCVAR_SET(headless,value);} } restore{previous};
-  REXCVAR_SET(headless,true); // No renderer, window or automatic UI acceptance.
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};config.tool_mode=true;config.kernel_init=rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config))==0);
-  auto* memory=rt.memory();auto* base=memory->virtual_membase();
+  rex::test::KernelFixture fixture;
+  auto& rt = fixture.GetRuntime();
+  auto* memory = &rex::kernel::GetAddressSpace(rt); auto* base=rt.GetMembase().GetBase();
   const auto block=memory->SystemHeapAlloc(16384);REQUIRE(block);
   std::memset(base+block,0,16384);
   const auto put=[&](uint32_t at,uint32_t word){rex::memory::store_and_swap<uint32_t>(base+at,word);};
@@ -50,20 +49,18 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
   const auto output=block+2048,io=block+2112;
   put(output,0xCCCCCCCC);put(output+4,0xDDDDDDDD);
   bool delivered=false;std::vector<uint8_t> request;
-  auto xam=rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-  REQUIRE(xam);
+  auto* xam=&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI();
   xam->system_ui_request=[&](uint32_t message,uint32_t at,uint32_t size){
     CHECK(message==0x2100D);CHECK(size==1148);
     delivered=true;request.assign(base+at,base+at+size);
     const auto overlap=rex::memory::load_and_swap<uint32_t>(base+at+1144);
     if(overlap) CHECK(rex::memory::load_and_swap<uint32_t>(base+overlap+8)==
-                     rex::system::XThread::GetCurrentThreadHandle());
-    return rex::X_HRESULT(0);
+                     rex::kernel::KernelThread::GetCurrentThreadHandle());
+    return 0u;
   };
   uint32_t result=~0u;
-  auto caller=rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      rt.kernel_state(),128*1024,0,[&]{
-    PPCContext ctx{};ctx.r1.u64=block+12000;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    auto& ctx=caller.GetContext();ctx.r1.u64=block+12000;
     ctx.r3.u64=0xFF;ctx.r4.u64=block;ctx.r5.u64=block+128;ctx.r6.u64=2;
     ctx.r7.u64=block+1024;ctx.r8.u64=1;ctx.r9.u64=3;ctx.r10.u64=output;
     put(ctx.r1.u32+0x54,io);
@@ -72,10 +69,7 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
     for(unsigned i=0;!delivered && i<50 &&
         rex::memory::load_and_swap<uint32_t>(base+io)==997;++i)
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return 0;
-  }));
-  REQUIRE(caller->Create()==0);
-  uint64_t timeout=uint64_t(-50'000'000ll);REQUIRE(caller->Wait(0,0,0,&timeout)==0);
+  });
   REQUIRE(delivered);
   CHECK(result==997);REQUIRE(request.size()==1148);
   const auto word=[&](size_t offset){return rex::memory::load_and_swap<uint32_t>(request.data()+offset);};
@@ -94,13 +88,14 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
   standard.r8.u64=1;standard.r9.u64=3;standard.r10.u64=output;
   const auto invoke=[&](PPCContext args,uint32_t overlap){
     uint32_t returned=~0u;
-    auto thread=rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(),128*1024,0,[&]{
-      args.r1.u64=block+12000;put(args.r1.u32+0x54,overlap);
-      __imp__XamShowMessageBoxUI(args,base);returned=args.r3.u32;return 0;
-    }));
-    REQUIRE(thread->Create()==0);uint64_t limit=uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0,0,0,&limit)==0);return returned;
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      auto& ctx=caller.GetContext();
+      ctx.r3=args.r3;ctx.r4=args.r4;ctx.r5=args.r5;ctx.r6=args.r6;
+      ctx.r7=args.r7;ctx.r8=args.r8;ctx.r9=args.r9;ctx.r10=args.r10;
+      ctx.r1.u64=block+12000;put(ctx.r1.u32+0x54,overlap);
+      __imp__XamShowMessageBoxUI(ctx,base);returned=ctx.r3.u32;
+    });
+    return returned;
   };
   // Original inline capacities include their terminator. Caller buffers can
   // disappear immediately after dispatch without changing the copied request.
@@ -162,8 +157,8 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
     const auto target=rex::memory::load_and_swap<uint32_t>(base+at+1140);
     const auto overlap=rex::memory::load_and_swap<uint32_t>(base+at+1144);
     put(target,1);put(target+4,2);
-    rt.kernel_state()->CompleteOverlappedImmediateEx(overlap,0,0,0);
-    return rex::X_HRESULT(0);
+    rex::xam::CurrentTitle().overlapped_dispatcher.Complete(overlap,{0,0,0});
+    return 0u;
   };
   REQUIRE(invoke(standard,io)==997);
   CHECK(rex::memory::load_and_swap<uint32_t>(base+output)==1);
@@ -172,7 +167,7 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
   for(const auto [status,expected]:{std::pair<uint32_t,uint32_t>{0x8007000E,14},
       {0x80070057,1627},{0x80004005,1627}}){
     CAPTURE(status);
-    xam->system_ui_request=[&](uint32_t,uint32_t,uint32_t){return rex::X_HRESULT(status);};
+    xam->system_ui_request=[&](uint32_t,uint32_t,uint32_t){return status;};
     CHECK(invoke(standard,io)==expected);
     CHECK(rex::memory::load_and_swap<uint32_t>(base+io)==expected);
     CHECK(rex::memory::load_and_swap<uint32_t>(base+io+24)==status);
@@ -184,56 +179,56 @@ TEST_CASE("Message boxes transport original owned requests instead of choosing a
 
 TEST_CASE("System UI completion retains the requesting thread across a service worker",
           "[sdk][message-box-io-context]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};config.tool_mode=true;config.kernel_init=rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config))==0);
-  const auto address=rt.memory()->SystemHeapAlloc(sizeof(rex::system::XAM_OVERLAPPED));
-  REQUIRE(address);auto* io=rt.memory()->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(address);
+  rex::test::KernelFixture fixture;
+  auto& rt=fixture.GetRuntime();
+  auto* memory=&rex::kernel::GetAddressSpace(rt);
+  const auto address=memory->SystemHeapAlloc(sizeof(rex::kernel::XOVERLAPPED));
+  REQUIRE(address);auto* io=memory->TranslateVirtual<rex::kernel::XOVERLAPPED*>(address);
   std::memset(io,0,sizeof(*io));uint32_t requester=0,completer=0,returned=~0u;
   const auto start=[&](auto callback){
-    auto thread=rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(),128*1024,0,callback));
-    REQUIRE(thread->Create()==0);uint64_t limit=uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0,0,0,&limit)==0);return thread;
+    auto thread=rt.GetThreadRegistry().LaunchHostThread("UI completion",128*1024,std::move(callback));
+    REQUIRE(thread); uint64_t limit=uint64_t(-50'000'000ll);
+    REQUIRE(rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*thread,0,0,0,&limit)==0);
+    return *thread;
   };
   auto first=start([&]{
-    requester=rex::system::XThread::GetCurrentThreadHandle();
+    requester=rex::kernel::KernelThread::GetCurrentThreadHandle();
     io->result=997;io->context=requester;return 0;
   });
   auto second=start([&]{
-    completer=rex::system::XThread::GetCurrentThreadHandle();
-    PPCContext ctx{};ctx.r3.u64=address;ctx.r4.u64=0;ctx.r5.u64=0;ctx.r6.u64=7;
-    __imp__XMsgCompleteIORequest(ctx,rt.memory()->virtual_membase());
+    completer=rex::kernel::KernelThread::GetCurrentThreadHandle();
+    auto& ctx=*rex::kernel::KernelThread::GetCallingThread()->GetThreadState()->GetContext();ctx.r3.u64=address;ctx.r4.u64=0;ctx.r5.u64=0;ctx.r6.u64=7;
+    __imp__XMsgCompleteIORequest(ctx,memory->GetVirtualMembase());
     returned=ctx.r3.u32;return 0;
   });
   REQUIRE(requester);REQUIRE(completer);REQUIRE(requester!=completer);
   CHECK(returned==0);CHECK(uint32_t(io->result)==0);CHECK(uint32_t(io->length)==7);
   CHECK(uint32_t(io->context)==requester);
+  rex::kernel::CloseOwned(rt.GetObjectTable(),first);
+  rex::kernel::CloseOwned(rt.GetObjectTable(),second);
 }
 
 TEST_CASE("Storage UI records the initiating caller before dispatching its modal",
           "[sdk][message-box-io-context]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};config.tool_mode=true;config.kernel_init=rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config))==0);
-  const auto address=rt.memory()->SystemHeapAlloc(64);REQUIRE(address);
-  auto* base=rt.memory()->virtual_membase();std::memset(base+address,0,64);
-  auto* io=rt.memory()->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(address);
-  auto xam=rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-  REQUIRE(xam);bool delivered=false;uint32_t returned=~0u;
+  rex::test::KernelFixture fixture;
+  auto& rt=fixture.GetRuntime();
+  auto* memory=&rex::kernel::GetAddressSpace(rt);
+  const auto address=memory->SystemHeapAlloc(64);REQUIRE(address);
+  auto* base=memory->GetVirtualMembase();std::memset(base+address,0,64);
+  auto* io=memory->TranslateVirtual<rex::kernel::XOVERLAPPED*>(address);
+  auto* xam=&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI();bool delivered=false;uint32_t returned=~0u;
   xam->system_ui_request=[&](uint32_t message,uint32_t,uint32_t size){
     delivered=true;CHECK(message==0x2100B);CHECK(size==40);
     CHECK(uint32_t(io->result)==997);
-    CHECK(uint32_t(io->context)==rex::system::XThread::GetCurrentThreadHandle());
-    return rex::X_HRESULT(0);
+    CHECK(uint32_t(io->context)==rex::kernel::KernelThread::GetCurrentThreadHandle());
+    return 0u;
   };
-  auto thread=rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      rt.kernel_state(),128*1024,0,[&]{
-    PPCContext ctx{};ctx.r3.u64=0xFF;ctx.r4.u64=1;ctx.r5.u64=0;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    auto& ctx=caller.GetContext();
+    ctx.r3.u64=0xFF;ctx.r4.u64=1;ctx.r5.u64=0;
     ctx.r6.u64=1024;ctx.r7.u64=address+32;ctx.r8.u64=address;
-    __imp__XamShowDeviceSelectorUI(ctx,base);returned=ctx.r3.u32;return 0;
-  }));
-  REQUIRE(thread->Create()==0);uint64_t limit=uint64_t(-50'000'000ll);
-  REQUIRE(thread->Wait(0,0,0,&limit)==0);CHECK(delivered);CHECK(returned==997);
+    __imp__XamShowDeviceSelectorUI(ctx,base);returned=ctx.r3.u32;
+  });
+  CHECK(delivered);CHECK(returned==997);
   xam->system_ui_request={};
 }

@@ -1,0 +1,31 @@
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -31,6 +31,7 @@
+ 
+ #include <rex/logging/log_category.h>
+ #include <rex/platform/file.h>
++#include <rex/platform/thread.h>
+ #include <rex/xam/content_manager.h>
+ #include <rex/xam/device.h>
+ #include <rex/hash.h>
+@@ -1101,6 +1102,19 @@
+     if (ec) return PictureFsError(ec);
+   }
+   fs::remove(stage, ec);
++#if REX_PLATFORM_WIN32
++  // NTFS may briefly reject an empty directory after its files were deleted.
++  // Retry only that condition; concurrent contents and other I/O errors stay errors.
++  for (unsigned retry = 0; retry < 25 && ec == std::errc::directory_not_empty; ++retry) {
++    if (!IsUnlinkedStoragePath(stage)) return 5;
++    std::error_code inspected;
++    if (!fs::is_empty(stage, inspected))
++      return inspected ? PictureFsError(inspected) : PictureFsError(ec);
++    platform::SleepFor(std::chrono::milliseconds(10));
++    if (!IsUnlinkedStoragePath(stage)) return 5;
++    fs::remove(stage, ec);
++  }
++#endif
+   return ec ? PictureFsError(ec) : 0;
+ }
+ X_RESULT PictureRecover(const fs::path& package, bool& changed) {

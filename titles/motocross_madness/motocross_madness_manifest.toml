@@ -2,7 +2,7 @@
 
 [project]
 name = "motocross_madness"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 # Codegen-only VFS root: it must contain both default.xex and the original xam.xex
 # below (project_recompiler.cpp refuses modules outside it). The game runs from
 # [x360n] game_data_root (titles/motocross_madness/extracted).

@@ -1,0 +1,346 @@
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -758,6 +758,8 @@
+   void Append(AchievementDetails item) { items_.push_back(std::move(item)); }
+ 
+   u32 Write(u32 buffer_ptr, u8* buffer_data, u32* written_count) {
++    std::lock_guard lock(*mutex_);
++    if (written_count) *written_count = 0;
+     size_t count = std::min(items_.size() - current_item_, items_per_enumerate_);
+     if (!count) {
+       return kernel::X_ERROR_NO_MORE_FILES;
+@@ -799,10 +801,7 @@
+   u32 AppendString(StringBuffer& sb, const std::u16string_view string) {
+     size_t count = string.length() + 1;
+     size_t size = count * sizeof(char16_t);
+-    if (size > sb.remaining_bytes) {
+-      REX_ASSERT_ALWAYS();
+-      return 0;
+-    }
++    if (size > sb.remaining_bytes) return 0;
+     auto ptr = sb.ptr;
+     rex::string::CopyAndSwapTruncating(reinterpret_cast<char16_t*>(sb.data), string, count);
+     sb.ptr += static_cast<u32>(size);
+@@ -814,97 +813,149 @@
+   size_t items_per_enumerate_;
+   u32 flags_;
+   std::vector<AchievementDetails> items_;
++  std::unique_ptr<std::mutex> mutex_ = std::make_unique<std::mutex>();
+   size_t current_item_ = 0;
+ };
+ 
+-u32 XamUserCreateAchievementEnumerator_entry([[maybe_unused]] u32 title_id, u32 user_index,
+-                                             [[maybe_unused]] u32 xuid, u32 flags,
+-                                             [[maybe_unused]] u32 offset, u32 count,
+-                                             MappedU32 buffer_size_ptr, MappedU32 handle_ptr) {
+-  if (!count || !buffer_size_ptr || !handle_ptr) {
+-    return kernel::X_ERROR_INVALID_PARAMETER;
+-  }
+-
++u32 XamUserCreateAchievementEnumerator_entry(u32 title_id, u32 user_index, u64 xuid, u32 flags,
++                                             u32 offset, u32 count, MappedU32 buffer_size_ptr,
++                                             MappedU32 handle_ptr) {
++  // Original 17559 81670190 never validates flags; flags & 7 selects strings.
++  // Other bits (GamerProfile requests 0x27) reach the service, which has no
++  // other source than the local ledger here.
++  if (!count || !buffer_size_ptr || !handle_ptr ||
++      !AchievementGuestSpan( buffer_size_ptr.GetGuestAddress(), 4,
++                            kernel::kMemoryProtectWrite) ||
++      !AchievementGuestSpan( handle_ptr.GetGuestAddress(), 4,
++                            kernel::kMemoryProtectWrite)) {
++    return X_ERROR_INVALID_PARAMETER;
++  }
++  *handle_ptr = 0;
+   if (user_index >= 4) {
+-    return kernel::X_ERROR_INVALID_PARAMETER;
++    return X_ERROR_INVALID_PARAMETER;
+   }
+ 
+   size_t entry_size = sizeof(X_ACHIEVEMENT_DETAILS);
+   if (flags & 7) {
+     entry_size += X_ACHIEVEMENT_DETAILS::kStringBufferSize;
+   }
+-
+-  if (buffer_size_ptr) {
+-    *buffer_size_ptr = static_cast<u32>(entry_size) * count;
++  if (count > UINT32_MAX / entry_size) return X_ERROR_INVALID_PARAMETER;
++  *buffer_size_ptr = static_cast<uint32_t>(entry_size) * count;
++
++  const auto identity = CurrentXAM().GetUserProfile().identity();
++  if (user_index != 0 || !identity.signin_state) return X_ERROR_NO_SUCH_USER;
++  const uint64_t requested_xuid = xuid ? uint64_t(xuid) : identity.xuid;
++  if (!CurrentXAM().GetUserProfile().FindLocal(requested_xuid).xuid) return X_ERROR_NO_SUCH_USER;
++  if (!title_id && !CurrentXAM().GetTitleID()) return X_ERROR_INVALID_PARAMETER;
++  const uint32_t requested_title = title_id ? uint32_t(title_id) : CurrentXAM().GetTitleID();
++  std::vector<OfflineAchievementRecord> records;
++  const auto error = OfflineAchievementError(
++      CurrentXAM().GetOfflineAchievements().List(requested_xuid, requested_title, records));
++  if (error) return error;
++
++  // The public ABI reserves 464 bytes of UTF-16 strings per record. Reject
++  // metadata that cannot fit rather than assert, truncate, or write past it.
++  std::vector<AchievementItemList::AchievementDetails> details;
++  for (size_t i = std::min<size_t>(offset, records.size()); i < records.size(); ++i) {
++    const auto& record = records[i];
++    const auto& info = record.info;
++    AchievementItemList::AchievementDetails item{
++        info.id, rex::string::ToUTF16(info.label), rex::string::ToUTF16(info.description),
++        rex::string::ToUTF16(info.unachieved_description), info.image_id, info.gamerscore,
++        {static_cast<uint32_t>(record.unlock_filetime),
++         static_cast<uint32_t>(record.unlock_filetime >> 32)},
++        (info.flags & ~0x30000u) | (record.unlock_filetime ? 0x20000u : 0u)};
++    const size_t chars = ((flags & 1) ? item.label.size() + 1 : 0) +
++                         ((flags & 2) ? item.description.size() + 1 : 0) +
++                         ((flags & 4) ? item.unachieved.size() + 1 : 0);
++    if (chars * 2 > X_ACHIEVEMENT_DETAILS::kStringBufferSize) return 13; // ERROR_INVALID_DATA
++    details.push_back(std::move(item));
+   }
+ 
+   AchievementItemList items(count, flags);
+-
+-  // ACHIEVED and ACHIEVED_ONLINE, the flags a title tests for an earned achievement.
+-  constexpr u32 kAchievedFlags = 0x00030000;
+-
+-  auto fill_unlock = [](AchievementItemList::AchievementDetails& item, u32 id) {
+-    u64 ft = CurrentXAM().GetAchievementManager().GetUnlockTime(id).value_or(0);
+-    if (ft) {
+-      item.flags |= kAchievedFlags;
+-      item.unlock_time.unk_0 = static_cast<u32>(ft & 0xFFFF'FFFF);
+-      item.unlock_time.unk_4 = static_cast<u32>(ft >> 32);
+-    }
+-  };
+-
+-  const auto achievements = CurrentXAM().GetAchievementManager().ListAchievements();
+-  if (!achievements.empty()) {
+-    for (const auto& info : achievements) {
+-      auto item =
+-          AchievementItemList::AchievementDetails{info.id,
+-                                                  rex::string::ToUTF16(info.label),
+-                                                  rex::string::ToUTF16(info.description),
+-                                                  rex::string::ToUTF16(info.unachieved_description),
+-                                                  info.image_id,
+-                                                  info.gamerscore,
+-                                                  {0, 0},
+-                                                  info.flags};
+-      fill_unlock(item, info.id);
+-      items.Append(item);
+-    }
+-  } else {
+-    const std::unique_ptr<rex::filesystem::IXDBFTitleData> db = CurrentXAM().OpenTitleXDBF();
+-    if (db->IsValid()) {
+-      const rex::kernel::XLanguage language =
+-          db->GetSupportedLanguage(CurrentXAM().GetUserLanguage());
+-      for (const rex::filesystem::XDBFAchievementTableEntry& entry : db->GetAchievements()) {
+-        auto item = AchievementItemList::AchievementDetails{
+-            entry.id,
+-            rex::string::ToUTF16(db->GetStringTableEntry(language, entry.label_id)),
+-            rex::string::ToUTF16(db->GetStringTableEntry(language, entry.description_id)),
+-            rex::string::ToUTF16(db->GetStringTableEntry(language, entry.unachieved_id)),
+-            entry.image_id,
+-            entry.gamerscore,
+-            {0, 0},
+-            entry.flags};
+-        fill_unlock(item, entry.id);
+-        items.Append(item);
+-      }
+-    }
+-  }
+-
++  for (auto& item : details) items.Append(std::move(item));
+   kernel::X_HANDLE handle = kernel::kXInvalidHandleValue;
+-  auto result = CreateEnumerator(
+-      &handle, EnumeratorInit{user_index, 0xFB, 0xB000A, 0xB000B, 0},
+-      EnumeratorObject(
+-          count, entry_size,
+-          [items = std::move(items)](u32 buffer_ptr, u8* buffer_data, u32* written_count) mutable {
+-            return items.Write(buffer_ptr, buffer_data, written_count);
++  const auto result = CreateEnumerator(&handle, {user_index, 0xFB, 0xB000A, 0xB000B, 0},
++      EnumeratorObject(count, entry_size,
++          [items = std::move(items)](u32 address, u8* data, u32* written) mutable {
++            return items.Write(address, data, written);
+           }));
+-  if (result == kernel::X_STATUS_NO_MEMORY) {
+-    return kernel::X_ERROR_NOT_ENOUGH_MEMORY;
+-  }
+-  if (kernel::XFAILED(result)) {
+-    return result;
+-  }
+-
++  if (result == kernel::X_STATUS_NO_MEMORY) return kernel::X_ERROR_NOT_ENOUGH_MEMORY;
++  if (kernel::XFAILED(result)) return kernel::X_ERROR_FUNCTION_FAILED;
+   *handle_ptr = handle;
+-  return kernel::X_ERROR_SUCCESS;
++  return X_ERROR_SUCCESS;
++}
++
++// X_XDBF_GPD_TITLE_PLAYED (40 bytes), followed by WCHAR title_name[64].
++// Layout documented by Xenia Canary xam/xdbf/gpd_info.h and xenumerator.h.
++struct X_OFFLINE_TITLE_PLAYED {
++  be_u32 title_id, achievement_count, unlocked_count, total_score, earned_score;
++  be_u16 online_count;
++  uint8_t avatar_awards[6];
++  be_u32 flags;
++  X_ACHIEVEMENT_UNLOCK_TIME last_played;
++  be_u16 title_name[64];
++};
++REX_STATIC_ASSERT_SIZE(X_OFFLINE_TITLE_PLAYED, 168);
++
++u32 XamUserCreateTitlesPlayedEnumerator_entry([[maybe_unused]] u32 title_id, u32 user_index, u64 xuid,
++                                              u32 offset, u32 count,
++                                              MappedU32 buffer_size, MappedU32 handle) {
++  if (!count || count > UINT32_MAX / sizeof(X_OFFLINE_TITLE_PLAYED) || user_index >= 4 ||
++      !buffer_size || !handle ||
++      !AchievementGuestSpan( buffer_size.GetGuestAddress(), 4,
++                            kernel::kMemoryProtectWrite) ||
++      !AchievementGuestSpan( handle.GetGuestAddress(), 4,
++                            kernel::kMemoryProtectWrite)) return X_ERROR_INVALID_PARAMETER;
++  *handle = 0;
++  *buffer_size = count * sizeof(X_OFFLINE_TITLE_PLAYED);
++  const auto identity = CurrentXAM().GetUserProfile().identity();
++  if (user_index != 0 || !identity.signin_state) return X_ERROR_NO_SUCH_USER;
++  const uint64_t requested_xuid = xuid ? uint64_t(xuid) : identity.xuid;
++  if (!CurrentXAM().GetUserProfile().FindLocal(requested_xuid).xuid) return X_ERROR_NO_SUCH_USER;
++  std::vector<X_OFFLINE_TITLE_PLAYED> titles;
++  for (const auto id : CurrentXAM().GetUserProfile().TitlesPlayed(requested_xuid)) {
++    std::vector<OfflineAchievementRecord> achievements;
++    const auto result = CurrentXAM().GetOfflineAchievements().List(requested_xuid, id, achievements);
++    // Historical played-title records may predate metadata import. They must
++    // not gain invented names, totals or achievements in this enumerator.
++    if (result == OfflineAchievementResult::kNotFound) continue;
++    if (result != OfflineAchievementResult::kSuccess) return OfflineAchievementError(result);
++    if (achievements.empty()) continue;
++    std::string name;
++    const auto name_result = CurrentXAM().GetOfflineAchievements().TitleName(id, name);
++    if (name_result != OfflineAchievementResult::kSuccess) return OfflineAchievementError(name_result);
++    X_OFFLINE_TITLE_PLAYED record{};
++    record.title_id = id;
++    record.achievement_count = static_cast<uint32_t>(achievements.size());
++    uint64_t total = 0, earned = 0;
++    uint32_t unlocked = 0;
++    for (const auto& achievement : achievements) {
++      total += achievement.info.gamerscore;
++      if (achievement.unlock_filetime) { ++unlocked; earned += achievement.info.gamerscore; }
++    }
++    if (total > UINT32_MAX || earned > UINT32_MAX) return 13;
++    record.total_score = static_cast<uint32_t>(total);
++    record.earned_score = static_cast<uint32_t>(earned);
++    record.unlocked_count = unlocked;
++    record.flags = unlocked ? 1u : 0u;  // Offline earned; no online flag/counter.
++    const auto title_name = rex::string::ToUTF16(name);
++    rex::string::CopyAndSwapTruncating(reinterpret_cast<char16_t*>(record.title_name),
++                                         title_name, 64);
++    titles.push_back(record);
++  }
++  StaticItemList items(count, sizeof(X_OFFLINE_TITLE_PLAYED));
++  for (size_t i = std::min<size_t>(offset, titles.size()); i < titles.size(); ++i)
++    *items.Append<X_OFFLINE_TITLE_PLAYED>() = titles[i];
++  kernel::X_HANDLE result_handle = kernel::kXInvalidHandleValue;
++  const auto status = CreateEnumerator(&result_handle, {user_index, 0xFB, 0xB0050, 0xB000B, 0},
++      EnumeratorObject(count, sizeof(X_OFFLINE_TITLE_PLAYED),
++          [items = std::move(items)](u32, u8* data, u32* written) mutable {
++            return items.Write(data, written);
++          }));
++  if (kernel::XFAILED(status)) return kernel::X_ERROR_FUNCTION_FAILED;
++  *handle = result_handle;
++  return X_ERROR_SUCCESS;
+ }
+ 
+ namespace {
+@@ -1261,3 +1312,5 @@
+ REX_XAM_BODY(__imp__XamReadTile, rex::xam::XamReadTile_entry)
+ 
+ REX_XAM_BODY(__imp__XamReadTileEx, rex::xam::XamReadTileEx_entry)
++
++REX_XAM_BODY(__imp__XamUserCreateTitlesPlayedEnumerator, rex::xam::XamUserCreateTitlesPlayedEnumerator_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1461,7 +1461,6 @@
+ REX_EXPORT_STUB(__imp__XamUserAllowedToPostToSocialNetwork);
+ REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
+-REX_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
+ 
+ REX_EXPORT_STUB(__imp__XamUserGetAge);
+ REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -422,3 +422,5 @@
+ REX_XAM_FORWARD(__imp__XamReadTile)
+ 
+ REX_XAM_FORWARD(__imp__XamReadTileEx)
++
++REX_XAM_FORWARD(__imp__XamUserCreateTitlesPlayedEnumerator)
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -187,7 +187,7 @@
+   return result;
+ }
+ 
+-u32 EnumerateItems(u32 handle, u32 flags, MappedVoid buffer_ptr, u32* items_returned,
++u32 EnumerateItems(u32 handle, u32 flags, MappedVoid buffer_ptr, u32 buffer_size, u32* items_returned,
+                    u32 overlapped_ptr) {
+   auto enumerator = CurrentTitle().objects.Get<EnumeratorObject>(handle);
+   if (!enumerator) return kernel::X_ERROR_INVALID_HANDLE;
+@@ -196,7 +196,13 @@
+       (header->open_message == 0xB000A || header->open_message == 0xB0050) &&
+       flags != 0 && flags != 2) return kernel::X_ERROR_INVALID_PARAMETER;
+ 
+-  auto run = [handle, buffer_ptr](u32& extended_error, u32& length,
++  const bool achievement = header->app_id == 0xFB &&
++      (header->open_message == 0xB000A || header->open_message == 0xB0050);
++  if (achievement && overlapped_ptr && !CurrentTitle().heap.IsGuestRangeAccessible(
++      overlapped_ptr, sizeof(kernel::XOVERLAPPED), kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++
++  auto run = [handle, buffer_ptr, buffer_size](u32& extended_error, u32& length,
+                                   bool& results_in_buffer) -> kernel::X_RESULT {
+     kernel::X_RESULT result;
+     u32 item_count = 0;
+@@ -206,7 +212,25 @@
+     } else if (!buffer_ptr) {
+       result = kernel::X_ERROR_INVALID_PARAMETER;
+     } else {
++      const auto* page = CurrentTitle().membase.TranslateVirtual<const X_KENUMERATOR*>(e.GetGuestAddress());
++      const bool achievement_page = page->app_id == 0xFB &&
++          (page->open_message == 0xB000A || page->open_message == 0xB0050);
++      if (achievement_page) {
++        const u64 required = u64{e->items_per_enumerate} * e->item_size;
++        if (buffer_size < required) {
++          REXXAM_DEBUG("Achievement/title enumerate message={:05X} size={} < required {}", u32(page->open_message), buffer_size, required);
++          extended_error = kernel::XHRESULTFromWin32(kernel::X_ERROR_INSUFFICIENT_BUFFER);
++          length = 0; return kernel::X_ERROR_INSUFFICIENT_BUFFER;
++        }
++        if (required > UINT32_MAX || u64{buffer_ptr.GetGuestAddress()} + required > 0x100000000ull ||
++            !CurrentTitle().heap.IsGuestRangeAccessible(buffer_ptr.GetGuestAddress(), static_cast<u32>(required), kernel::kMemoryProtectWrite)) {
++          extended_error = kernel::XHRESULTFromWin32(kernel::X_ERROR_INVALID_PARAMETER);
++          length = 0; return kernel::X_ERROR_INVALID_PARAMETER;
++        }
++      }
+       result = e->write_items(buffer_ptr.GetGuestAddress(), buffer_ptr.As<u8*>(), &item_count);
++      if (achievement_page) REXXAM_DEBUG("Achievement/title enumerate message={:05X} size={} -> {} items={}",
++          u32(page->open_message), buffer_size, result, item_count);
+       results_in_buffer = e->results_in_buffer;
+     }
+     extended_error = kernel::XHRESULTFromWin32(result);
+@@ -252,7 +276,7 @@
+   }
+ }
+ 
+-u32 XamEnumerate_entry(u32 handle, u32 flags, MappedVoid buffer, [[maybe_unused]] u32 buffer_length,
++u32 XamEnumerate_entry(u32 handle, u32 flags, MappedVoid buffer, u32 buffer_length,
+                        MappedU32 items_returned, GuestPtrT<kernel::XOVERLAPPED> overlapped) {
+   auto enumerator = CurrentTitle().objects.Get<EnumeratorObject>(handle);
+   if (!enumerator) {
+@@ -269,7 +293,7 @@
+   }
+   u32 item_count = 0;
+   auto result =
+-      EnumerateItems(handle, flags, buffer, !overlapped.GetGuestAddress() ? &item_count : nullptr,
++      EnumerateItems(handle, flags, buffer, buffer_length, !overlapped.GetGuestAddress() ? &item_count : nullptr,
+                      overlapped.GetGuestAddress());
+   if (!overlapped && items_returned) {
+     *items_returned = item_count;

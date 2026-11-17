@@ -3,9 +3,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
-#include <rex/graphics/pipeline/texture/util.h>
+#include <rex/xenos/texture.h>
 
-using namespace rex::graphics;
+namespace texture_util=rex::xenos;
+namespace xenos=rex::xenos;
 
 namespace {
 
@@ -128,7 +129,7 @@ int main() {
     auto layout = texture_util::GetGuestTextureLayout(
         xenos::DataDimension::k2DOrStacked, 2, 64, 64, 3, true, xenos::TextureFormat::k_8_8_8_8,
         false, true, 2);
-    check(layout.mip_offsets_bytes[2] == layout.mips[1].array_slice_stride_bytes * 4,
+    check(layout.mip_offsets_bytes[2] == layout.mips[1].array_layer_stride_bytes * 4,
           "3-slice array mip 2 follows 4 slices of mip 1");
   }
   // bc6b7a020: volume depth is reduced at each mip level.
@@ -137,7 +138,7 @@ int main() {
         xenos::DataDimension::k3D, 1, 32, 32, 16, true, xenos::TextureFormat::k_8_8_8_8, false,
         true, 1);
     const auto& mip = layout.mips[1];
-    check(mip.array_slice_stride_bytes == mip.row_pitch_bytes * mip.z_slice_stride_block_rows * 8,
+    check(mip.array_layer_stride_bytes == mip.row_pitch_bytes * mip.z_layer_stride_block_rows * 8,
           "32x32x16 volume mip 1 has 8 slices");
   }
   // 81e3deaee: a packed level-0 volume base uses power-of-two depth.
@@ -146,8 +147,8 @@ int main() {
         xenos::DataDimension::k3D, 1, 16, 16, 9, true, xenos::TextureFormat::k_8_8_8_8, true,
         true, 0);
     const auto& base = layout.base;
-    check(base.array_slice_stride_bytes ==
-              base.row_pitch_bytes * base.z_slice_stride_block_rows * 16,
+    check(base.array_layer_stride_bytes ==
+              base.row_pitch_bytes * base.z_layer_stride_block_rows * 16,
           "16x16x9 packed volume base has 16 slices");
   }
   // 19da17403: linear 96bpp mip rows are 32 blocks, not 256-byte aligned.

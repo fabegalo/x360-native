@@ -1,8 +1,8 @@
 #include "texture_load.h"
 #include "texture.h"
 #include "texture_block.h"
-#include <rex/graphics/pipeline/texture/info.h>
-#include <rex/graphics/flags.h>
+#include <rex/xenos/texture.h>
+#include <gpu/xenos/xenos_settings.h>
 #include <algorithm>
 #include <bit>
 #include <stdexcept>
@@ -11,24 +11,26 @@
 #include "../d3d12/d3d12_commands.h"
 #endif
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
 namespace bytecode {
 #if defined(_WIN32)
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_8bpb_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_16bpb_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_32bpb_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_64bpb_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_128bpb_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_float_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_8bpb_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_16bpb_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_32bpb_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_64bpb_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_128bpb_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_float_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_8bpb_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_16bpb_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_32bpb_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_64bpb_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_128bpb_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_depth_float_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_8bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_16bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_32bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_64bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_128bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/texture_load_depth_float_scaled_cs.h"
 #endif
 }
 namespace {
@@ -54,8 +56,8 @@ Info LoadInfo(LoadShader shader) {
 }
 bool DepthFormat(TextureFormat f) { return f == TextureFormat::k_24_8 || f == TextureFormat::k_24_8_FLOAT; }
 }
-texture_util::TextureGuestLayout TextureLoadInput::Layout() const {
-  return texture_util::GetGuestTextureLayout(dimension, pitch, width, height, depth_or_slices, tiled, format,
+rex::xenos::GuestTextureLayout TextureLoadInput::Layout() const {
+  return rex::xenos::GetGuestTextureLayout(dimension, pitch, width, height, depth_or_slices, tiled, format,
       packed_mips, base != 0, max_level);
 }
 bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
@@ -64,22 +66,22 @@ bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
       (GetBaseFormat(format) == TextureFormat::k_2_10_10_10 && is_signed) ||
       (num_format && format == TextureFormat::k_16);
 }
-bool TextureFetchSampled(const xe_gpu_texture_fetch_t& f) {
+bool TextureFetchSampled(const TextureFetch& f, bool allow_invalid) {
   return f.type == FetchConstantType::kTexture ||
-      (f.type == FetchConstantType::kInvalidTexture && REXCVAR_GET(gpu_allow_invalid_fetch_constants));
+      (f.type == FetchConstantType::kInvalidTexture && allow_invalid);
 }
-bool TextureViewActive(const xe_gpu_texture_fetch_t& f, FetchOpDimension dimension, bool is_signed) {
-  if (!TextureFetchSampled(f)) return false;
+bool TextureViewActive(const TextureFetch& f, FetchOpDimension dimension, bool is_signed, bool allow_invalid) {
+  if (!TextureFetchSampled(f, allow_invalid)) return false;
   const bool compatible = dimension == FetchOpDimension::kCube ? f.dimension == DataDimension::kCube :
       dimension == FetchOpDimension::k3DOrStacked ? f.dimension == DataDimension::k3D : f.dimension != DataDimension::kCube;
-  const uint8_t signs = texture_util::SwizzleSigns(f);
-  return compatible && (is_signed ? texture_util::IsAnySignSigned(signs) : texture_util::IsAnySignNotSigned(signs));
+  const uint8_t signs = rex::xenos::SwizzleSigns(f);
+  return compatible && (is_signed ? rex::xenos::HasSignedComponent(signs) : rex::xenos::HasNonSignedComponent(signs));
 }
 LoadShader GpuLoadShader(const TextureLoadInput& t) {
   if (NeedsCpuConversion(t.format, t.is_signed, t.num_format)) return LoadShader::kUnknown;
   if (DepthFormat(t.format))
     return t.format == TextureFormat::k_24_8_FLOAT ? LoadShader::kDepthFloat : LoadShader::kDepthUnorm;
-  switch (FormatInfo::Get(t.format)->bytes_per_block()) {
+  switch (FormatInfo::Get(t.format)->GetBytesPerBlock()) {
     case 1: return LoadShader::k8bpb;
     case 2: return LoadShader::k16bpb;
     case 4: return LoadShader::k32bpb;
@@ -100,7 +102,7 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
   plan.source_bpe_log2 = info.source_bpe_log2; plan.dest_bpe_log2 = info.dest_bpe_log2;
   const auto layout = t.Layout();
   const FormatInfo* fi = FormatInfo::Get(t.format);
-  const uint32_t block_width = fi->block_width, block_height = fi->block_height, bytes_per_block = fi->bytes_per_block();
+  const uint32_t block_width = fi->block_width, block_height = fi->block_height, bytes_per_block = fi->GetBytesPerBlock();
   const bool is_3d = t.dimension == DataDimension::k3D;
   const uint32_t depth = t.host_volume ? t.depth_or_slices : 1;
   const uint32_t array_size = t.array_size;
@@ -158,7 +160,7 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     uint32_t pitch = gl.row_pitch_bytes;
     if (t.tiled) pitch /= bytes_per_block;
     c.guest_pitch_aligned = pitch;
-    c.guest_z_stride_block_rows_aligned = gl.z_slice_stride_block_rows;
+    c.guest_z_stride_block_rows_aligned = gl.z_layer_stride_block_rows;
     uint32_t w, h, d;
     if (level == level_packed) { w = gl.x_extent_blocks * block_width; h = gl.y_extent_blocks * block_height; d = gl.z_extent; }
     else { w = std::max(t.width >> level, 1u); h = std::max(t.height >> level, 1u); d = std::max((is_3d ? t.depth_or_slices : 1u) >> level, 1u); }
@@ -176,7 +178,7 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     const uint32_t gy = (c.size_blocks[1] + (1u << kLoadGuestYBlocksPerGroupLog2) - 1) >> kLoadGuestYBlocksPerGroupLog2;
     for (uint32_t slice = 0; slice < array_size; ++slice) {
       plan.dispatches.push_back({c, {gx, gy, c.size_blocks[2]}, !is_base});
-      c.guest_offset += gl.array_slice_stride_bytes * area;
+      c.guest_offset += gl.array_layer_stride_bytes * area;
       c.host_offset += uint32_t(slice_size);
     }
   }
@@ -189,7 +191,7 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     copy.boxed = level >= level_packed;
     if (copy.boxed) {
       uint32_t ox, oy, oz;
-      texture_util::GetPackedMipOffset(t.width, t.height, t.host_volume ? t.depth_or_slices : 1, t.format, level, ox, oy, oz);
+      rex::xenos::GetPackedMipOffset(t.width, t.height, t.host_volume ? t.depth_or_slices : 1, t.format, level, ox, oy, oz);
       copy.box.left = ox * block_width * sx; copy.box.top = oy * block_height * sy; copy.box.front = oz;
       copy.box.right = copy.box.left + (std::max(t.width >> level, 1u) * sx + host_block_width - 1) / host_block_width * host_block_width;
       copy.box.bottom = copy.box.top + (std::max(t.height >> level, 1u) * sy + host_block_height - 1) / host_block_height * host_block_height;
@@ -210,7 +212,7 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
   if (t.scale_x * t.scale_y != 1) throw std::logic_error("Native: CPU texture conversion is unscaled");
   const auto layout = t.Layout();
   const FormatInfo* fi = FormatInfo::Get(t.format);
-  const unsigned block = fi->bytes_per_block();
+  const unsigned block = fi->GetBytesPerBlock();
   const bool volume = t.dimension == DataDimension::k3D;
   const bool depth_texture = DepthFormat(t.format);
   const bool expanded = ExpandedTextureComponents(t.format, t.num_format) != 0;
@@ -228,19 +230,19 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
     const auto& gl = level ? layout.mips[stored_level] : layout.base;
     uint32_t address = level ? mip_page + layout.mip_offsets_bytes[stored_level] : base_page;
     unsigned ox = 0, oy = 0, oz = 0;
-    if (t.packed_mips) texture_util::GetPackedMipOffset(t.width, t.height, volume ? t.depth_or_slices : 1, t.format, level, ox, oy, oz);
+    if (t.packed_mips) rex::xenos::GetPackedMipOffset(t.width, t.height, volume ? t.depth_or_slices : 1, t.format, level, ox, oy, oz);
     unsigned bx = (std::max(1u, t.width >> level) + fi->block_width - 1) / fi->block_width;
     unsigned by = (std::max(1u, t.height >> level) + fi->block_height - 1) / fi->block_height;
     const std::span<const uint8_t> source = level ? mip_source : base_source;
     const uint32_t pitch_blocks = gl.row_pitch_bytes / block;
     for (unsigned slice = 0; slice < t.array_size; ++slice) {
-    const size_t level_offset = size_t(address - (level ? mip_page : base_page)) + size_t(slice) * gl.array_slice_stride_bytes;
+    const size_t level_offset = size_t(address - (level ? mip_page : base_page)) + size_t(slice) * gl.array_layer_stride_bytes;
     const auto& footprint = footprints[level + slice * levels];
     for (unsigned z = 0; z < (t.host_volume ? std::max(1u, t.depth_or_slices >> level) : 1u); ++z)
     for (unsigned y = 0; y < by; ++y) {
       const unsigned host_rows = expanded_block ? std::max(1u,t.height>>level) : by;
       uint8_t* row = linear + footprint.Offset + (uint64_t(z) * host_rows + y * (expanded_block ? fi->block_height : 1)) * footprint.Footprint.RowPitch;
-      const uint32_t linear_row = ((z + oz) * gl.z_slice_stride_block_rows + y + oy) * gl.row_pitch_bytes + ox * block;
+      const uint32_t linear_row = ((z + oz) * gl.z_layer_stride_block_rows + y + oy) * gl.row_pitch_bytes + ox * block;
       // Whole linear rows of 32/64/128-bit blocks are word aligned; the
       // per-word endian swap equals the per-byte address XOR below.
       if (raw && !t.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
@@ -251,16 +253,16 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
         const unsigned run = TiledContiguousBlocks(block_log2);
         for (unsigned x = 0; x < bx;) {
           const unsigned n = std::min(run - ((x + ox) & (run - 1)), bx - x);
-          const uint32_t offset = texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2);
+          const uint32_t offset = rex::xenos::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2);
           ReadTextureBlock(source, level_offset + offset, n * block, endian, row + size_t(x) * block);
           x += n;
         }
         continue;
       }
       for (unsigned x = 0; x < bx; ++x) {
-      uint32_t offset = t.tiled ? (volume ? uint32_t(texture_util::GetTiledOffset3D(x + ox, y + oy, z + oz,
-          pitch_blocks, gl.z_slice_stride_block_rows, block_log2)) :
-          texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2)) :
+      uint32_t offset = t.tiled ? (volume ? uint32_t(rex::xenos::GetTiledOffset3D(x + ox, y + oy, z + oz,
+          pitch_blocks, gl.z_layer_stride_block_rows, block_log2)) :
+          rex::xenos::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2)) :
           linear_row + x * block;
       uint8_t* dest = row + size_t(x) * host_block;
       auto read = [&](uint8_t* out) { ReadTextureBlock(source, level_offset + offset, block, endian, out); };
@@ -331,24 +333,24 @@ D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader shader, bool scaled) {
   D3D12_SHADER_BYTECODE code{};
   if (scaled) {
     switch (shader) {
-      case LoadShader::k8bpb: return {texture_load_8bpb_scaled_cs, sizeof(texture_load_8bpb_scaled_cs)};
-      case LoadShader::k16bpb: return {texture_load_16bpb_scaled_cs, sizeof(texture_load_16bpb_scaled_cs)};
-      case LoadShader::k32bpb: return {texture_load_32bpb_scaled_cs, sizeof(texture_load_32bpb_scaled_cs)};
-      case LoadShader::k64bpb: return {texture_load_64bpb_scaled_cs, sizeof(texture_load_64bpb_scaled_cs)};
-      case LoadShader::k128bpb: return {texture_load_128bpb_scaled_cs, sizeof(texture_load_128bpb_scaled_cs)};
-      case LoadShader::kDepthUnorm: return {texture_load_depth_unorm_scaled_cs, sizeof(texture_load_depth_unorm_scaled_cs)};
-      case LoadShader::kDepthFloat: return {texture_load_depth_float_scaled_cs, sizeof(texture_load_depth_float_scaled_cs)};
+      case LoadShader::k8bpb: return {kTextureLoad8BPBScaledCS, sizeof(kTextureLoad8BPBScaledCS)};
+      case LoadShader::k16bpb: return {kTextureLoad16BPBScaledCS, sizeof(kTextureLoad16BPBScaledCS)};
+      case LoadShader::k32bpb: return {kTextureLoad32BPBScaledCS, sizeof(kTextureLoad32BPBScaledCS)};
+      case LoadShader::k64bpb: return {kTextureLoad64BPBScaledCS, sizeof(kTextureLoad64BPBScaledCS)};
+      case LoadShader::k128bpb: return {kTextureLoad128BPBScaledCS, sizeof(kTextureLoad128BPBScaledCS)};
+      case LoadShader::kDepthUnorm: return {kTextureLoadDepthUNormScaledCS, sizeof(kTextureLoadDepthUNormScaledCS)};
+      case LoadShader::kDepthFloat: return {kTextureLoadDepthFloatScaledCS, sizeof(kTextureLoadDepthFloatScaledCS)};
       default: throw std::runtime_error("Native texture load: no scaled pipeline for shader");
     }
   }
   switch (shader) {
-    case LoadShader::k8bpb: code = {texture_load_8bpb_cs, sizeof(texture_load_8bpb_cs)}; break;
-    case LoadShader::k16bpb: code = {texture_load_16bpb_cs, sizeof(texture_load_16bpb_cs)}; break;
-    case LoadShader::k32bpb: code = {texture_load_32bpb_cs, sizeof(texture_load_32bpb_cs)}; break;
-    case LoadShader::k64bpb: code = {texture_load_64bpb_cs, sizeof(texture_load_64bpb_cs)}; break;
-    case LoadShader::k128bpb: code = {texture_load_128bpb_cs, sizeof(texture_load_128bpb_cs)}; break;
-    case LoadShader::kDepthUnorm: code = {texture_load_depth_unorm_cs, sizeof(texture_load_depth_unorm_cs)}; break;
-    case LoadShader::kDepthFloat: code = {texture_load_depth_float_cs, sizeof(texture_load_depth_float_cs)}; break;
+    case LoadShader::k8bpb: code = {kTextureLoad8BPBCS, sizeof(kTextureLoad8BPBCS)}; break;
+    case LoadShader::k16bpb: code = {kTextureLoad16BPBCS, sizeof(kTextureLoad16BPBCS)}; break;
+    case LoadShader::k32bpb: code = {kTextureLoad32BPBCS, sizeof(kTextureLoad32BPBCS)}; break;
+    case LoadShader::k64bpb: code = {kTextureLoad64BPBCS, sizeof(kTextureLoad64BPBCS)}; break;
+    case LoadShader::k128bpb: code = {kTextureLoad128BPBCS, sizeof(kTextureLoad128BPBCS)}; break;
+    case LoadShader::kDepthUnorm: code = {kTextureLoadDepthUNormCS, sizeof(kTextureLoadDepthUNormCS)}; break;
+    case LoadShader::kDepthFloat: code = {kTextureLoadDepthFloatCS, sizeof(kTextureLoadDepthFloatCS)}; break;
     default: throw std::runtime_error("Native texture load: no pipeline for shader");
   }
   return code;

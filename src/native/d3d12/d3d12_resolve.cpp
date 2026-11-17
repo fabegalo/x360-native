@@ -1,36 +1,40 @@
 #include "d3d12_render.h"
 #include "../commands/resolve_coverage.h"
 #include <d3dcompiler.h>
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <stdexcept>
 #include <bit>
-#include <rex/graphics/pipeline/texture/info.h>
+#include <rex/xenos/texture.h>
 #include "../shaders/resolve_downsample.h"
 namespace x360n::native {
-using namespace rex::graphics;
+namespace draw_util = rex::gpu::draw_state;
+using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
 namespace kernels {
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_1x2xmsaa_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_4xmsaa_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_1x2xmsaa_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_4xmsaa_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_clear_32bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_clear_64bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_1x2xmsaa_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_4xmsaa_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_1x2xmsaa_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_4xmsaa_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_clear_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_clear_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_1x2xmsaa_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_4xmsaa_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_1x2xmsaa_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_4xmsaa_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_clear_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_clear_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_1x2xmsaa_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_32bpp_4xmsaa_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_1x2xmsaa_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fast_64bpp_4xmsaa_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_clear_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_clear_64bpp_scaled_cs.h"
 }
 namespace {
 void Check(HRESULT h, const char* text) { if (FAILED(h)) throw std::runtime_error(std::string("Native resolve: ") + text); }
@@ -64,7 +68,7 @@ D3D12Render::PendingPipeline D3D12Render::ComputePSO(ID3D12RootSignature* root, 
     return pipeline;
   });
 }
-void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
+void D3D12Render::Resolve(const RegisterFile& r, rex::IPhysicalMemory& memory) {
   EndHybridColor();
   SubmitEarly();
   recorded_work_ += eager_threshold_;
@@ -76,8 +80,8 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       uint64_t(fetch.address) * 4 + 24 <= 0x20000000) {
     SyncGuestRead(fetch.address << 2, 24, kReadResolveRect); // Rectangle read by the CPU below.
     float vertices[6];
-    const auto* guest = memory.TranslatePhysical<const float*>(fetch.address << 2);
-    for (unsigned i = 0; i < 6; ++i) vertices[i] = xenos::GpuSwap(guest[i], fetch.endian);
+    const auto* guest = reinterpret_cast<const float*>(memory.GetReadOnlyPhysicalSpan({uint32_t(fetch.address) << 2, 24}).value().data());
+    for (unsigned i = 0; i < 6; ++i) vertices[i] = xenos::GPUSwap(guest[i], fetch.endian);
     if (ResolveCoverageEmpty(r, vertices)) {
       // No samples exist to copy or clear: nothing becomes CPU-visible, so as
       // in the pinned executor there is no submission or wait. Pending draws
@@ -87,20 +91,20 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       return;
     }
   }
-  draw_util::ResolveInfo info;
+  draw_util::ResolveRequest info;
   // Native's EDRAM (ROV/FSI, SDK patch 0185) keeps k_16_16[_16_16] as exact
   // s5.10 integers, so a same-format signed-integer copy with exponent bias 10
   // is bitwise (patch 0087), not a full resolve without integer destinations.
-  if (!draw_util::GetResolveInfo(r, memory, scale_x_, scale_y_, false, false, info,
+  if (!draw_util::GetResolveInfo(settings_, r, memory, scale_x_, scale_y_, false, false, info,
       /*fixed16_s5_10_storage=*/true, edram_tile_count_)) {
     const auto f = r.GetVertexFetch(0);
     REXLOG_ERROR("Native resolve fetch address={:08X} size={} endian={} surface={:08X} scissor TL={:08X} BR={:08X}",
-        f.address << 2, f.size, uint32_t(f.endian), r[XE_GPU_REG_RB_SURFACE_INFO],
-        r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL], r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]);
+        f.address << 2, f.size, uint32_t(f.endian), r[static_cast<uint32_t>(rex::xenos::Register::RB_SURFACE_INFO)],
+        r[static_cast<uint32_t>(rex::xenos::Register::PA_SC_WINDOW_SCISSOR_TL)], r[static_cast<uint32_t>(rex::xenos::Register::PA_SC_WINDOW_SCISSOR_BR)]);
     if (f.type == xenos::FetchConstantType::kVertex && f.size == 6) {
-      const auto* v = memory.TranslatePhysical<const float*>(f.address << 2);
-      REXLOG_ERROR("Native resolve vertices ({},{}) ({},{}) ({},{})", xenos::GpuSwap(v[0], f.endian), xenos::GpuSwap(v[1], f.endian),
-          xenos::GpuSwap(v[2], f.endian), xenos::GpuSwap(v[3], f.endian), xenos::GpuSwap(v[4], f.endian), xenos::GpuSwap(v[5], f.endian));
+      const auto* v = reinterpret_cast<const float*>(memory.GetReadOnlyPhysicalSpan({uint32_t(f.address) << 2, 24}).value().data());
+      REXLOG_ERROR("Native resolve vertices ({},{}) ({},{}) ({},{})", xenos::GPUSwap(v[0], f.endian), xenos::GPUSwap(v[1], f.endian),
+          xenos::GPUSwap(v[2], f.endian), xenos::GPUSwap(v[3], f.endian), xenos::GPUSwap(v[4], f.endian), xenos::GPUSwap(v[5], f.endian));
     }
     throw std::runtime_error("Native: invalid resolve registers/vertices");
   }
@@ -120,25 +124,25 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     draw_util::ResolveCopyShaderConstants constants; uint32_t gx, gy;
     auto index = info.GetCopyShader(scale_x_, scale_y_, constants, gx, gy);
     if (index == draw_util::ResolveCopyShaderIndex::kUnknown) throw std::runtime_error("Native: unsupported resolve conversion");
-    const auto& si = draw_util::resolve_copy_shader_info[size_t(index)];
+    const auto& si = draw_util::kResolveCopyShaderInfo[size_t(index)];
     if (!copy_pipelines_[size_t(index)].valid()) {
       using namespace kernels;
       const D3D12_SHADER_BYTECODE code[]{
-        {resolve_fast_32bpp_1x2xmsaa_cs, sizeof(resolve_fast_32bpp_1x2xmsaa_cs)},
-        {resolve_fast_32bpp_4xmsaa_cs, sizeof(resolve_fast_32bpp_4xmsaa_cs)},
-        {resolve_fast_64bpp_1x2xmsaa_cs, sizeof(resolve_fast_64bpp_1x2xmsaa_cs)},
-        {resolve_fast_64bpp_4xmsaa_cs, sizeof(resolve_fast_64bpp_4xmsaa_cs)},
-        {resolve_full_8bpp_cs, sizeof(resolve_full_8bpp_cs)}, {resolve_full_16bpp_cs, sizeof(resolve_full_16bpp_cs)},
-        {resolve_full_32bpp_cs, sizeof(resolve_full_32bpp_cs)}, {resolve_full_64bpp_cs, sizeof(resolve_full_64bpp_cs)},
-        {resolve_full_128bpp_cs, sizeof(resolve_full_128bpp_cs)}};
+        {kResolveFast32BPP1x2xMSAACS, sizeof(kResolveFast32BPP1x2xMSAACS)},
+        {kResolveFast32BPP4xMSAACS, sizeof(kResolveFast32BPP4xMSAACS)},
+        {kResolveFast64BPP1x2xMSAACS, sizeof(kResolveFast64BPP1x2xMSAACS)},
+        {kResolveFast64BPP4xMSAACS, sizeof(kResolveFast64BPP4xMSAACS)},
+        {kResolveFull8BPPCS, sizeof(kResolveFull8BPPCS)}, {kResolveFull16BPPCS, sizeof(kResolveFull16BPPCS)},
+        {kResolveFull32BPPCS, sizeof(kResolveFull32BPPCS)}, {kResolveFull64BPPCS, sizeof(kResolveFull64BPPCS)},
+        {kResolveFull128BPPCS, sizeof(kResolveFull128BPPCS)}};
       const D3D12_SHADER_BYTECODE scaled_code[]{
-        {resolve_fast_32bpp_1x2xmsaa_scaled_cs, sizeof(resolve_fast_32bpp_1x2xmsaa_scaled_cs)},
-        {resolve_fast_32bpp_4xmsaa_scaled_cs, sizeof(resolve_fast_32bpp_4xmsaa_scaled_cs)},
-        {resolve_fast_64bpp_1x2xmsaa_scaled_cs, sizeof(resolve_fast_64bpp_1x2xmsaa_scaled_cs)},
-        {resolve_fast_64bpp_4xmsaa_scaled_cs, sizeof(resolve_fast_64bpp_4xmsaa_scaled_cs)},
-        {resolve_full_8bpp_scaled_cs, sizeof(resolve_full_8bpp_scaled_cs)}, {resolve_full_16bpp_scaled_cs, sizeof(resolve_full_16bpp_scaled_cs)},
-        {resolve_full_32bpp_scaled_cs, sizeof(resolve_full_32bpp_scaled_cs)}, {resolve_full_64bpp_scaled_cs, sizeof(resolve_full_64bpp_scaled_cs)},
-        {resolve_full_128bpp_scaled_cs, sizeof(resolve_full_128bpp_scaled_cs)}};
+        {kResolveFast32BPP1x2xMSAAScaledCS, sizeof(kResolveFast32BPP1x2xMSAAScaledCS)},
+        {kResolveFast32BPP4xMSAAScaledCS, sizeof(kResolveFast32BPP4xMSAAScaledCS)},
+        {kResolveFast64BPP1x2xMSAAScaledCS, sizeof(kResolveFast64BPP1x2xMSAAScaledCS)},
+        {kResolveFast64BPP4xMSAAScaledCS, sizeof(kResolveFast64BPP4xMSAAScaledCS)},
+        {kResolveFull8BPPScaledCS, sizeof(kResolveFull8BPPScaledCS)}, {kResolveFull16BPPScaledCS, sizeof(kResolveFull16BPPScaledCS)},
+        {kResolveFull32BPPScaledCS, sizeof(kResolveFull32BPPScaledCS)}, {kResolveFull64BPPScaledCS, sizeof(kResolveFull64BPPScaledCS)},
+        {kResolveFull128BPPScaledCS, sizeof(kResolveFull128BPPScaledCS)}};
       const auto selected = scaled ? scaled_code[size_t(index)] : code[size_t(index)];
       copy_pipelines_[size_t(index)] = ComputePSO(copy_root_.Get(), selected.pShaderBytecode, selected.BytecodeLength);
     }
@@ -216,9 +220,9 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       draw_util::ResolveClearShaderConstants c;
       if (depth) info.GetDepthClearShaderConstants(c); else info.GetColorClearShaderConstants(c);
       auto i = unsigned(!depth && info.color_edram_info.format_is_64bpp);
-      if (!clear_pipelines_[i].valid()) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_scaled_cs, sizeof(kernels::resolve_clear_64bpp_scaled_cs))
-          : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_scaled_cs, sizeof(kernels::resolve_clear_32bpp_scaled_cs))) : i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_cs, sizeof(kernels::resolve_clear_64bpp_cs))
-          : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_cs, sizeof(kernels::resolve_clear_32bpp_cs));
+      if (!clear_pipelines_[i].valid()) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::kResolveClear64BPPScaledCS, sizeof(kernels::kResolveClear64BPPScaledCS))
+          : ComputePSO(clear_root_.Get(), kernels::kResolveClear32BPPScaledCS, sizeof(kernels::kResolveClear32BPPScaledCS))) : i ? ComputePSO(clear_root_.Get(), kernels::kResolveClear64BPPCS, sizeof(kernels::kResolveClear64BPPCS))
+          : ComputePSO(clear_root_.Get(), kernels::kResolveClear32BPPCS, sizeof(kernels::kResolveClear32BPPCS));
       cmd_.SetPipelineState(clear_pipelines_[i], &clear_pipelines_[i]); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
       cmd_.Dispatch(groups.first, groups.second, 1); Barrier();
     };

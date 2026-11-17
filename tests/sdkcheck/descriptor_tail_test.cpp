@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <array>
 #include <fstream>
@@ -49,16 +49,16 @@ TEST_CASE("Descriptor tail thunks preserve adjacent callable boundaries",
     config << "project_name='descriptor'\nfile_path='test.xex'\nout_directory_path='out'\n";
     if (variant == 11) config << "[functions]\n0x82010008 = { size = 40 }\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    const auto& graph = pipeline->context().graph;
-    CHECK(graph.isEntryPoint(kXexText + 40) == (variant < 2));
+    const auto& graph = pipeline->GetContext().graph;
+    CHECK(graph.IsEntryPoint(kXexText + 40) == (variant < 2));
     if (variant < 2) {
-      const auto* invoker = graph.getFunction(kXexText + 8);
+      const auto* invoker = graph.GetFunction(kXexText + 8);
       REQUIRE(invoker);
-      CHECK(invoker->blocks().front().size == 32);
-      CHECK(invoker->jumpTables().empty());
+      CHECK(invoker->GetBlocks().front().size == 32);
+      CHECK(invoker->GetJumpTables().empty());
     }
     REQUIRE(pipeline->RunWrite().has_value());
   }

@@ -1,0 +1,124 @@
+diff --git a/include/rex/platform/file.h b/include/rex/platform/file.h
+--- a/include/rex/platform/file.h
++++ b/include/rex/platform/file.h
+@@ -114,6 +114,10 @@
+ [[nodiscard]] REX_API Result<void> WriteHostFile(const std::filesystem::path& path,
+                                                  std::span<const u8> data);
+ 
++/** Like the span form, optionally synchronizing file contents before the atomic rename. */
++[[nodiscard]] REX_API Result<void> WriteHostFile(const std::filesystem::path& path,
++                                                 std::span<const u8> data, bool durable);
++
+ /** Replaces a host file with text, as the span form does. */
+ [[nodiscard]] REX_API Result<void> WriteHostFile(const std::filesystem::path& path,
+                                                  std::string_view text);
+diff --git a/src/base/platform/file.cpp b/src/base/platform/file.cpp
+--- a/src/base/platform/file.cpp
++++ b/src/base/platform/file.cpp
+@@ -11,6 +11,11 @@
+ #include <system_error>
+ 
+ #include <rex/string/text.h>
++#if REX_PLATFORM_WIN32
++#include <io.h>
++#else
++#include <unistd.h>
++#endif
+ 
+ namespace rex::platform {
+ 
+@@ -111,6 +116,10 @@
+ }
+ 
+ Result<void> WriteHostFile(const std::filesystem::path& path, std::span<const u8> data) {
++  return WriteHostFile(path, data, false);
++}
++
++Result<void> WriteHostFile(const std::filesystem::path& path, std::span<const u8> data, bool durable) {
+   std::error_code ec;
+   if (path.has_parent_path()) {
+     std::filesystem::create_directories(path.parent_path(), ec);
+@@ -120,22 +129,23 @@
+   }
+   std::filesystem::path temp = path;
+   temp += ".tmp";
+-  {
+-    std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
+-    if (!stream) {
+-      return Err(IOError("cannot open", temp));
+-    }
+-    if (!data.empty() && !stream.write(reinterpret_cast<const char*>(data.data()),
+-                                       static_cast<std::streamsize>(data.size()))) {
+-      return Err(IOError("cannot write", temp));
+-    }
+-    stream.close();
+-    if (!stream) {
+-      return Err(IOError("cannot flush", temp));
+-    }
++  auto* file = OpenFile(temp, "wb");
++  if (!file) return Err(IOError("cannot open", temp));
++  bool written = data.empty() || std::fwrite(data.data(), 1, data.size(), file) == data.size();
++  if (written) written = std::fflush(file) == 0;
++#if REX_PLATFORM_WIN32
++  if (written && durable) written = _commit(_fileno(file)) == 0;
++#else
++  if (written && durable) written = fsync(fileno(file)) == 0;
++#endif
++  if (std::fclose(file) != 0) written = false;
++  if (!written) {
++    std::filesystem::remove(temp, ec);
++    return Err(IOError("cannot flush", temp));
+   }
+   std::filesystem::rename(temp, path, ec);
+-  if (ec) {
++  const bool replaced = !ec;
++  if (!replaced) {
+     std::filesystem::remove(temp, ec);
+     return Err(IOError("cannot replace", path));
+   }
+diff --git a/tests/unit/filesystem/host_file_test.cpp b/tests/unit/filesystem/host_file_test.cpp
+--- a/tests/unit/filesystem/host_file_test.cpp
++++ b/tests/unit/filesystem/host_file_test.cpp
+@@ -225,3 +225,30 @@
+   REQUIRE_FALSE(handle);
+   CHECK(rex::filesystem::CodeOf(handle.error()) == rex::filesystem::FileSystemError::kNotFound);
+ }
++
++
++REX_TEST_CASE("atomic host writes replace existing files and preserve committed bytes on failure", "[filesystem][atomic-host-write]") {
++  TempFolder temp;
++  const auto durable = [](const std::filesystem::path& file, std::string_view text) {
++    return rex::platform::WriteHostFile(file, std::span(reinterpret_cast<const u8*>(text.data()), text.size()), true);
++  };
++  const auto path = temp.path / "profile.dat";
++  REQUIRE(durable(path, "original"));
++  REQUIRE(durable(path, "replacement"));
++  auto contents = rex::platform::ReadHostFile(path); REQUIRE(contents);
++  CHECK(std::string(contents->begin(), contents->end()) == "replacement");
++  auto stage = path; stage += ".tmp";
++  REQUIRE(std::filesystem::create_directory(stage));
++  CHECK_FALSE(durable(path, "uncommitted"));
++  contents = rex::platform::ReadHostFile(path); REQUIRE(contents);
++  CHECK(std::string(contents->begin(), contents->end()) == "replacement");
++  CHECK(std::filesystem::is_directory(stage));
++  REQUIRE(std::filesystem::remove(stage));
++  REQUIRE(durable(path, std::string_view{}));
++  CHECK(std::filesystem::file_size(path) == 0);
++  const auto directory = temp.path / "existing-directory";
++  REQUIRE(std::filesystem::create_directory(directory));
++  CHECK_FALSE(durable(directory, "cannot replace a directory"));
++  CHECK(std::filesystem::is_directory(directory));
++  CHECK_FALSE(std::filesystem::exists(temp.path / "existing-directory.tmp"));
++}
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -365,7 +365,7 @@
+     std::memcpy(header.data() + sizeof(kernel::XCONTENT_AGGREGATE_DATA), &license_mask,
+                 sizeof(license_mask));
+   }
+-  if (!platform::WriteHostFile(header_path, header)) {
++  if (!platform::WriteHostFile(header_path, header, true)) {
+     return Err(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
+   }
+   return Ok();

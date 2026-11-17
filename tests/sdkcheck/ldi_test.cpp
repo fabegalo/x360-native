@@ -1,7 +1,9 @@
 // Synthetic LZX and direct import ABI checks. No title or proprietary assets.
 #include <rex/memory.h>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
+#include <rex/ppc/recompiled_code.h>
+#include "codegen/tool_runtime.h"
+#include "temp_folder.h"
 
 #include <algorithm>
 #include <array>
@@ -50,13 +52,16 @@ std::vector<uint8_t> LiteralFrame(const std::vector<uint8_t>& plain) {
 
 int main() {
   try {
+    rex::test::TempFolder folder("x360n_ldi_");
+    rex::codegen::ToolApp app("sdkcheck_ldi", folder.path);
+    Require(app.Start().has_value(), "start official module services");
     std::vector<uint8_t> memory(0x30000, 0xCD);
     auto c = std::make_unique<PPCContext>();
     auto put = [&](uint32_t p, uint32_t v) {
-      rex::memory::store_and_swap<uint32_t>(memory.data() + p, v);
+      rex::memory::store<rex::be_u32>(memory.data() + p, v);
     };
     auto get = [&](uint32_t p) {
-      return rex::memory::load_and_swap<uint32_t>(memory.data() + p);
+      return rex::memory::load<rex::be_u32>(memory.data() + p);
     };
     auto call = [&](PPCFunc* fn, std::initializer_list<uint32_t> args) {
       std::array<PPCRegister*, 7> regs = {&c->r3, &c->r4, &c->r5, &c->r6,

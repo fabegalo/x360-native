@@ -1,7 +1,5 @@
 #include "guest_memory_mirror.h"
-#include <rex/memory/utils.h>
-#include <rex/system/xmemory.h>
-#include <rex/thread/mutex.h>
+#include <rex/memory/virtual_memory.h>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -17,20 +15,20 @@ uint64_t BlockMask(uint32_t i, uint32_t first, uint32_t last) {
   return mask;
 }
 }
-std::unique_lock<std::recursive_mutex> GuestMemoryMirror::Lock() {
-  return rex::thread::global_critical_region::AcquireDirect();
+rex::ScopeGuard GuestMemoryMirror::Lock() {
+  return watch_.LockWriteWatches();
 }
-GuestMemoryMirror::GuestMemoryMirror(rex::memory::Memory& memory, Upload upload)
-    : memory_(memory), upload_(std::move(upload)) {
-  page_log2_ = uint32_t(std::countr_zero(uint64_t(rex::memory::page_size())));
+GuestMemoryMirror::GuestMemoryMirror(rex::IPhysicalMemory& memory, rex::IPhysicalWriteWatch& watch, Upload upload)
+    : memory_(memory), watch_(watch), upload_(std::move(upload)) {
+  page_log2_ = uint32_t(std::countr_zero(uint64_t(rex::memory::GetPageSize())));
   const size_t blocks = ((kSize >> page_log2_) + 63) / 64;
   valid_.assign(blocks, 0);
   gpu_written_.assign(blocks, 0);
   cpu_generations_.assign(kSize >> page_log2_, 0);
-  invalidation_handle_ = memory_.RegisterPhysicalMemoryInvalidationCallback(InvalidationThunk, this);
+  invalidation_handle_ = watch_.AddWriteListener(*this);
 }
 GuestMemoryMirror::~GuestMemoryMirror() {
-  memory_.UnregisterPhysicalMemoryInvalidationCallback(invalidation_handle_);
+  invalidation_handle_.Reset();
   auto lock = Lock();
   for (auto& bucket : buckets_)
     for (auto* range : bucket) Release(range);
@@ -52,7 +50,7 @@ void GuestMemoryMirror::Unwatch(WatchHandle handle) {
 }
 void GuestMemoryMirror::Release(WatchRange* range) { if (!--range->bucket_refs) delete range; }
 void GuestMemoryMirror::Fire(uint32_t page_first, uint32_t page_last, bool by_gpu) {
-  auto lock = Lock();
+  // The canonical write-watch lock is already held by the caller.
   const uint32_t first = (page_first << page_log2_) >> kBucketLog2;
   const uint32_t last = std::min((page_last << page_log2_) >> kBucketLog2, kBuckets - 1);
   for (uint32_t b = first; b <= last; ++b) {
@@ -100,7 +98,7 @@ void GuestMemoryMirror::MakeValid(uint32_t start, uint32_t length, bool by_gpu, 
     }
   }
   // Outside the region: heap locks are taken before it by guest faults.
-  memory_.EnablePhysicalMemoryAccessCallbacks(first << page_log2_, (last - first + 1) << page_log2_, true, false);
+  watch_.WatchPhysicalWrites({first << page_log2_, (last - first + 1) << page_log2_});
 }
 void GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length) {
   if (!length) return;
@@ -161,7 +159,11 @@ void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* sourc
     const uint32_t page = address >> page_log2_;
     if (((std::atomic_ref(valid_[page >> 6]).load(std::memory_order_relaxed) >> (page & 63)) & 1) &&
         (cpu_generations.empty() || cpu_generations[page - first_page] == cpu_generations_[page]))
-      std::memcpy(memory_.TranslatePhysical(address), source + offset, chunk);
+    {
+      auto destination = memory_.GetWritablePhysicalSpan({address, chunk});
+      if (!destination) throw std::runtime_error(destination.error().message);
+      std::memcpy(destination->data(), source + offset, chunk);
+    }
     offset += chunk;
   }
 }
@@ -183,14 +185,15 @@ void GuestMemoryMirror::InvalidateCpuPages() {
   for (size_t i = 0; i < valid_.size(); ++i)
     std::atomic_ref(valid_[i]).store(gpu_written_[i], std::memory_order_relaxed);
 }
-std::pair<uint32_t, uint32_t> GuestMemoryMirror::InvalidationThunk(void* context, uint32_t start, uint32_t length, bool exact) {
-  return static_cast<GuestMemoryMirror*>(context)->Invalidate(start, length, exact);
+rex::PhysicalRange GuestMemoryMirror::OnPhysicalWrite(rex::PhysicalRange range, bool exact) {
+  const auto [address, length] = Invalidate(range.address, range.length, exact);
+  return {address, length};
 }
 std::pair<uint32_t, uint32_t> GuestMemoryMirror::Invalidate(uint32_t start, uint32_t length, bool exact) {
   if (!length || start >= kSize) return {0, UINT32_MAX};
   length = std::min(length, kSize - start);
   uint32_t first = start >> page_log2_, last = (start + length - 1) >> page_log2_;
-  auto lock = Lock();
+  // The canonical write-watch lock is already held by the caller.
   if (!exact) {
     // As the pinned SharedMemory: widen to the 64-page block, stopping at
     // GPU-written pages, so fewer access violations are taken.

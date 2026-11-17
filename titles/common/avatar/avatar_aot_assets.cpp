@@ -1,7 +1,8 @@
 #include "avatar_aot_assets.h"
 
+#include <rex/kernel/heap.h>
 #include <rex/memory.h>
-#include <rex/system/thread_state.h>
+#include <rex/kernel/thread_state.h>
 
 #include <algorithm>
 #include <cmath>
@@ -22,10 +23,10 @@ void Put(uint8_t* p, uint32_t n) {
 // Caller must serialize all 17559 avatar calls sharing these guest globals.
 // The title service holds its mutex for the entire request; probes are exclusive.
 struct ScopedXamProfile {
-  rex::memory::Memory& memory;
+  rex::kernel::GuestAddressSpace& memory;
   std::array<uint8_t, 20> callbacks;
   uint32_t protocol, coordinates;
-  ScopedXamProfile(rex::memory::Memory& m, uint32_t table) : memory(m) {
+  ScopedXamProfile(rex::kernel::GuestAddressSpace& m, uint32_t table) : memory(m) {
     protocol = Read(m.TranslateVirtual<const uint8_t*>(kProtocol));
     coordinates = Read(m.TranslateVirtual<const uint8_t*>(0x81A975E0));
     Put(m.TranslateVirtual<uint8_t*>(0x81A975E0), 1);
@@ -42,7 +43,7 @@ struct ScopedXamProfile {
 
 class AotAssetsBackend final : public AssetsBackend {
  public:
-  AotAssetsBackend(rex::memory::Memory& memory, AvatarAotCall call,
+  AotAssetsBackend(rex::kernel::GuestAddressSpace& memory, AvatarAotCall call,
                    const AvatarToc& toc, std::vector<AssetSelection> selection,
                    uint32_t protocol, uint32_t body, uint32_t callbacks,
                    AotAssetsStats& stats, float height = 0, float weight = 0,
@@ -173,7 +174,7 @@ class AotAssetsBackend final : public AssetsBackend {
 
   uint32_t Finish() override {
     ScopedXamProfile profile(memory_, callbacks_);
-    auto* ctx = rex::runtime::ThreadState::Get()->context();
+    auto* ctx = rex::kernel::ThreadState::Get()->GetContext();
     const auto f1 = ctx->f1, f2 = ctx->f2;
     ctx->f1.f64 = height_;
     ctx->f2.f64 = weight_;
@@ -295,7 +296,7 @@ class AotAssetsBackend final : public AssetsBackend {
     }
     return true;
   }
-  rex::memory::Memory& memory_;
+  rex::kernel::GuestAddressSpace& memory_;
   AvatarAotCall call_;
   const AvatarToc& toc_;
   std::vector<AssetSelection> selection_;
@@ -311,7 +312,7 @@ class AotAssetsBackend final : public AssetsBackend {
 }  // namespace
 
 std::unique_ptr<AssetsBackend> MakeAotAssetsBackend(
-    rex::memory::Memory& memory, AvatarAotCall call, const AvatarToc& toc,
+    rex::kernel::GuestAddressSpace& memory, AvatarAotCall call, const AvatarToc& toc,
     std::vector<AssetSelection> selection, uint32_t protocol,
     uint32_t body_type, uint32_t callbacks, AotAssetsStats& stats,
     AssetsBuffers destination) {
@@ -320,7 +321,7 @@ std::unique_ptr<AssetsBackend> MakeAotAssetsBackend(
       callbacks, stats, 0, 0, destination);
 }
 std::unique_ptr<AssetsBackend> MakeAotMetadataAssetsBackend(
-    rex::memory::Memory& memory, AvatarAotCall call, const AvatarToc& toc,
+    rex::kernel::GuestAddressSpace& memory, AvatarAotCall call, const AvatarToc& toc,
     std::span<const uint8_t, kMetadataSize> metadata, uint16_t mask,
     uint32_t callbacks, AotAssetsStats& stats, AssetsBuffers destination) {
   const auto body = BodyType(metadata);
@@ -341,7 +342,7 @@ std::unique_ptr<AssetsBackend> MakeAotMetadataAssetsBackend(
   std::array<float, 4> skin_material;
   for (size_t i = 0; i < 4; ++i)
     skin_material[i] =
-        rex::runtime::ThreadState::Get()->context()->v1.f32[3 - i];
+        rex::kernel::ThreadState::Get()->GetContext()->v1.f32[3 - i];
   std::vector<AssetSelection> selections;
   auto add = [&](size_t offset, uint32_t kind, uint32_t slot) {
     auto id = AssetId::FromBytes(

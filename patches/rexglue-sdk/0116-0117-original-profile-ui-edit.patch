@@ -1,0 +1,287 @@
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -286,6 +286,8 @@
+   REX_XAM_API u32 SetLocalSession(u64 xuid);
+   // Archive the committed identity snapshot; retain saves, settings and achievements.
+   REX_XAM_API u32 RemoveLocal(u64 xuid);
++  REX_XAM_API u32 RenameLocal(u64 xuid, const std::string& name);
++  void SetProfileChangedCallback(std::function<void()> callback) { profile_changed_ = std::move(callback); }
+   u64 GetStorageEpoch() const { return storage_epoch_.load(std::memory_order_acquire); }
+ 
+ 
+@@ -311,6 +313,7 @@
+   bool storage_ready_ = false;
+   bool PersistProfiles(const std::vector<Identity>& next, const Identity& selected);
+   std::function<void()> session_changed_;
++  std::function<void()> profile_changed_;
+   std::recursive_mutex settings_mutex_;
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<u32, Setting*> settings_;
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -379,6 +379,33 @@
+   return X_ERROR_SUCCESS;
+ }
+ 
++u32 UserProfile::RenameLocal(u64 xuid, const std::string& name) {
++  auto settings_lock = LockSettings();
++  std::unique_lock lock(identity_mutex_);
++  if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
++  auto next = profiles_;
++  const auto target = std::find_if(next.begin(), next.end(),
++      [xuid](const auto& profile) { return profile.xuid == xuid; });
++  if (target == next.end()) return X_ERROR_NO_SUCH_USER;
++  for (const auto& profile : next)
++    if (profile.xuid != xuid && profile.name.size() == name.size() &&
++        std::equal(name.begin(), name.end(), profile.name.begin(),
++            [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
++      return X_ERROR_ALREADY_EXISTS;
++  if (target->name == name) return X_ERROR_SUCCESS;
++  target->name = name;
++  auto selected = identity_;
++  if (selected.xuid == xuid) selected.name = name;
++  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  const bool notify = selected.xuid == xuid && selected.signin_state != 0;
++  profiles_ = std::move(next);
++  identity_ = std::move(selected);
++  const auto changed = profile_changed_;
++  lock.unlock();
++  if (notify && changed) changed();
++  return X_ERROR_SUCCESS; // A rename preserves identity, active handles and the save epoch.
++}
++
+ u32 UserProfile::RemoveLocal(u64 xuid) {
+   auto settings_lock = LockSettings();
+   std::unique_lock lock(identity_mutex_);
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -64,6 +64,7 @@
+     content_manager_->RetireStaleSaves();
+     title_.notifier.BroadcastNotification(0xA, 1);
+   });
++  user_profile_->SetProfileChangedCallback([this] { title_.notifier.BroadcastNotification(0xE, 1); });
+   achievement_manager_ = std::make_unique<AchievementManager>();
+   app_manager_->RegisterApp(std::make_unique<apps::XMPApp>(title_));
+   app_manager_->RegisterApp(std::make_unique<apps::XGIApp>(title_, *achievement_manager_));
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -154,6 +154,21 @@
+   *handle = *added;
+   REXXAM_INFO("Local profile created name={} xuid={:016X} result={}", name, operation->xuid, operation->result);
+   return 0;
++}
++
++u32 XamProfileRenameAccount_entry(u64 xuid, u32 address) {
++  if (!address || (address & 1)) return kernel::X_ERROR_INVALID_PARAMETER;
++  std::string name;
++  for (u32 i = 0; i < 16; ++i) {
++    const u64 at = u64{address} + i * 2;
++    if (at > UINT32_MAX || !CurrentTitle().heap.IsGuestRangeAccessible(static_cast<u32>(at), 2,
++        kernel::kMemoryProtectRead)) return kernel::X_ERROR_INVALID_PARAMETER;
++    const auto character = memory::load_and_swap<u16>(CurrentTitle().membase.TranslateVirtual(static_cast<u32>(at)));
++    if (!character) return CurrentXAM().GetUserProfile().RenameLocal(xuid, name);
++    if (i == 15 || character < 32 || character > 126) return kernel::X_ERROR_INVALID_PARAMETER;
++    name.push_back(static_cast<char>(character));
++  }
++  return kernel::X_ERROR_INVALID_PARAMETER;
+ }
+ 
+ u32 XamProfileDelete_entry(u32 device, u64 xuid) {
+@@ -294,3 +309,5 @@
+ REX_XAM_BODY(__imp__XamProfileGetCreationStatus, rex::xam::XamProfileGetCreationStatus_entry)
+ 
+ REX_XAM_BODY(__imp__XamProfileDelete, rex::xam::XamProfileDelete_entry)
++
++REX_XAM_BODY(__imp__XamProfileRenameAccount, rex::xam::XamProfileRenameAccount_entry)
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -645,6 +645,22 @@
+   const u32 request[] = {0, 0xFF, user_count, flags, 0};
+   return DispatchProfileUi(0x21001, request, 5);
+ }
++static u32 ShowOriginalProfile(u32 user, u32 title, u64 xuid, u32 mode, u32 achievement) {
++  if (user >= 4) return kernel::X_ERROR_INVALID_PARAMETER;
++  u32 words[544 / 4]{};
++  words[0] = user; words[1] = mode;
++  words[2] = static_cast<u32>(xuid >> 32); words[3] = static_cast<u32>(xuid);
++  words[4] = title; words[5] = achievement;
++  return DispatchProfileUi(0x21008, words, 544 / 4);
++}
++
++u32 XamShowAchievementsUI_entry(u32 user, u32 title) { return ShowOriginalProfile(user, title, 0, 2, 0); }
++u32 XamShowAchievementsUIEx_entry(u32 user, u32 title, u64 xuid) { return ShowOriginalProfile(user, title, xuid, 2, 0); }
++u32 XamShowAchievementDetailsUI_entry(u32 user, u32 title, u32 achievement) { return ShowOriginalProfile(user, title, 0, 4, achievement); }
++u32 XamShowGamesUI_entry(u32 user, u64 xuid) { return ShowOriginalProfile(user, 0, xuid, 1, 0); }
++u32 XamShowAvatarAwardGamesUI_entry(u32 user, u64 xuid) { return ShowOriginalProfile(user, 0, xuid, 6, 0); }
++u32 XamShowEditProfileUI_entry(u32 user) { return ShowOriginalProfile(user, 0, 0, 3, 0); }
++
+ u32 XamShowGamerCardUI_entry(u32 user_index) {
+   u32 request[544 / 4]{};
+   request[0] = user_index;
+@@ -1099,3 +1115,15 @@
+ REX_XAM_BODY(__imp__XamShowOptionsUI, rex::xam::XamShowOptionsUI_entry)
+ 
+ REX_XAM_BODY(__imp__XamUserReadUserPreference, rex::xam::XamUserReadUserPreference_entry)
++
++REX_XAM_BODY(__imp__XamShowAchievementsUI, rex::xam::XamShowAchievementsUI_entry)
++
++REX_XAM_BODY(__imp__XamShowAchievementsUIEx, rex::xam::XamShowAchievementsUIEx_entry)
++
++REX_XAM_BODY(__imp__XamShowAchievementDetailsUI, rex::xam::XamShowAchievementDetailsUI_entry)
++
++REX_XAM_BODY(__imp__XamShowGamesUI, rex::xam::XamShowGamesUI_entry)
++
++REX_XAM_BODY(__imp__XamShowAvatarAwardGamesUI, rex::xam::XamShowAvatarAwardGamesUI_entry)
++
++REX_XAM_BODY(__imp__XamShowEditProfileUI, rex::xam::XamShowEditProfileUI_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -659,7 +659,7 @@
+ REX_EXPORT_STUB(__imp__XamProfileLoadWindowsLiveCredentials);
+ REX_EXPORT_STUB(__imp__XamProfileOpen);
+ REX_EXPORT_STUB(__imp__XamProfileRecoverTitle);
+-REX_EXPORT_STUB(__imp__XamProfileRenameAccount);
++
+ REX_EXPORT_STUB(__imp__XamProfileSaveAccountInfo);
+ REX_EXPORT_STUB(__imp__XamProfileSaveWindowsLiveCredentials);
+ REX_EXPORT_STUB(__imp__XamProfileSetCachedWindowsLiveEmail);
+@@ -1346,11 +1346,11 @@
+ REX_EXPORT_STUB(__imp__XamNavigate);
+ REX_EXPORT_STUB(__imp__XamNavigateBack);
+ REX_EXPORT_STUB(__imp__XamOverrideHudOpenType);
+-REX_EXPORT_STUB(__imp__XamShowAchievementDetailsUI);
+-REX_EXPORT_STUB(__imp__XamShowAchievementsUI);
+-REX_EXPORT_STUB(__imp__XamShowAchievementsUIEx);
++
++
++
+ REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
+-REX_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
++
+ REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
+ REX_EXPORT_STUB(__imp__XamShowAvatarMiniCreatorUI);
+ REX_EXPORT_STUB(__imp__XamShowBadDiscErrorUI);
+@@ -1364,7 +1364,7 @@
+ REX_EXPORT_STUB(__imp__XamShowCustomMessageComposeUI);
+ REX_EXPORT_STUB(__imp__XamShowCustomPlayerListUI);
+ REX_EXPORT_STUB(__imp__XamShowDirectAcquireUI);
+-REX_EXPORT_STUB(__imp__XamShowEditProfileUI);
++
+ REX_EXPORT_STUB(__imp__XamShowFirstRunWelcomeUI);
+ REX_EXPORT_STUB(__imp__XamShowFitnessBodyProfileUI);
+ REX_EXPORT_STUB(__imp__XamShowFitnessClearUI);
+@@ -1380,7 +1380,7 @@
+ 
+ REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUID);
+ REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUIDp);
+-REX_EXPORT_STUB(__imp__XamShowGamesUI);
++
+ REX_EXPORT_STUB(__imp__XamShowGenericOnlineAppUI);
+ REX_EXPORT_STUB(__imp__XamShowGoldUpgradeUI);
+ REX_EXPORT_STUB(__imp__XamShowGraduateUserUI);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -390,3 +390,17 @@
+ REX_XAM_FORWARD(__imp__XamLoaderRebootToDash)
+ 
+ REX_XAM_FORWARD(__imp__XamProfileDelete)
++
++REX_XAM_FORWARD(__imp__XamShowAchievementsUI)
++
++REX_XAM_FORWARD(__imp__XamShowAchievementsUIEx)
++
++REX_XAM_FORWARD(__imp__XamShowAchievementDetailsUI)
++
++REX_XAM_FORWARD(__imp__XamShowGamesUI)
++
++REX_XAM_FORWARD(__imp__XamShowAvatarAwardGamesUI)
++
++REX_XAM_FORWARD(__imp__XamShowEditProfileUI)
++
++REX_XAM_FORWARD(__imp__XamProfileRenameAccount)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1922,3 +1922,75 @@
+   REQUIRE(reopened.InitializeLocal(root));
+   CHECK(reopened.identity().xuid == xuid); CHECK(reopened.GetSigninState() == 1);
+ }
++
++
++REX_TEST_CASE("original profile UI modes retain request layout and full XUID ABI", "[kernel][xam][profile-ui]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    std::array<u32, 136> words{};
++    u32 address = 0, result = 0;
++    int calls = 0;
++    ui.system_ui_request = [&](u32 message, u32 packet, u32 size) {
++      ++calls; CHECK(message == 0x21008); REQUIRE(size == 544);
++      address = packet;
++      for (u32 i = 0; i < words.size(); ++i) words[i] = c.Load32(packet + i * 4);
++      return result;
++    };
++    const u64 xuid = 0xE123456789ABCDEFull;
++    REQUIRE(c.XAM("XamShowGamesUI", {2, xuid}) == 0);
++    CHECK(words[0] == 2); CHECK(words[1] == 1);
++    CHECK(words[2] == 0xE1234567); CHECK(words[3] == 0x89ABCDEF);
++    CHECK(words[4] == 0); CHECK(words[5] == 0);
++    CHECK(std::ranges::all_of(words.begin() + 6, words.end(), [](u32 v) { return v == 0; }));
++    CHECK(rex::xam::CurrentTitle().heap.QueryAllocationSize(address) == 0);
++    REQUIRE(c.XAM("XamShowAvatarAwardGamesUI", {1, xuid}) == 0); CHECK(words[1] == 6); CHECK(words[3] == 0x89ABCDEF);
++    REQUIRE(c.XAM("XamShowEditProfileUI", {0}) == 0); CHECK(words[1] == 3); CHECK(words[2] == 0); CHECK(words[3] == 0);
++    REQUIRE(c.XAM("XamShowAchievementsUI", {0, 0x12345678}) == 0); CHECK(words[1] == 2); CHECK(words[4] == 0x12345678);
++    REQUIRE(c.XAM("XamShowAchievementsUIEx", {0, 42, xuid}) == 0); CHECK(words[2] == 0xE1234567); CHECK(words[4] == 42);
++    REQUIRE(c.XAM("XamShowAchievementDetailsUI", {0, 42, 99}) == 0); CHECK(words[1] == 4); CHECK(words[5] == 99);
++    const int before = calls;
++    CHECK(c.XAM("XamShowGamesUI", {4, xuid}) == 87); CHECK(calls == before);
++    result = 0x8007000E; CHECK(c.XAM("XamShowGamesUI", {0, xuid}) == 14);
++    result = 0x80004005; CHECK(c.XAM("XamShowGamesUI", {0, xuid}) == 1627);
++    ui.system_ui_request = {};
++    CHECK(c.XAM("XamShowGamesUI", {0, xuid}) == 1627);
++  });
++}
++
++REX_TEST_CASE("profile rename commits before profile notification and preserves identity epoch", "[kernel][xam][local-profile-session][profile-ui]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  u64 first = 0, second = 0;
++  REQUIRE(profile.CreateLocal("First", &first) == 0);
++  REQUIRE(profile.CreateLocal("Second", &second) == 0);
++  REQUIRE(profile.SetLocalSession(first) == 0);
++  const auto epoch = profile.GetStorageEpoch();
++  fixture.RunOnGuestThread([&](Caller& c) {
++    const auto listener = c.XAM("XamNotifyCreateListener", {1, 0}); REQUIRE(listener);
++    const auto id = c.Alloc(4), data = c.Alloc(4);
++    const auto put_name = [&](std::u16string_view text) {
++      const auto address = c.Alloc(static_cast<u32>((text.size() + 1) * 2));
++      for (u32 i = 0; i <= text.size(); ++i)
++        rex::memory::store_and_swap<u16>(c.GetBase() + address + i * 2, i == text.size() ? 0 : static_cast<u16>(text[i]));
++      return address;
++    };
++    CHECK(c.XAM("XamProfileRenameAccount", {first, 0x7F100000}) == 87);
++    CHECK(c.XAM("XamProfileRenameAccount", {first, put_name(u"second")}) == rex::kernel::X_ERROR_ALREADY_EXISTS);
++    REQUIRE(c.XAM("XamProfileRenameAccount", {first, put_name(u"Renamed")}) == 0);
++    CHECK(profile.GetName() == "Renamed"); CHECK(profile.GetXUID() == first);
++    CHECK(profile.GetStorageEpoch() == epoch);
++    REQUIRE(c.XAM("XNotifyGetNext", {listener, 0xE, id, data}) == 1);
++    CHECK(c.Load32(id) == 0xE); CHECK(c.Load32(data) == 1);
++    REQUIRE(c.XAM("XamProfileRenameAccount", {first, put_name(u"Renamed")}) == 0);
++    CHECK(c.XAM("XNotifyGetNext", {listener, 0xE, id, data}) == 0);
++    std::filesystem::create_directory(rex::xam::CurrentTitle().user_data_root / "profiles" / "local-v2.dat.tmp");
++    CHECK(c.XAM("XamProfileRenameAccount", {first, put_name(u"Rejected")}) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++    CHECK(profile.GetName() == "Renamed"); CHECK(profile.GetStorageEpoch() == epoch);
++    CHECK(c.XAM("XNotifyGetNext", {listener, 0xE, id, data}) == 0);
++    rex::xam::UserProfile reopened;
++    REQUIRE(reopened.InitializeLocal(rex::xam::CurrentTitle().user_data_root));
++    CHECK(reopened.GetName() == "Renamed"); CHECK(reopened.GetXUID() == first);
++    CHECK(c.Kernel("NtClose", {listener}) == 0);
++  });
++}

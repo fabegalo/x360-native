@@ -1,5 +1,17 @@
 # Local patches to ReXGlue SDK
 
+The active chain targets stable **v0.11.0**, commit
+`a3e1d82678ca20d68d4837a8e9ee4652ff073745`. All 279 original patches are
+accounted for: 271 are ported into 253 ordered rebased entries, and eight are
+superseded by verified upstream implementations (0002, 0004, 0007, 0029,
+0126, 0127, 0212, 0251). The lock contains 278 entries, including 25 migration
+patches alongside the shared regressions and combined ports. Each entry records original patch hashes,
+its own hash, per-step input hashes and final source hashes. Upstream
+replacement proofs are recorded in `rexglue_sdk.upstream_equivalents`.
+The sections below retain historical rationale; active names and order
+come from `deps.lock.json`. This SDK rebase alone does not certify the
+project integrations, original dashboard, games or real GPU behavior.
+
 ## 0274 — Canary ZPD report conversion
 
 Ports `xenos_zpd_report.h` from Canary `4f04bc7`, preserving its BSD notice.
@@ -2794,7 +2806,7 @@ still refused. The baseline returns `false` from `RecompilerConfig::Load`. The
 preparation (`docs/reports/paths-storage-2026-11-02.md`). No upstream equivalent
 was identified.
 
-### 0254 — open log files in the host form
+### 0255 — open log files in the host form
 
 A title launched from an installation 363 bytes deep receives a `--log_file`
 beyond `MAX_PATH` (its run folder lives in the installation). `InitLogging`

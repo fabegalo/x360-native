@@ -1,0 +1,244 @@
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -20,6 +20,7 @@
+ #include <cstddef>
+ #include <memory>
+ #include <mutex>
++#include <atomic>
+ #include <unordered_map>
+ #include <vector>
+ #include <format>
+@@ -282,6 +283,7 @@
+   REX_XAM_API std::vector<Identity> local_profiles() const;
+   REX_XAM_API Identity FindLocal(u64 xuid) const;
+   REX_XAM_API u32 SetLocalSession(u64 xuid);
++  u64 GetStorageEpoch() const { return storage_epoch_.load(std::memory_order_acquire); }
+ 
+ 
+   /**
+@@ -300,6 +302,7 @@
+  private:
+   mutable std::mutex identity_mutex_;
+   Identity identity_;
++  std::atomic<u64> storage_epoch_{0};
+   std::vector<Identity> profiles_;
+   std::filesystem::path profile_path_;
+   bool storage_ready_ = false;
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -276,7 +276,7 @@
+ 
+ u32 UserProfile::SetLocalSession(u64 xuid) {
+   auto settings_lock = LockSettings();
+-  std::lock_guard lock(identity_mutex_);
++  std::unique_lock lock(identity_mutex_);
+   if (!identity_.xuid) return xuid ? X_ERROR_NO_SUCH_USER : X_ERROR_SUCCESS;
+   auto next = profiles_;
+   auto it = std::find_if(next.begin(), next.end(),
+@@ -288,6 +288,7 @@
+   it->signin_state = state;
+   const auto selected = *it;
+   if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  storage_epoch_.fetch_add(1, std::memory_order_acq_rel);
+   const bool changed_identity = identity_.xuid != selected.xuid;
+   profiles_ = std::move(next);
+   identity_ = selected;
+@@ -301,7 +302,9 @@
+       }
+     }
+   }
+-  if (session_changed_) session_changed_();
++  const auto changed = session_changed_;
++  lock.unlock();
++  if (changed) changed();
+   return X_ERROR_SUCCESS;
+ }
+ 
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -58,7 +58,7 @@
+  public:
+   ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                  const std::string_view root_name, const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                 const std::filesystem::path& package_path);
++                 const std::filesystem::path& package_path, u64 storage_epoch);
+   ~ContentPackage();
+ 
+   void LoadPackageLicenseMask(const std::filesystem::path& header_path);
+@@ -68,6 +68,7 @@
+   const std::filesystem::path& GetPackagePath() const { return package_path_; }
+ 
+   u32 GetPackageLicense() const { return license_; }
++  u64 GetStorageEpoch() const { return storage_epoch_; }
+ 
+  private:
+   filesystem::IFileSystem& file_system_;
+@@ -76,6 +77,7 @@
+   std::filesystem::path package_path_;
+   kernel::XCONTENT_AGGREGATE_DATA content_data_;
+   u32 license_ = 0;
++  u64 storage_epoch_ = 0;
+ };
+ 
+ class ContentManager final : public rex::xam::IContentManager {
+@@ -86,6 +88,7 @@
+    */
+   ContentManager(const XAMTitle& title, rex::xam::UserProfile& user_profile);
+   ~ContentManager() override;
++  void RetireStaleSaves();
+ 
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContent(u32 device_id, u64 xuid,
+                                                            rex::kernel::XContentType content_type,
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -49,8 +49,8 @@
+ ContentPackage::ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                                const std::string_view root_name,
+                                const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                               const std::filesystem::path& package_path)
+-    : file_system_(file_system), root_name_(root_name), package_path_(package_path), license_(0) {
++                               const std::filesystem::path& package_path, u64 storage_epoch)
++    : file_system_(file_system), root_name_(root_name), package_path_(package_path), license_(0), storage_epoch_(storage_epoch) {
+   device_path_ = std::format("\\Device\\Content\\{0}\\", device_index);
+   content_data_ = data;
+ 
+@@ -62,6 +62,8 @@
+   entry.type = folder ? filesystem::ProviderType::kHostDirectory : filesystem::ProviderType::kSTFS;
+   entry.source = package_path;
+   entry.flags = folder ? filesystem::MountFlags::kWritable : filesystem::MountFlags::kNone;
++  if (data.content_type == kernel::XContentType::kSavedGame)
++    entry.flags |= filesystem::MountFlags::kRevokeOnUnmount;
+   if (auto mounted = fs->Mount(entry); !mounted) {
+     REXSYS_WARN("content package '{}' is not mounted, {}", rex::string::PathToUTF8(package_path),
+                 mounted.error().message);
+@@ -113,6 +115,15 @@
+     : title_(title), root_path_(title.user_data_root), user_profile_(user_profile) {}
+ 
+ ContentManager::~ContentManager() = default;
++
++void ContentManager::RetireStaleSaves() {
++  std::lock_guard lock(mutex_);
++  const auto epoch = user_profile_.GetStorageEpoch();
++  std::erase_if(open_packages_, [epoch](const auto& item) {
++    return item.second->GetPackageContentData().content_type == kernel::XContentType::kSavedGame &&
++           item.second->GetStorageEpoch() != epoch;
++  });
++}
+ 
+ std::filesystem::path ContentManager::ResolvePackageRoot(u64 xuid,
+                                                          rex::kernel::XContentType content_type,
+@@ -260,7 +271,7 @@
+     package_path = *source;
+   }
+   auto package = std::make_unique<ContentPackage>(title_.file_system, ++device_count_, root_name,
+-                                                  data, package_path);
++                                                  data, package_path, user_profile_.GetStorageEpoch());
+   return package;
+ }
+ 
+@@ -371,6 +382,7 @@
+ 
+ Result<void> ContentManager::CreateContent(const std::string_view root_name, u64 xuid,
+                                            const kernel::XCONTENT_AGGREGATE_DATA& data) {
++  auto session_lock = user_profile_.LockSettings();
+   {
+     std::lock_guard lock(mutex_);
+     if (open_packages_.count(string::StringKeyIgnoreCase(root_name))) {
+@@ -400,6 +412,7 @@
+ 
+ Result<u32> ContentManager::OpenContent(const std::string_view root_name, u64 xuid,
+                                         const kernel::XCONTENT_AGGREGATE_DATA& data) {
++  auto session_lock = user_profile_.LockSettings();
+   {
+     std::lock_guard lock(mutex_);
+     if (open_packages_.count(string::StringKeyIgnoreCase(root_name))) {
+@@ -433,6 +446,7 @@
+ 
+ Result<void> ContentManager::CloseContent(const std::string_view root_name) {
+   std::string open_root_name;
++  bool saved = false;
+   {
+     std::lock_guard lock(mutex_);
+     auto it = open_packages_.find(string::StringKeyIgnoreCase(root_name));
+@@ -440,8 +454,9 @@
+       return Err(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
+     }
+     open_root_name = it->first.GetView();
+-  }
+-  CloseOpenedFilesFromContent(open_root_name);
++    saved = it->second->GetPackageContentData().content_type == kernel::XContentType::kSavedGame;
++  }
++  if (!saved) CloseOpenedFilesFromContent(open_root_name);
+   DetachPackage(open_root_name);
+   return Ok();
+ }
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -59,7 +59,10 @@
+   if (!user_profile_->InitializeLocal(title_.user_data_root)) {
+     REXSYS_ERROR("Local profile store unavailable or invalid; keeping user signed out");
+   }
+-  user_profile_->SetSessionChangedCallback([this] { title_.notifier.BroadcastNotification(0xA, 1); });
++  user_profile_->SetSessionChangedCallback([this] {
++    content_manager_->RetireStaleSaves();
++    title_.notifier.BroadcastNotification(0xA, 1);
++  });
+   achievement_manager_ = std::make_unique<AchievementManager>();
+   app_manager_->RegisterApp(std::make_unique<apps::XMPApp>(title_));
+   app_manager_->RegisterApp(std::make_unique<apps::XGIApp>(title_, *achievement_manager_));
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1442,3 +1442,47 @@
+     CHECK(c.Load32(output) == 0xCAFEBABE);
+   });
+ }
++
++
++REX_TEST_CASE("save mount generations retire on logout and profile switch while shared content stays mounted", "[kernel][xam][save-storage]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([](Caller&) {
++    namespace fs = rex::filesystem;
++    auto& xam = rex::xam::CurrentXAM();
++    auto& profile = xam.GetUserProfile();
++    auto& manager = xam.GetContentManager();
++    auto& system = rex::xam::CurrentTitle().file_system;
++    const auto first = profile.GetXUID();
++    u64 second = 0; REQUIRE(profile.CreateLocal("Second", &second) == 0);
++    rex::kernel::XCONTENT_AGGREGATE_DATA save{};
++    save.device_id = 1; save.title_id = 0x12345678;
++    save.xuid = first; save.content_type = rex::kernel::XContentType::kSavedGame;
++    save.SetFileName("progress");
++    REQUIRE(manager.CreateContent("SAVE", first, save));
++    auto old = system.Open("SAVE:\\payload.bin", {.disposition = fs::Disposition::kCreate, .access = fs::Access::kReadAccess | fs::Access::kWriteAccess});
++    REQUIRE(old); const std::array<u8, 4> bytes{1, 2, 3, 4};
++    REQUIRE(old->file->Write(bytes, 0)); REQUIRE(old->file->Flush());
++    auto shared = save; shared.xuid = 0; shared.content_type = rex::kernel::XContentType::kMarketplaceContent;
++    shared.SetFileName("shared"); REQUIRE(manager.CreateContent("DLC", 0, shared));
++    auto common = system.Open("DLC:\\payload.bin", {.disposition = fs::Disposition::kCreate, .access = fs::Access::kReadAccess | fs::Access::kWriteAccess});
++    REQUIRE(common); REQUIRE(common->file->Write(bytes, 0));
++    const auto epoch = profile.GetStorageEpoch();
++    REQUIRE(profile.SetLocalSession(first) == 0); CHECK(profile.GetStorageEpoch() == epoch);
++    REQUIRE(profile.SetLocalSession(0) == 0); CHECK(profile.GetStorageEpoch() == epoch + 1);
++    CHECK_FALSE(system.FindLink("SAVE:")); CHECK_FALSE(old->file->IsAccessible());
++    CHECK(common->file->IsAccessible());
++    REQUIRE(profile.SetLocalSession(first) == 0);
++    REQUIRE(manager.OpenContent("SAVE", first, save));
++    auto fresh = system.Open("SAVE:\\payload.bin", {}); REQUIRE(fresh);
++    std::array<u8, 4> output{}; REQUIRE(fresh->file->Read(output, 0)); CHECK(output == bytes);
++    CHECK_FALSE(old->file->Read(output, 0));
++    REQUIRE(profile.SetLocalSession(second) == 0);
++    CHECK_FALSE(fresh->file->IsAccessible()); CHECK(common->file->IsAccessible());
++    REQUIRE(profile.SetLocalSession(first) == 0);
++    REQUIRE(manager.OpenContent("SAVE", first, save));
++    auto closed = system.Open("SAVE:\\payload.bin", {}); REQUIRE(closed);
++    REQUIRE(manager.CloseContent("SAVE")); CHECK_FALSE(closed->file->IsAccessible());
++    CHECK_FALSE(system.FindLink("SAVE:"));
++    REQUIRE(manager.CloseContent("DLC"));
++  });
++}

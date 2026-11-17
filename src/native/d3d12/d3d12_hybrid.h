@@ -1,7 +1,7 @@
 #pragma once
 #include <d3d12.h>
 #include <wrl/client.h>
-#include <rex/graphics/register_file.h>
+#include <rex/xenos/register.h>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -18,7 +18,7 @@ struct HybridColorKey {
 class D3D12HybridColor {
  public:
   explicit D3D12HybridColor(D3D12Render&);
-  std::optional<HybridColorKey> Classify(const rex::graphics::RegisterFile&, uint32_t color_mask) const;
+  std::optional<HybridColorKey> Classify(const rex::xenos::RegisterFile&, uint32_t color_mask) const;
   void Begin(const HybridColorKey&);
   void End();
   D3D12_CPU_DESCRIPTOR_HANDLE target() const;

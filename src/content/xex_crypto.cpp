@@ -1,6 +1,6 @@
 // AES-128-CBC and SHA-1 for the XEX formats (see xex_crypto.h).
 #include "xex_crypto.h"
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(X360N_CONTENT_TEST_EXCRYPT)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -11,36 +11,37 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
-#ifndef _WIN32
-extern "C" {
-#include <aes_128/aes.h>
-}
-#include <crypto/TinySHA1.hpp>
+#if !defined(_WIN32) || defined(X360N_CONTENT_TEST_EXCRYPT)
+#include <excrypt.h>
 #endif
 
 namespace x360n::content {
 namespace crypto {
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(X360N_CONTENT_TEST_EXCRYPT)
 std::vector<uint8_t> AesCbcDecrypt(const uint8_t* key16, const uint8_t* data, size_t len) {
   std::vector<uint8_t> out(data, data + len);
-  uint8_t round_keys[AES_ROUND_KEY_SIZE];
-  aes_key_schedule_128(key16, round_keys);
+  EXCRYPT_AES_STATE state;
+  ExCryptAesKey(&state, key16);
   uint8_t previous[16] = {};
   for (size_t at = 0; at + 16 <= len; at += 16) {
     uint8_t plain[16];
-    aes_decrypt_128(round_keys, data + at, plain);
+    ExCryptAesEcb(&state, data + at, plain, 0);
     for (int i = 0; i < 16; ++i) out[at + i] = uint8_t(plain[i] ^ previous[i]);
     std::memcpy(previous, data + at, 16);
   }
   return out;
 }
 std::array<uint8_t, 20> Sha1(const uint8_t* data, size_t len) {
-  sha1::SHA1 hash;
-  hash.processBytes(data, len);
+  EXCRYPT_SHA_STATE hash;
+  ExCryptShaInit(&hash);
+  while (len) {
+    const auto chunk = uint32_t(std::min(len, size_t(std::numeric_limits<uint32_t>::max())));
+    ExCryptShaUpdate(&hash, data, chunk);
+    data += chunk;
+    len -= chunk;
+  }
   std::array<uint8_t, 20> digest{};
-  uint8_t bytes[20];
-  hash.finalize(bytes);
-  std::memcpy(digest.data(), bytes, 20);
+  ExCryptShaFinal(&hash, digest.data(), uint32_t(digest.size()));
   return digest;
 }
 #else

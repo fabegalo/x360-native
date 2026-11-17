@@ -1,53 +1,59 @@
-// Runs in a bounded child process before the session window is created. Driver
-// initialization and plugin ABI checks cannot crash or hang the launcher.
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/graphics/graphics_system.h>
-#include <rex/logging.h>
-#include <iostream>
-#include <chrono>
+// Runs in a bounded child before the session window is created. Use the same
+// module/driver ABI as titles, without allocating or executing a guest runtime.
+#include "gpu_probe_app.h"
 #include "supervisor/fs_io.h"
+#ifdef _WIN32
+void CheckD3D12Presenter(rex::gpu::IGraphicsDriver&, rex::ScopeGuard&);
+#endif
 
+using x360n::GPUProbeApp;
 #ifdef _WIN32
 int wmain(int argc, wchar_t** argv) try {
 #else
 int main(int argc, char** argv) try {
 #endif
-  if (argc < 3) return 2;
+  if (argc != 3 && argc != 4) return 2;
+  const auto family = std::filesystem::path(argv[1]).string();
   const auto backend = std::filesystem::path(argv[2]).string();
-  if (backend != "d3d12" && backend != "vulkan") return 2;
-  rex::InitLogging();
-  // The presenter uses runtime services (including the host clock). No guest
-  // image is loaded and tool mode does not execute dashboard/game code.
+  if ((family != "xenos" && family != "native") ||
+      (backend != "d3d12" && backend != "vulkan")) return 2;
+  const bool presenter_contract = argc == 4;
+  if (presenter_contract && (std::filesystem::path(argv[3]).string() != "--presenter-contract" || backend != "d3d12")) return 2;
+#ifndef _WIN32
+  if (presenter_contract) return 2;
+#endif
+  const std::string selected = family == "native" ? "native-" + backend : backend;
+  const std::string module = family == "native" ? "rexgpu-native" : "rexgpu-xenos-" + backend;
   const auto scratch = std::filesystem::temp_directory_path() /
       ("x360n-gpu-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  x360n::io::create_directories(scratch);
-  rex::Runtime runtime(scratch, scratch / "user");
-  rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-  if (runtime.Setup(std::move(config)) != 0) {
-    std::cerr << "Cannot initialize GPU probe runtime services\n"; return 7;
+  if (!x360n::io::create_directory(scratch)) throw std::runtime_error("GPU probe scratch collision");
+  rex::ScopeGuard cleanup([&] {
+    std::error_code ec;
+    const auto resolved = std::filesystem::weakly_canonical(scratch, ec);
+    if (ec || resolved != scratch || x360n::io::is_redirect(scratch, ec) || ec) return;
+    std::filesystem::recursive_directory_iterator entry(scratch, ec), end;
+    for (unsigned count = 0; !ec && entry != end; ++count, entry.increment(ec))
+      if (count >= 32 || x360n::io::is_redirect(entry->path(), ec) || ec) return;
+    if (!ec) std::filesystem::remove_all(scratch, ec);
+  });
+  GPUProbeApp app(scratch, module, selected);
+  const std::vector<std::string> options = presenter_contract
+      ? std::vector<std::string>{"--gpu.d3d12.debug=true"} : std::vector<std::string>{};
+  auto initialized = app.Init(rex::CLIArgList::Parse(options));
+  if (!initialized) {
+    std::cerr << initialized.error().GetDescription() << '\n'; return 3;
   }
-  auto gpu = rex::system::LoadGpuPlugin(std::filesystem::path(argv[1]).string(), backend);
-  if (!gpu) {
-    std::cerr << "GPU plugin absent, incompatible ABI, or requested backend not compiled. See GPU log.\n";
-    return 3;
-  }
-  // SetupPresentation creates the provider with presentation features, including
-  // VK_KHR_swapchain, but no HWND. This exercises the actual SDK device selector.
-  if (gpu->SetupPresentation(nullptr) != 0) {
-    gpu->Shutdown();
-    std::cerr << "Cannot create " << backend << " provider/presenter: loader, driver or required GPU features unavailable. See GPU log.\n";
-    return 4;
-  }
-  const auto implementation = static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->name();
-  if (backend == "vulkan" && implementation != "Vulkan") {
-    gpu->Shutdown(); std::cerr << "Plugin did not create VulkanGraphicsSystem\n"; return 6;
-  }
-  std::cout << "GPU backend initialized: " << implementation << '\n';
-  gpu->Shutdown();
-  gpu.reset(); runtime.Shutdown();
-  rex::FlushLogging();
+  auto* driver = &app.GetProbeDriver();
+  rex::ScopeGuard shutdown([&] { app.ReleaseProbeDriver(); });
+  // An empty surface creates the real provider/presenter, including swapchain
+  // device features, without attaching an OS window or starting guest threads.
+  auto ready = static_cast<rex::gpu::IGraphicsDriver&>(*driver).SetSurface({});
+  if (!ready) { std::cerr << ready.error().GetDescription() << '\n'; return 4; }
+  if (driver->GetName() != selected) throw std::runtime_error("GPU module selected a different backend");
+  std::cout << "GPU backend initialized: " << driver->GetName() << '\n';
+#ifdef _WIN32
+  if (presenter_contract) CheckD3D12Presenter(static_cast<rex::gpu::IGraphicsDriver&>(*driver), shutdown);
+#endif
   return 0;
 } catch (const std::exception& e) {
   std::cerr << e.what() << '\n';

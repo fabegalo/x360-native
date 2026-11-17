@@ -1,25 +1,29 @@
 // Coverage calculation follows ReXGlue f5337cdc graphics/util/draw.cpp,
 // Copyright 2023 Ben Vanik, BSD license (external/rexglue-sdk/LICENSE).
 #pragma once
-#include <rex/graphics/util/draw.h>
-#include <rex/graphics/register_file.h>
-#include <rex/ui/graphics_util.h>
+#include <gpu/xenos/draw_state.h>
+#include <rex/xenos/register.h>
+#include <gpu/xenos/host/fixed_point.h>
 #include <algorithm>
 #include <cmath>
 namespace x360n::native {
+namespace draw_util = rex::gpu::draw_state;
 // Only an empty, otherwise supported resolve is a no-op. Malformed inputs
 // must continue into GetResolveInfo's diagnostic failure path.
-inline bool ResolveCoverageEmpty(const rex::graphics::RegisterFile& r, const float* vertices) {
-  using namespace rex::graphics;
+inline bool ResolveCoverageEmpty(const rex::xenos::RegisterFile& r, const float* vertices) {
+  using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
   auto command = r.Get<reg::RB_COPY_CONTROL>().copy_command;
   if (command != xenos::CopyCommand::kRaw && command != xenos::CopyCommand::kConvert) return false;
   const auto surface = r.Get<reg::RB_SURFACE_INFO>();
-  if (surface.msaa_samples > xenos::MsaaSamples::k4X) return false;
+  if (surface.msaa_samples > xenos::MSAASamples::k4X) return false;
   const float half = r.Get<reg::PA_SU_VTX_CNTL>().pix_center == xenos::PixelCenter::kD3DZero ? 0.5f : 0.0f;
   int32_t fixed[6];
   for (unsigned i = 0; i < 6; ++i) {
     if (!std::isfinite(vertices[i])) return false;
-    fixed[i] = rex::ui::FloatToD3D11Fixed16p8(vertices[i] + half);
+    fixed[i] = rex::gpu::FloatToD3D11Fixed16p8(vertices[i] + half);
   }
   const auto offset = r.Get<reg::PA_SC_WINDOW_OFFSET>();
   const bool window = r.Get<reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable;

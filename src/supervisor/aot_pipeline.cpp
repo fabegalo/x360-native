@@ -432,7 +432,7 @@ class Driver {
     Record(inputs, dir / "CMakeCache.txt");
     return inputs;
   }
-  J Products(const fs::path& dir) {
+  J Products(const fs::path& dir, bool for_invalidation = false) {
     auto graph = GraphFor(dir, {});
     auto commands = Commands(dir);
     std::map<std::string, std::string> command_by_path, rule_command;
@@ -487,8 +487,15 @@ class Driver {
             inputs.insert(graph.nodes[input]);
       }
       if ((file.extension() == ".o" || file.extension() == ".obj") &&
-          !recorded_headers)
-        throw std::runtime_error("Compiler dependency record missing");
+          !recorded_headers) {
+        if (!for_invalidation)
+          throw std::runtime_error("Compiler dependency record missing: " + Path(file));
+        // Reconfiguration may discard deps for temporarily absent module targets.
+        // A null signature forces reconstruction; publication still requires deps.
+        products.push_back({{"path", Path(file)}, {"signature", nullptr},
+                            {"sha256", Digest(file)}});
+        continue;
+      }
       Files entries;
       for (const auto& input : inputs) {
         if (!io::is_regular_file(input)) {
@@ -513,7 +520,7 @@ class Driver {
     return products;
   }
   void Invalidate(const J& previous) {
-    auto current = Products(build);
+    auto current = Products(build, true);
     std::map<std::string, J> old;
     for (const auto& product : previous.at("products"))
       old[product.at("path")] = product;
@@ -1016,9 +1023,9 @@ void Driver::SharedSdk() {
           Path(source));
   }
   Stage("sdk-build");
-  Build(generation, {"rexglue", "rexgpu-xenos"});
+  Build(generation, {"x360n_shared_sdk"});
   Commands(generation);
-  const auto graph = GraphFor(generation, {"rexglue", "rexgpu-xenos"});
+  const auto graph = GraphFor(generation, {"x360n_shared_sdk"});
   Files artifacts;
   for (const auto& [id, path] : graph.nodes)
     if (io::is_regular_file(path) && IsWithin(path, generation) &&
@@ -1035,7 +1042,7 @@ void Driver::SharedSdk() {
       const auto file = PathFromUtf8(path);
       ValidateNativeImage(file);
       if (PathUtf8(file.filename()).find("rexgpu-xenos") != std::string::npos)
-        ModuleSymbols(file, {"rex_gpu_create", "rex_gpu_abi_version"});
+        ModuleSymbols(file, {"ReXCreateInterface", "ReXEnumerateInterfaces", "ReXBuildIdentity"});
     }
   for (const auto& entry : io::recursive_directory_iterator(generation))
     if (entry.is_regular_file() && entry.path().extension() == ".cmake")
@@ -1047,7 +1054,7 @@ void Driver::SharedSdk() {
   sdk_export = generation / "sdk.cmake";
   if (!io::is_regular_file(sdk_export))
     throw std::runtime_error("Shared SDK export missing");
-  auto inputs = Closure(generation, {"rexglue", "rexgpu-xenos"});
+  auto inputs = Closure(generation, {"x360n_shared_sdk"});
   for (const auto& file :
        {options.cxx, options.cc, options.cmake, options.ninja,
         options.paths.root / "deps.lock.json"})
@@ -1270,14 +1277,15 @@ AotResult Driver::Run() {
           const auto file = published / NativeRuntimeFilename(PathFromUtf8(*name));
           Record(artifacts, file);
           const auto stem = PathUtf8(PathFromUtf8(*name).stem());
-          if (stem == "rexgpu-xenos" || stem == "rexgpu-native")
-            ModuleSymbols(file, {"rex_gpu_create", "rex_gpu_abi_version"});
+          if (stem.starts_with("rexgpu-xenos-") || stem == "rexgpu-native")
+            ModuleSymbols(file, {"ReXCreateInterface", "ReXEnumerateInterfaces", "ReXBuildIdentity"});
           else if (stem.ends_with("_session_ui"))
             ModuleSymbols(file,
-                          {"X360nSystemUiInstall", "X360nSystemUiRelease"});
+                          {"X360nSystemUiConfigure", "X360nSystemUiUnconfigure",
+                           "X360nSystemUiInstall", "X360nSystemUiRelease"});
           else if (stem.starts_with(options.title + "_"))
             ModuleSymbols(file,
-                          {"ReXModule_Register", "ReXModule_GetImageInfo"});
+                          {"ReXRegisterModule", "ReXGetModuleImage", "ReXModule_UsesHostFunctionTable"});
         }
     }
     for (const auto& [path, hash] : artifacts)

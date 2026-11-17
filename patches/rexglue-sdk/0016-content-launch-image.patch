@@ -1,69 +1,124 @@
-diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
-index c16f4a3..5445db1 100644
---- a/src/kernel/xam/xam_content.cpp
-+++ b/src/kernel/xam/xam_content.cpp
-@@ -11,6 +11,8 @@
- 
- #include <rex/cvar.h>
- #include <rex/kernel/xam/private.h>
-+#include <rex/kernel/xam/module.h>
-+#include <rex/filesystem/vfs.h>
- #include <rex/logging.h>
- #include <rex/math.h>
- #include <rex/hook.h>
-@@ -433,6 +435,46 @@ u32 XamContentDeleteInternal_entry(mapped_void content_data_ptr, mapped_void ove
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -471,6 +471,37 @@
    }
  }
  
-+// Original XAM 17559 0x294 -> 816EFED0: open the aggregate package under
-+// XSYSLAUNCH, then pass the requested image and flags to the loader.
-+u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string image, u32 flags) {
-+  if (!content) return X_ERROR_INVALID_PARAMETER;
-+  const auto& data = *content.as<XCONTENT_AGGREGATE_DATA*>();
-+  const auto* device = GetDummyDeviceInfo(data.device_id);
-+  if (!device) return X_ERROR_DEVICE_NOT_CONNECTED;
-+  if (device->device_type != DeviceType::HDD) return X_RESULT_FROM_WIN32(50);
-+  // Other loader modes need their own semantics; don't silently drop flags.
-+  if (flags != 0) {
-+    REXKRNL_ERROR("Content launch flags {:08X} not implemented", uint32_t(flags));
-+    return X_RESULT_FROM_WIN32(50);
-+  }
-+  const std::string package(data.file_name_raw,
-+      std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
-+  if (package.empty() || package == "." || package == ".." ||
-+      package.find_first_of("/\\:") != std::string::npos) return X_ERROR_INVALID_PARAMETER;
-+  const std::string name = image && !image.value().empty() ? std::string(image.value()) : "default.xex";
-+  if (name.empty() || name == "." || name == ".." ||
-+      name.find_first_of("/\\:") != std::string::npos) return X_ERROR_INVALID_PARAMETER;
-+  auto* state = REX_KERNEL_STATE();
-+  auto* manager = state->content_manager();
-+  uint32_t license = 0;
-+  auto result = manager->OpenContent("XSYSLAUNCH", data.xuid, data, license);
-+  if (result != X_ERROR_SUCCESS) return result;
++u32 XamContentLaunchImageInternalEx_entry(MappedVoid content, MappedString image, u32 flags) {
++  if (!content) return kernel::X_ERROR_INVALID_PARAMETER;
++  const auto& data = *content.As<const kernel::XCONTENT_AGGREGATE_DATA*>();
++  const auto* device = rex::xam::GetPlaceholderDevice(data.device_id);
++  if (!device) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++  if (device->device_type != rex::xam::DeviceType::kHDD || flags) return kernel::XResultFromWin32(50);
++  const std::string package(data.file_name_raw, std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
++  if (package.empty() || package == "." || package == ".." || package.find_first_of("/\\:") != std::string::npos)
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  const std::string name = image && !image.GetValue().empty() ? std::string(image.GetValue()) : "default.xex";
++  if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos)
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  auto& manager = CurrentXAM().GetContentManager();
++  auto opened = manager.OpenContent("XSYSLAUNCH", data.xuid, data);
++  if (!opened) return kernel::ToXResult(opened);
 +  const std::string path = "XSYSLAUNCH:\\" + name;
-+  auto* entry = state->file_system()->ResolvePath(path);
-+  if (!entry || (entry->attributes() & filesystem::kFileAttributeDirectory)) {
-+    manager->CloseContent("XSYSLAUNCH");
-+    return X_ERROR_FILE_NOT_FOUND;
++  auto entry = CurrentTitle().file_system.Stat(path);
++  if (!entry || rex::HasFlags(entry->attributes, rex::filesystem::FileAttributes::kDirectory)) {
++    if (auto closed = manager.CloseContent("XSYSLAUNCH"); !closed)
++      REXXAM_WARN("Failed to close rejected content launch: {}", closed.error().message);
++    return kernel::X_ERROR_FILE_NOT_FOUND;
 +  }
-+  auto xam = state->GetKernelModule<XamModule>("xam.xex");
-+  xam->loader_data().launch_path = path;
-+  xam->loader_data().launch_flags = flags;
-+  REXKRNL_INFO("Content launch requested: title={:08X}, path={}, flags={:08X}",
-+              uint32_t(data.title_id), path, uint32_t(flags));
-+  state->TerminateTitle();
-+  return X_ERROR_SUCCESS;  // TerminateTitle does not return on a guest thread.
++  auto& loader = CurrentXAM().GetLoaderState();
++  loader.launch_path = path;
++  loader.launch_flags = flags;
++  REXXAM_INFO("Content launch requested: title={:08X}, path={}, flags={:08X}",
++      static_cast<u32>(data.title_id), path, flags);
++  CurrentTitle().exit.TerminateTitle();
++  return kernel::X_ERROR_SUCCESS;
 +}
 +
  }  // namespace xam
- }  // namespace kernel
  }  // namespace rex
-@@ -473,7 +515,7 @@ REX_EXPORT_STUB(__imp__XamContentIsGameInstalledToHDD);
+ 
+@@ -490,3 +521,5 @@
+ REX_XAM_BODY(__imp__XamContentDeleteInternal, rex::xam::XamContentDeleteInternal_entry)
+ 
+ REX_XAM_BODY(__imp__XamContentGetAttributesInternal, rex::xam::XamContentGetAttributesInternal_entry)
++
++REX_XAM_BODY(__imp__XamContentLaunchImageInternalEx, rex::xam::XamContentLaunchImageInternalEx_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1070,7 +1070,7 @@
  REX_EXPORT_STUB(__imp__XamContentLaunchImage);
  REX_EXPORT_STUB(__imp__XamContentLaunchImageFromFileInternal);
  REX_EXPORT_STUB(__imp__XamContentLaunchImageInternal);
 -REX_EXPORT_STUB(__imp__XamContentLaunchImageInternalEx);
-+REX_EXPORT(__imp__XamContentLaunchImageInternalEx, rex::kernel::xam::XamContentLaunchImageInternalEx_entry)
++
  REX_EXPORT_STUB(__imp__XamContentLockUnlockPackageHeaders);
  REX_EXPORT_STUB(__imp__XamContentMountInstalledGame);
  REX_EXPORT_STUB(__imp__XamContentMountPackage);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -360,3 +360,5 @@
+ REX_XAM_FORWARD(__imp__XamProfileGetCreationStatus)
+ 
+ REX_XAM_FORWARD(__imp__XamContentGetAttributesInternal)
++
++REX_XAM_FORWARD(__imp__XamContentLaunchImageInternalEx)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1101,3 +1101,52 @@
+     CHECK(xam.GetUserProfile().GetSigninState() == 1);
+   });
+ }
++
++
++REX_TEST_CASE("content launch validates its mounted image before publishing a transition", "[kernel][xam][content-launch]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++    REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++    std::filesystem::create_directories(root / "0000000000000000" / "584108B7" / "000D0000" / "package");
++  });
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto input = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + input);
++    *data = {};
++    data->device_id = 1; data->title_id = 0x584108B7;
++    data->content_type = static_cast<rex::kernel::XContentType>(0xD0000);
++    data->SetFileName("missing");
++    CHECK(caller.XAM("XamContentLaunchImageInternalEx", {input, 0, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    data->SetFileName("package");
++    CHECK(caller.XAM("XamContentLaunchImageInternalEx", {input, 0, 1}) == 50);
++    CHECK(caller.XAM("XamContentLaunchImageInternalEx", {input, 0, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    CHECK_FALSE(rex::xam::CurrentTitle().file_system.Stat("XSYSLAUNCH:\\default.xex").has_value());
++    CHECK(rex::xam::CurrentXAM().GetLoaderState().launch_path.empty());
++    CHECK(caller.XAM("XamContentLaunchImageInternalEx", {input, caller.AllocString("../default.xex"), 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++  });
++}
++
++REX_TEST_CASE("content launch hands the mounted path to the existing title termination flow", "[kernel][xam][content-launch]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++    REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++    const auto package = root / "0000000000000000" / "584108B7" / "000D0000" / "package";
++    std::filesystem::create_directories(package);
++    // This case verifies the launch request only; no executable image is loaded or run.
++    std::ofstream(package / "default.xex", std::ios::binary).write("fixture", 7);
++  });
++  bool returned = false;
++  fixture.RunUntilGuestThreadEnds([&](Caller& caller) {
++    const auto input = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + input);
++    *data = {};
++    data->device_id = 1; data->title_id = 0x584108B7;
++    data->content_type = static_cast<rex::kernel::XContentType>(0xD0000);
++    data->SetFileName("package");
++    caller.XAM("XamContentLaunchImageInternalEx", {input, 0, 0});
++    returned = true;
++  });
++  CHECK_FALSE(returned);
++  CHECK(rex::xam::CurrentXAM().GetLoaderState().launch_path == "XSYSLAUNCH:\\default.xex");
++  CHECK(rex::xam::CurrentXAM().GetLoaderState().launch_flags == 0);
++}

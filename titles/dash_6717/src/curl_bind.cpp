@@ -20,10 +20,9 @@
 
 #include <cstdint>
 
-#include <rex/logging.h>
-#include <rex/logging/assert.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
+#include <rex/ppc/hook.h>
 
 namespace dash6717 {
 namespace {
@@ -36,7 +35,7 @@ const CurlBinding& LastCurlBinding() {
 
 }  // namespace dash6717
 
-extern "C" REX_FUNC(sub_92739D94) {
+REX_HOOK_RAW(sub_92739D94) {
   const uint32_t table = ctx.r3.u32;
   if (table == 0) {
     REX_FATAL("dash_6717: xam 0xAE6 (CurlBindFunctionTable per Xenia) called with a null table; "

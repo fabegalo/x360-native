@@ -1,295 +1,549 @@
-diff --git a/src/kernel/xam/xam_task.cpp b/src/kernel/xam/xam_task.cpp
-index e0e7dab..1a894fe 100644
---- a/src/kernel/xam/xam_task.cpp
-+++ b/src/kernel/xam/xam_task.cpp
-@@ -20,6 +20,8 @@
- #include <rex/system/user_module.h>
- #include <rex/system/xthread.h>
- #include <rex/system/xtypes.h>
-+#include <rex/system/thread_state.h>
-+#include <rex/runtime.h>
+diff --git a/src/xam/xam_task.cpp b/src/xam/xam_task.cpp
+--- a/src/xam/xam_task.cpp
++++ b/src/xam/xam_task.cpp
+@@ -10,94 +10,231 @@
+  */
  
- #if REX_PLATFORM_WIN32
- #include <rex/platform.h>
-@@ -33,51 +35,111 @@ namespace xam {
- using namespace rex::system;
- using namespace rex::system::xam;
- 
+ #include "xam/xam_state.h"
++#include "xam/xam_bodies.h"
++#include "xam/categories.h"
++#include <rex/xam/task_context.h>
++#include <rex/chrono.h>
++#include <rex/kernel/object/kernel_thread.h>
+ #include <rex/kernel/object/module_object.h>
+-#include <rex/kernel/title_runtime.h>
+-#include <rex/platform/thread.h>
+-#include <rex/ppc/call.h>
+-#include "xam/xam_ui.h"
++#include <rex/kernel/object/object_table.h>
++#include <rex/kernel/object/xam_object.h>
+ #include <rex/kernel/types/thread.h>
++#include <rex/kernel/types/status.h>
+ #include <rex/logging/log_category.h>
+-#include "xam/categories.h"
+-#include <rex/ppc/hook.h>
+ #include <rex/memory/mapped_ptr.h>
+-#include <rex/kernel/types/status.h>
+-#include <rex/kernel/object/object_table.h>
+-#include <rex/kernel/thread_registry.h>
+-#include <rex/types.h>
+-#include <rex/kernel/title_runtime.h>
+-#include <rex/kernel/function_dispatcher.h>
+-#include <rex/kernel/object/module_object.h>
+-#include <rex/kernel/object/kernel_thread.h>
+-#include "xam/stub_log.h"
+-
+-#if REX_PLATFORM_WIN32
+-#include <rex/platform.h>
+-#endif
+-
+-#include <format>
+-#include "xam/xam_bodies.h"
+-
+-namespace rex {
+-namespace xam {
+-
++#include <rex/utility.h>
++#include <atomic>
++#include <functional>
++#include <mutex>
++
++namespace rex::xam {
+ using namespace rex::kernel;
+-
 -struct XTASK_MESSAGE {
--  be<uint32_t> unknown_00;
--  be<uint32_t> unknown_04;
--  be<uint32_t> unknown_08;
--  be<uint32_t> callback_arg_ptr;
--  be<uint32_t> event_handle;
--  be<uint32_t> unknown_14;
--  be<uint32_t> task_handle;
+-  be_u32 unknown_00;
+-  be_u32 unknown_04;
+-  be_u32 unknown_08;
+-  be_u32 callback_arg_ptr;
+-  be_u32 event_handle;
+-  be_u32 unknown_14;
+-  be_u32 task_handle;
++u32 XamTaskCloseHandle_entry(u32 handle);
 +struct TaskState {
 +  std::atomic<bool> cancelled{false};
 +  std::atomic<bool> completed{false};
-+  std::atomic<uint32_t> result{0x8000000A};
-+  uint32_t handle = 0;
-+  uint32_t attributes[2] = {};
-+};
-+static thread_local TaskState* current_task = nullptr;
-+
-+class TaskThread final : public XThread {
-+ public:
-+  TaskThread(KernelState* kernel, uint32_t stack, uint32_t callback, uint32_t context,
-+             std::shared_ptr<TaskState> state)
-+      : XThread(kernel, stack, 0, callback, context, 0, true), state_(std::move(state)) {}
-+  void Execute() override {
-+    kernel_state_->OnThreadExecute(this);
-+    DeliverAPCs();
-+    current_task = state_.get();
-+    thread_state_->context()->fpscr.InitHost();
-+    main_fiber_ = rex::thread::Fiber::ConvertCurrentThread();
-+    uint64_t args[] = {creation_params_.start_context};
-+    const auto result = Runtime::instance()->function_dispatcher()->Execute(
-+        thread_state_.get(), creation_params_.start_address, args, 1);
-+    state_->result = uint32_t(result);
-+    state_->completed = true;
-+    current_task = nullptr;
-+    Exit(uint32_t(result));
-+  }
-+ private:
-+  std::shared_ptr<TaskState> state_;
++  std::atomic<u32> result{0x8000000A};
++  u32 handle = 0;
++  bool host_system = false;
++  u32 attributes[2] = {};
++  std::mutex attributes_mutex;
  };
--static_assert_size(XTASK_MESSAGE, 0x1C);
+-REX_STATIC_ASSERT_SIZE(XTASK_MESSAGE, 0x1C);
 -
--u32 XamTaskSchedule_entry(mapped_void callback, ppc_ptr_t<XTASK_MESSAGE> message,
--                          mapped_u32 unknown, mapped_u32 handle_ptr) {
--  // TODO(gibbed): figure out what this is for
+-u32 XamTaskSchedule_entry(MappedVoid callback, GuestPtrT<XTASK_MESSAGE> message,
+-                          [[maybe_unused]] MappedU32 unknown, MappedU32 handle_ptr) {
 -  *handle_ptr = 12345;
 -
--  uint32_t stack_size = REX_KERNEL_STATE()->GetExecutableModule()->stack_size();
--
--  // Stack must be aligned to 16kb pages
--  stack_size = std::max((uint32_t)0x4000, ((stack_size + 0xFFF) & 0xFFFFF000));
- 
--  auto thread =
--      object_ref<XThread>(new XThread(REX_KERNEL_STATE(), stack_size, 0, callback.guest_address(),
--                                      message.guest_address(), 0, true));
-+class Task final : public XObject {
+-  kernel::X_HANDLE task_thread = 0;
+-  auto launched = CurrentTitle().threads.CreateTaskThread(callback.GetGuestAddress(),
+-                                                          message.GetGuestAddress());
+-  if (launched) {
+-    task_thread = *launched;
++static thread_local TaskState* current_task = nullptr;
++
++class Task final : public kernel::IXAMObject {
 + public:
-+  static constexpr Type kObjectType = Type::XamTask;
-+  explicit Task(KernelState* kernel) : XObject(kernel, kObjectType) {}
++  static constexpr u32 kTag = 0x5441534B;
++  explicit Task(kernel::IObjectTable& objects) : objects(objects) {}
++  ~Task() override { if (thread) kernel::CloseOwned(objects, thread); }
++  u32 GetTag() const override { return kTag; }
++  kernel::IObjectTable& objects;
 +  std::shared_ptr<TaskState> state = std::make_shared<TaskState>();
-+  object_ref<TaskThread> thread;
++  kernel::X_HANDLE thread = 0;
++  u32 references = 1;
 +};
- 
--  X_STATUS result = thread->Create();
-+static object_ref<Task> LookupTask(uint32_t handle) {
-+  return REX_KERNEL_STATE()->object_table()->LookupObject<Task>(handle & ~1u);
++
++static kernel::Pinned<Task> LookupTask(u32 handle) {
++  return CurrentTitle().objects.Get<Task>(handle & ~1u);
 +}
- 
++
 +// 17559 816BA440: context is opaque; attributes are two words, not a message.
-+u32 XamTaskSchedule_entry(mapped_void callback, u32 context,
-+                          mapped_u32 attributes, mapped_u32 handle_ptr) {
++u32 XamTaskSchedule_entry(MappedVoid callback, u32 context,
++                          MappedU32 attributes, MappedU32 handle_ptr) {
 +  if (!callback || !handle_ptr) return X_E_INVALIDARG;
 +  *handle_ptr = 0;
-+  auto* kernel = REX_KERNEL_STATE();
-+  auto task = object_ref<Task>(new Task(kernel));
-+  task->state->handle = task->handle();
++  auto& objects = CurrentTitle().objects;
++  auto added = objects.AddXAMObject(std::make_unique<Task>(objects), {});
++  if (!added) return kernel::ToXStatus(added);
++  const auto handle = *added;
++  auto task = objects.Get<Task>(handle);
++  task->state->handle = handle;
 +  if (attributes) {
 +    task->state->attributes[0] = attributes[0];
 +    task->state->attributes[1] = attributes[1];
-+  }
-+  auto module = kernel->GetExecutableModule();
-+  uint32_t stack = module ? module->stack_size() : 0x4000;
-+  task->thread = object_ref<TaskThread>(new TaskThread(kernel, stack,
-+      callback.guest_address(), context, task->state));
-+  const auto result = task->thread->Create();
-   if (XFAILED(result)) {
--    // Failed!
--    REXKRNL_ERROR("XAM task creation failed: {:08X}", result);
-+    task->thread->Delete();
-+    task->Delete();
-     return result;
    }
+-  kernel::X_STATUS result = kernel::ToXStatus(launched);
 -
--  REXKRNL_DEBUG("XAM task ({:08X}) scheduled asynchronously", callback.guest_address());
+-  if (kernel::XFAILED(result)) {
+-    REXXAM_FAIL(result, "XAM task creation failed: {:08X}", result);
++  auto launched = CurrentTitle().threads.CreateTaskThread(callback.GetGuestAddress(), context, {
++      [state = task->state] { current_task = state.get(); },
++      [state = task->state](u32 result) {
++        state->result = result;
++        state->completed = true;
++        if (current_task == state.get()) current_task = nullptr;
++      }, [owner = task.operator->(), handle_ptr, handle](kernel::X_HANDLE thread_handle) {
++        owner->thread = thread_handle;
++        *handle_ptr = handle;
++      }});
++  if (!launched) {
++    *handle_ptr = 0;
++    kernel::CloseOwned(objects, handle);
++    return kernel::ToXStatus(launched);
+   }
+-  kernel::CloseOwned(CurrentTitle().objects, task_thread);
 -
--  return X_STATUS_SUCCESS;
-+  *handle_ptr = task->handle();
-+  REXKRNL_DEBUG("XAM task {:08X} callback={:08X} attributes={:08X}/{:08X}",
-+      task->handle(), callback.guest_address(), task->state->attributes[0],
-+      task->state->attributes[1]);
+-  REXXAM_DEBUG("XAM task ({:08X}) scheduled asynchronously", callback.GetGuestAddress());
+-
+-  return kernel::X_STATUS_SUCCESS;
+-}
+-
+-u32 XamTaskShouldExit_entry([[maybe_unused]] u32 r3) {
+-  return 0;
+-}
+-
++  REXXAM_DEBUG("XAM task {:08X} callback={:08X} attributes={:08X}/{:08X}",
++      handle, callback.GetGuestAddress(), task->state->attributes[0], task->state->attributes[1]);
 +  return 0;
- }
- 
--u32 XamTaskShouldExit_entry(u32 r3) {
++}
++
 +u32 XamTaskShouldExit_entry() { return current_task && current_task->cancelled; }
-+u32 XamTaskGetCurrentTask_entry() { return current_task ? current_task->handle : 0; }
++u32 XamTaskGetCurrentTask_entry() {
++  if (!current_task) return 0;
++  auto task = LookupTask(current_task->handle);
++  if (!task) return 0;
++  // Original 17559 816B7F30 takes a reference, released by CloseHandle.
++  std::lock_guard lock(task->state->attributes_mutex);
++  if (!task->references) return 0;
++  ++task->references;
++  return task->state->handle;
++}
++
++// A host-dispatched synchronous system callback is a real task too. Keep its
++// lifetime bounded to the callback, without starting a worker or borrowing the
++// title's TLS. Nested dispatch restores the caller's task and cancellation state.
++u32 RunSystemTask(const std::function<u32()>& callback) {
++  auto& objects = CurrentTitle().objects;
++  auto added = objects.AddXAMObject(std::make_unique<Task>(objects), {});
++  if (!added) return kernel::X_E_FAIL;
++  auto task = objects.Get<Task>(*added);
++  task->state->handle = *added;
++  task->state->host_system = true;
++  task->state->attributes[0] = 0x04000000;
++  rex::ScopeGuard scope([previous = current_task, handle = *added] {
++    current_task = previous;
++    XamTaskCloseHandle_entry(handle);
++  });
++  current_task = task->state.get();
++  const auto result = callback();
++  task->state->result = result;
++  task->state->completed = true;
++  return result;
++}
++
++bool IsRuntimeTask(u32 handle) { return bool(LookupTask(handle)); }
++
++u32 CurrentSystemTask() {
++  return current_task && current_task->host_system ? u32(XamTaskGetCurrentTask_entry()) : 0;
++}
++
++u32 XamTaskGetAttributes_entry(u32 handle, MappedU32 output) {
++  auto task = LookupTask(handle);
++  if (!task || !output) return X_E_INVALIDARG;
++  std::lock_guard lock(task->state->attributes_mutex);
++  output[0] = task->state->attributes[0];
++  output[1] = task->state->attributes[1];
++  return 0;
++}
 +u32 XamTaskCancel_entry(u32 handle) {
 +  auto task = LookupTask(handle);
 +  if (!task) return X_E_INVALIDARG;
 +  task->state->cancelled = true;
-   return 0;
- }
--
++  return 0;
++}
 +u32 XamTaskWaitOnCompletion_entry(u32 handle) {
 +  auto task = LookupTask(handle);
 +  if (!task || task->state.get() == current_task) return X_E_INVALIDARG;
 +  // Join the guest callback before its owner frees context or unloads the XEX.
-+  return task->thread->Wait(0, 0, 0, nullptr);
++  if (!task->thread) return task->state->completed ? 0 : u32(X_E_INVALIDARG);
++  return CurrentTitle().threads.GetObjectWaiter().WaitGuestObject(task->thread, 0, 0, 0, nullptr);
 +}
  u32 XamTaskCloseHandle_entry(u32 handle) {
--  REXKRNL_DEBUG("XamTaskCloseHandle({:#x}) - stub", (uint32_t)handle);
--  return X_STATUS_SUCCESS;
+-  REX_XAM_STUB("XamTaskCloseHandle({:#x})", static_cast<u32>(handle));
+-  return kernel::X_STATUS_SUCCESS;
+-}
 +  auto task = LookupTask(handle);
 +  if (!task) return X_E_INVALIDARG;
-+  task->Delete();
++  bool close = false;
++  {
++    std::lock_guard lock(task->state->attributes_mutex);
++    if (!task->references) return X_E_INVALIDARG;
++    close = --task->references == 0;
++  }
++  if (close) kernel::CloseOwned(CurrentTitle().objects, handle & ~1u);
 +  return 0;
 +}
 +u32 XamTaskGetStatus_entry(u32 handle) {
 +  auto task = LookupTask(handle);
 +  if (!task) return X_E_INVALIDARG;
-+  return task->state->completed ? 0 : 0x8000000A;
++  // 816B7B98: idle/completed state 0 returns S_FALSE; queued/running returns S_OK.
++  return task->state->completed ? 1 : 0;
 +}
 +u32 XamTaskGetCompletionStatus_entry(u32 handle) {
 +  auto task = LookupTask(handle);
-+  return task ? task->state->result.load() : uint32_t(X_E_INVALIDARG);
++  return task ? task->state->result.load() : u32(X_E_INVALIDARG);
 +}
 +u32 XamTaskQueryProperty_entry(u32 handle, u32 mask) {
 +  auto task = LookupTask(handle);
-+  return task ? task->state->attributes[0] & mask : 0;
- }
++  if (!task) return 0;
++  std::lock_guard lock(task->state->attributes_mutex);
++  return task->state->attributes[0] & mask;
++}
++
  
- }  // namespace xam
-@@ -87,17 +149,17 @@ u32 XamTaskCloseHandle_entry(u32 handle) {
- REX_EXPORT(__imp__XamTaskSchedule, rex::kernel::xam::XamTaskSchedule_entry)
- REX_EXPORT(__imp__XamTaskShouldExit, rex::kernel::xam::XamTaskShouldExit_entry)
- REX_EXPORT(__imp__XamTaskCloseHandle, rex::kernel::xam::XamTaskCloseHandle_entry)
-+REX_EXPORT(__imp__XamTaskCancel, rex::kernel::xam::XamTaskCancel_entry)
-+REX_EXPORT(__imp__XamTaskWaitOnCompletion, rex::kernel::xam::XamTaskWaitOnCompletion_entry)
-+REX_EXPORT(__imp__XamTaskGetCurrentTask, rex::kernel::xam::XamTaskGetCurrentTask_entry)
-+REX_EXPORT(__imp__XamTaskGetStatus, rex::kernel::xam::XamTaskGetStatus_entry)
-+REX_EXPORT(__imp__XamTaskGetCompletionStatus, rex::kernel::xam::XamTaskGetCompletionStatus_entry)
-+REX_EXPORT(__imp__XamTaskQueryProperty, rex::kernel::xam::XamTaskQueryProperty_entry)
+ void XRegisterThreadNotifyRoutine_entry(GuestPtrT<kernel::X_THREAD_NOTIFICATION> notification,
+                                         u32 register_notification) {
+   auto& registry = CurrentTitle().threads;
+-  if (register_notification) {
+-    registry.RegisterThreadNotify(notification.GetGuestAddress());
+-  } else {
+-    registry.UnregisterThreadNotify(notification.GetGuestAddress());
+-  }
+-}
+-
+-}  // namespace xam
+-}  // namespace rex
++  if (register_notification) registry.RegisterThreadNotify(notification.GetGuestAddress());
++  else registry.UnregisterThreadNotify(notification.GetGuestAddress());
++}
++
++void GetSystemTimeAsFileTime_entry(MappedU64 output) {
++  if (output) *output = rex::Clock::QueryGuestSystemTime();
++}
++u32 XamAreMixedAccountsSignedIn_entry() { return 0; }
++u32 XamUserGetUserFlags_entry() { return 0; }
++u32 XamIsCurrentTitleDash_entry() {
++  auto module = CurrentTitle().objects.Get<kernel::ILoadedModule>(CurrentTitle().modules.GetExecutable().value_or(0));
++  return module && module->GetTitleID() == 0xFFFE07D1;
++}
++u32 XamGetUserNeedTFA_entry(u32 user, MappedU32 challenge, MappedU32 token) {
++  if (user || !CurrentXAM().GetUserProfile().GetSigninState()) return 0x80070525u;
++  if (!challenge || !token) return 0x80004003u;
++  *challenge = *token = 0;
++  return 0;
++}
++}  // namespace rex::xam
  
--REX_EXPORT_STUB(__imp__XamTaskCancel);
- REX_EXPORT_STUB(__imp__XamTaskCancelWaitAndCloseWaitTask);
- REX_EXPORT_STUB(__imp__XamTaskCreateQueue);
- REX_EXPORT_STUB(__imp__XamTaskCreateQueueEx);
- REX_EXPORT_STUB(__imp__XamTaskGetAttributes);
--REX_EXPORT_STUB(__imp__XamTaskGetCompletionStatus);
--REX_EXPORT_STUB(__imp__XamTaskGetCurrentTask);
--REX_EXPORT_STUB(__imp__XamTaskGetStatus);
- REX_EXPORT_STUB(__imp__XamTaskModify);
--REX_EXPORT_STUB(__imp__XamTaskQueryProperty);
- REX_EXPORT_STUB(__imp__XamTaskReschedule);
- REX_EXPORT_STUB(__imp__XamTaskSetCancelSubTasks);
--REX_EXPORT_STUB(__imp__XamTaskWaitOnCompletion);
-diff --git a/include/rex/system/xobject.h b/include/rex/system/xobject.h
-index 0a43f07..f43624d 100644
---- a/include/rex/system/xobject.h
-+++ b/include/rex/system/xobject.h
-@@ -139,6 +139,7 @@ class XObject {
-     SymbolicLink,
-     Thread,
-     Timer,
-+    XamTask,
-   };
- 
-   XObject(Type type);
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 9627e32..5272679 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -125,7 +125,11 @@ REX_EXPORT_STUB(__imp__GetModuleHandleA);
+ REX_XAM_BODY(__imp__XamTaskSchedule, rex::xam::XamTaskSchedule_entry)
++
+ REX_XAM_BODY(__imp__XamTaskShouldExit, rex::xam::XamTaskShouldExit_entry)
++
+ REX_XAM_BODY(__imp__XamTaskCloseHandle, rex::xam::XamTaskCloseHandle_entry)
++
++REX_XAM_BODY(__imp__XamTaskCancel, rex::xam::XamTaskCancel_entry)
++
++REX_XAM_BODY(__imp__XamTaskWaitOnCompletion, rex::xam::XamTaskWaitOnCompletion_entry)
++
++REX_XAM_BODY(__imp__XamTaskGetCurrentTask, rex::xam::XamTaskGetCurrentTask_entry)
++
++REX_XAM_BODY(__imp__XamTaskGetStatus, rex::xam::XamTaskGetStatus_entry)
++
++REX_XAM_BODY(__imp__XamTaskGetCompletionStatus, rex::xam::XamTaskGetCompletionStatus_entry)
++
++REX_XAM_BODY(__imp__XamTaskQueryProperty, rex::xam::XamTaskQueryProperty_entry)
++
++REX_XAM_BODY(__imp__XamTaskGetAttributes, rex::xam::XamTaskGetAttributes_entry)
++
+ REX_XAM_BODY(__imp__XRegisterThreadNotifyRoutine, rex::xam::XRegisterThreadNotifyRoutine_entry)
++
++REX_XAM_BODY(__imp__GetSystemTimeAsFileTime, rex::xam::GetSystemTimeAsFileTime_entry)
++
++REX_XAM_BODY(__imp__XamAreMixedAccountsSignedIn, rex::xam::XamAreMixedAccountsSignedIn_entry)
++
++REX_XAM_BODY(__imp__XamIsCurrentTitleDash, rex::xam::XamIsCurrentTitleDash_entry)
++
++REX_XAM_BODY(__imp__XamGetUserNeedTFA, rex::xam::XamGetUserNeedTFA_entry)
++
++REX_XAM_BODY(__imp__XamUserGetUserFlags, rex::xam::XamUserGetUserFlags_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -121,7 +121,7 @@
  REX_EXPORT_STUB(__imp__GetOverlappedResult);
  REX_EXPORT_STUB(__imp__GetProcessHeap);
  REX_EXPORT_STUB(__imp__GetSystemTime);
 -REX_EXPORT_STUB(__imp__GetSystemTimeAsFileTime);
-+// 17559 8171CA90 tail-calls KeQuerySystemTime: a big-endian 64-bit value.
-+extern "C" REX_FUNC(__imp__GetSystemTimeAsFileTime) {
-+  if (ctx.r3.u32) rex::memory::store_and_swap<uint64_t>(base + ctx.r3.u32,
-+      rex::chrono::Clock::QueryGuestSystemTime());
-+}
- extern "C" REX_FUNC(__imp__GetTickCount) {
-   ctx.r3.u64 = rex::chrono::Clock::QueryGuestUptimeMillis();
- }
-@@ -316,7 +320,11 @@ extern "C" REX_FUNC(__imp__XamAppUnloadStack) {
-   __imp__XamAppUnloadSelf(ctx, base);
- }
++
+ REX_EXPORT_STUB(__imp__GetTickCount);
+ REX_EXPORT_STUB(__imp__GetTimeZoneInformation);
+ REX_EXPORT_STUB(__imp__InjectConnectionServerNotification);
+@@ -293,7 +293,7 @@
+ REX_EXPORT_STUB(__imp__XamAppUnloadSelf);
+ REX_EXPORT_STUB(__imp__XamAppUnloadStack);
  REX_EXPORT_STUB(__imp__XamAppUnrequestLoad);
 -REX_EXPORT_STUB(__imp__XamAreMixedAccountsSignedIn);
-+extern "C" REX_FUNC(__imp__XamAreMixedAccountsSignedIn) {
-+  // 816DE798 requires both account categories among active users. The local
-+  // store supports one local account and cannot contain a mixed session.
-+  ctx.r3.u64 = 0;
-+}
++
  REX_EXPORT_STUB(__imp__XamAskUserForCSVDrainagePermission);
  REX_EXPORT_STUB(__imp__XamBackgroundDownloadBindItems);
  REX_EXPORT_STUB(__imp__XamBackgroundDownloadCacheLegacyMappingInfo);
-@@ -497,7 +505,19 @@ REX_EXPORT_STUB(__imp__XamGetTitleGlobalStorageValue);
+@@ -471,7 +471,7 @@
  REX_EXPORT_STUB(__imp__XamGetToken);
  REX_EXPORT_STUB(__imp__XamGetUserBalance);
  REX_EXPORT_STUB(__imp__XamGetUserInMemoryWindowsLiveCreds);
 -REX_EXPORT_STUB(__imp__XamGetUserNeedTFA);
-+extern "C" REX_FUNC(__imp__XamGetUserNeedTFA) {
-+  // 816D8988 validates the signed-in slot before writing both outputs.
-+  if (ctx.r3.u32 || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
-+    ctx.r3.u64 = 0x80070525u;
-+  } else if (!ctx.r4.u32 || !ctx.r5.u32) {
-+    ctx.r3.u64 = 0x80004003; // E_POINTER
-+  } else {
-+    // Local accounts have neither a Live TFA challenge nor an auth token.
-+    rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32, 0);
-+    rex::memory::store_and_swap<uint32_t>(base + ctx.r5.u32, 0);
-+    ctx.r3.u64 = 0;
-+  }
-+}
++
  REX_EXPORT_STUB(__imp__XamGetUserPresetPresenceState);
  REX_EXPORT_STUB(__imp__XamGetUserPresetWindowsLiveCreds);
  REX_EXPORT_STUB(__imp__XamGetUserShowMessengerFriends);
-@@ -523,7 +543,9 @@ REX_EXPORT_STUB(__imp__XamIsBackgroundSceneInTransition);
+@@ -497,7 +497,7 @@
  REX_EXPORT_STUB(__imp__XamIsCSVDrainageSupported);
  REX_EXPORT_STUB(__imp__XamIsChildAccountSignedIn);
  REX_EXPORT_STUB(__imp__XamIsCounterMeasureActivated);
 -REX_EXPORT_STUB(__imp__XamIsCurrentTitleDash);
-+extern "C" REX_FUNC(__imp__XamIsCurrentTitleDash) {
-+  ctx.r3.u64 = REX_KERNEL_STATE()->title_id() == 0xFFFE07D1;
-+}
++
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterClient);
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterDash);
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleIptv);
-diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
-index d5116a9..9ef7674 100644
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -60,9 +60,9 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
- // 17559: 8199C630 expands four XUIDs into 392-byte entries before LogonEx.
- // 8199EEC0 replaces the slot array for flags=0 (zero XUID signs that slot out).
- // Original Sign-in 17559 (901186BC-90118720) uses 0x120420 for its
--// normal confirmation. With no bits 4/8 set, XAM follows the same replacement
--// path at 8199E884 -> 8199EEC0. Only this local mode is supported in addition
--// to flags=0; preview, Live and other account modes remain unsupported.
-+// replacement confirmation and 0x120424 for merge confirmation. The closing
-+// snapshot uses Logon(0x63) with four XUIDs. Live and additional slots remain
-+// unsupported; all supported modes go through the persistent local store.
- static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
-                            uint32_t stride) {
-   if (!users) return uint32_t(X_E_INVALIDARG);
-@@ -81,7 +81,7 @@ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlappe
-     if (!xuid || rex::memory::load_and_swap<uint64_t>(bytes + 48))
-       return uint32_t(X_E_INVALIDARG);
-   }
--  // 17559 8199E884 / 8199E8C4: bit 4 merges the supplied accounts;
-+  // 17559 8199E884 / 8199E8C4: bit 0x4 merges the supplied accounts;
-   // with one local slot this selects the persisted identity without clearing peers.
-   const auto result = REX_KERNEL_STATE()->user_profile()->SetLocalSession(xuid);
-   REXKRNL_INFO("Local logon flags={:08X} xuid={:016X} result={}", flags, xuid, result);
-@@ -890,7 +890,11 @@ REX_EXPORT_STUB(__imp__XamUserGetOnlineXUIDFromOfflineXUID);
+@@ -1324,19 +1324,19 @@
+ REX_EXPORT_STUB(__imp__XamPartySetJoinable);
+ REX_EXPORT_STUB(__imp__XamPartySetTestDelay);
+ REX_EXPORT_STUB(__imp__XamPartySetTestFlags);
+-REX_EXPORT_STUB(__imp__XamTaskCancel);
++
+ REX_EXPORT_STUB(__imp__XamTaskCancelWaitAndCloseWaitTask);
+ REX_EXPORT_STUB(__imp__XamTaskCreateQueue);
+ REX_EXPORT_STUB(__imp__XamTaskCreateQueueEx);
+-REX_EXPORT_STUB(__imp__XamTaskGetAttributes);
+-REX_EXPORT_STUB(__imp__XamTaskGetCompletionStatus);
+-REX_EXPORT_STUB(__imp__XamTaskGetCurrentTask);
+-REX_EXPORT_STUB(__imp__XamTaskGetStatus);
++
++
++
++
+ REX_EXPORT_STUB(__imp__XamTaskModify);
+-REX_EXPORT_STUB(__imp__XamTaskQueryProperty);
++
+ REX_EXPORT_STUB(__imp__XamTaskReschedule);
+ REX_EXPORT_STUB(__imp__XamTaskSetCancelSubTasks);
+-REX_EXPORT_STUB(__imp__XamTaskWaitOnCompletion);
++
+ REX_EXPORT_STUB(__imp__XamIsGuideDisabled);
+ REX_EXPORT_STUB(__imp__XamIsMessageBoxActive);
+ REX_EXPORT_STUB(__imp__XamIsNuiUIActive);
+@@ -1477,7 +1477,7 @@
  REX_EXPORT_STUB(__imp__XamUserGetReportingInfo);
  REX_EXPORT_STUB(__imp__XamUserGetRequestedUserIndexMask);
  REX_EXPORT_STUB(__imp__XamUserGetSubscriptionType);
 -REX_EXPORT_STUB(__imp__XamUserGetUserFlags);
-+extern "C" REX_FUNC(__imp__XamUserGetUserFlags) {
-+  // 816DAB28 returns account flags (not HRESULT), zero for an unused slot.
-+  // Persisted local accounts have no Live/guest account flags.
-+  ctx.r3.u64 = 0;
-+}
++
  REX_EXPORT_STUB(__imp__XamUserGetUserFlagsFromXUID);
- REX_EXPORT(__imp__XamUserGetUserIndexMask, rex::kernel::xam::XamUserGetUserIndexMask_entry)
+ 
  REX_EXPORT_STUB(__imp__XamUserGetUserTenure);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -288,3 +288,27 @@
+ REX_XAM_FORWARD(__imp__XMemSet)
+ 
+ REX_XAM_FORWARD(__imp__lstrcpynW)
++
++REX_XAM_FORWARD(__imp__XamTaskCancel)
++
++REX_XAM_FORWARD(__imp__XamTaskWaitOnCompletion)
++
++REX_XAM_FORWARD(__imp__XamTaskGetCurrentTask)
++
++REX_XAM_FORWARD(__imp__XamTaskGetStatus)
++
++REX_XAM_FORWARD(__imp__XamTaskGetCompletionStatus)
++
++REX_XAM_FORWARD(__imp__XamTaskQueryProperty)
++
++REX_XAM_FORWARD(__imp__XamTaskGetAttributes)
++
++REX_XAM_FORWARD(__imp__GetSystemTimeAsFileTime)
++
++REX_XAM_FORWARD(__imp__XamAreMixedAccountsSignedIn)
++
++REX_XAM_FORWARD(__imp__XamIsCurrentTitleDash)
++
++REX_XAM_FORWARD(__imp__XamGetUserNeedTFA)
++
++REX_XAM_FORWARD(__imp__XamUserGetUserFlags)
+diff --git a/include/rex/xam/task_context.h b/include/rex/xam/task_context.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/xam/task_context.h
+@@ -0,0 +1,13 @@
++#pragma once
++#include <rex/types.h>
++#include <rex/platform.h>
++#include <functional>
++
++namespace rex::xam {
++// Run a synchronous host system callback with its own scoped XAM task identity.
++// Must be called on a bound guest thread; restores any enclosing task on return.
++REX_XAM_API u32 RunSystemTask(const std::function<uint32_t()>& callback);
++REX_XAM_API bool IsRuntimeTask(uint32_t handle);
++// Retained handle only for RunSystemTask; zero for ordinary guest task workers.
++REX_XAM_API u32 CurrentSystemTask();
++}
+diff --git a/include/rex/kernel/object/kernel_thread.h b/include/rex/kernel/object/kernel_thread.h
+--- a/include/rex/kernel/object/kernel_thread.h
++++ b/include/rex/kernel/object/kernel_thread.h
+@@ -140,6 +140,15 @@
+   static void WriteKernelTime();
+ 
+   TitleRuntime& GetRuntime() const { return *runtime_; }
++
++  // Installed before Launch; the registry retains the guest thread through completion.
++  void SetTaskCallbacks(rex::MoveOnlyFunction<void()> enter,
++                        rex::MoveOnlyFunction<void(u32)> exit,
++                        rex::MoveOnlyFunction<void(X_HANDLE)> publish) {
++    task_enter_ = std::move(enter);
++    task_exit_ = std::move(exit);
++    task_publish_ = std::move(publish);
++  }
+ 
+   kernel::GuestAddressSpace* GetAddressSpace() const;
+ 
+@@ -392,6 +401,9 @@
+   X_HANDLE handle_ = 0;
+   u32 guest_object_ptr_ = 0;
+   rex::MoveOnlyFunction<int()> host_fn_;
++  rex::MoveOnlyFunction<void()> task_enter_;
++  rex::MoveOnlyFunction<void(u32)> task_exit_;
++  rex::MoveOnlyFunction<void(X_HANDLE)> task_publish_;
+   std::atomic<bool> released_{false};
+   std::atomic<bool> abandoned_{false};
+   bool exited_ = false;
+diff --git a/src/kernel/thread_registry.cpp b/src/kernel/thread_registry.cpp
+--- a/src/kernel/thread_registry.cpp
++++ b/src/kernel/thread_registry.cpp
+@@ -40,9 +40,11 @@
+   }
+ }
+ 
+-Result<X_HANDLE> ThreadRegistry::CreateTaskThread(u32 start_address, u32 start_context) {
+-  return Launch(
+-      std::make_unique<KernelThread>(runtime_, 0, 0, start_address, start_context, 0, true));
++Result<X_HANDLE> ThreadRegistry::CreateTaskThread(u32 start_address, u32 start_context,
++                                                TaskThreadCallbacks callbacks) {
++  auto thread = std::make_unique<KernelThread>(runtime_, 0, 0, start_address, start_context, 0, true);
++  thread->SetTaskCallbacks(std::move(callbacks.enter), std::move(callbacks.exit), std::move(callbacks.publish));
++  return Launch(std::move(thread));
+ }
+ 
+ ICallingThread* ThreadRegistry::GetCallingThread() {
+@@ -124,6 +126,11 @@
+     raw->ReleaseReference();
+     CloseOwned(table_, *handle);
+     return Err<X_HANDLE>(StatusError(X_STATUS_PROCESS_IS_TERMINATING));
++  }
++  // Publish a task's owned thread handle before its callback can retain or close the task.
++  if (raw->task_publish_) {
++    raw->task_publish_(*handle);
++    raw->task_publish_ = {};
+   }
+   raw->Start();
+   return handle;
+diff --git a/include/rex/kernel/thread_registry.h b/include/rex/kernel/thread_registry.h
+--- a/include/rex/kernel/thread_registry.h
++++ b/include/rex/kernel/thread_registry.h
+@@ -126,7 +126,13 @@
+ };
+ 
+ /** Owns every `KernelThread`, finds them by ID or handle, and keeps the TLS slots and fibers. */
+-REX_DECLARE_INTERFACE(IThreadRegistry, 2)
++struct TaskThreadCallbacks {
++  rex::MoveOnlyFunction<void()> enter;
++  rex::MoveOnlyFunction<void(u32)> exit;
++  rex::MoveOnlyFunction<void(X_HANDLE)> publish;
++};
++
++REX_DECLARE_INTERFACE(IThreadRegistry, 3)
+   virtual ~IThreadRegistry() = default;
+ 
+   /**
+@@ -143,7 +149,7 @@
+    * @param start_context The argument passed to the entry point.
+    * @return The creation handle, or the status of the allocation or the thread creation.
+    */
+-  [[nodiscard]] virtual Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context) = 0;
++  [[nodiscard]] virtual Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context, TaskThreadCallbacks callbacks = {}) = 0;
+ 
+   /** Returns the thread the caller runs on, which the registry owns. */
+   [[nodiscard]] virtual ICallingThread* GetCallingThread() = 0;
+diff --git a/src/kernel/thread_registry.h b/src/kernel/thread_registry.h
+--- a/src/kernel/thread_registry.h
++++ b/src/kernel/thread_registry.h
+@@ -41,7 +41,7 @@
+   ~ThreadRegistry() override;
+ 
+   [[nodiscard]] Result<X_HANDLE> Launch(std::unique_ptr<KernelThread> thread) override;
+-  [[nodiscard]] Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context) override;
++  [[nodiscard]] Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context, TaskThreadCallbacks callbacks = {}) override;
+   [[nodiscard]] ICallingThread* GetCallingThread() override;
+   [[nodiscard]] IObjectWaiter& GetObjectWaiter() override { return *this; }
+   rex::platform::WaitResult WaitHostObject(rex::platform::WaitHandle* handle,
+diff --git a/src/kernel/kernel_thread.cpp b/src/kernel/kernel_thread.cpp
+--- a/src/kernel/kernel_thread.cpp
++++ b/src/kernel/kernel_thread.cpp
+@@ -547,6 +547,7 @@
+ }
+ 
+ void KernelThread::Finish(int exit_code) {
++  if (task_exit_) task_exit_(static_cast<u32>(exit_code));
+   thread_state_->ClearStop();
+   if (!host_fn_ && !StateOf(*runtime_).IsTerminatingTitle()) {
+     try {
+@@ -610,6 +611,7 @@
+ 
+   DeliverAPCs();
+   CallThreadNotifyRoutines(true);
++  if (task_enter_) task_enter_();
+ 
+   u32 address;
+   std::vector<u64> args;

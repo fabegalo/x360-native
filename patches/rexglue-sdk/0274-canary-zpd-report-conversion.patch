@@ -1,7 +1,7 @@
-diff --git a/include/rex/graphics/xenos_zpd_report.h b/include/rex/graphics/xenos_zpd_report.h
+diff --git a/src/gpu/xenos/zpd_report.h b/src/gpu/xenos/zpd_report.h
 new file mode 100644
 --- /dev/null
-+++ b/include/rex/graphics/xenos_zpd_report.h
++++ b/src/gpu/xenos/zpd_report.h
 @@ -0,0 +1,146 @@
 +/**
 + ******************************************************************************
@@ -19,9 +19,9 @@ new file mode 100644
 +#include <cstddef>
 +#include <cstring>
 +
-+#include <rex/graphics/xenos.h>
++#include <rex/xenos/state.h>
 +
-+namespace rex::graphics {
++namespace rex::gpu {
 +
 +// One EVENT_WRITE_ZPD occlusion query sample counter report.
 +//
@@ -128,7 +128,7 @@ new file mode 100644
 +  // lanes. Low 32 bits only, the hardware counters wrap and so do we.
 +  // GetData (usually) wakes on the ZPass lanes and QueryBatch Lock on ZPass_A
 +  // or StencilFail_B, so those four are written last, in one copy.
-+  void WriteTo(xenos::xe_gpu_depth_sample_counts* guest) const {
++  void WriteTo(xenos::DepthSampleCounts* guest) const {
 +    auto lane_a = [](uint64_t count) {
 +      return uint32_t(count) - (uint32_t(count) >> 1);
 +    };
@@ -137,91 +137,75 @@ new file mode 100644
 +    guest->Total_B = lane_b(total());
 +    guest->ZFail_A = lane_a(z_fail);
 +    guest->ZFail_B = lane_b(z_fail);
-+    xenos::xe_gpu_depth_sample_counts values;
++    xenos::DepthSampleCounts values;
 +    values.ZPass_A = lane_a(z_pass);
 +    values.ZPass_B = lane_b(z_pass);
 +    values.StencilFail_A = lane_a(stencil_fail);
 +    values.StencilFail_B = lane_b(stencil_fail);
 +    std::memcpy(
 +        &guest->ZPass_A, &values.ZPass_A,
-+        sizeof(values) - offsetof(xenos::xe_gpu_depth_sample_counts, ZPass_A));
++        sizeof(values) - offsetof(xenos::DepthSampleCounts, ZPass_A));
 +  }
 +};
 +
-+}  // namespace rex::graphics
-diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
-index 09f94ea..f4d1301 100644
---- a/src/graphics/d3d12/command_processor.cpp
-+++ b/src/graphics/d3d12/command_processor.cpp
-@@ -29,6 +29,7 @@
- #include <rex/graphics/display_overlay.h>
- #include <rex/graphics/util/draw.h>
- #include <rex/graphics/xenos.h>
-+#include <rex/graphics/xenos_zpd_report.h>
- #include <rex/kernel/xboxkrnl/video.h>
- #include <rex/logging.h>
- #include <rex/memory/utils.h>
-@@ -5193,7 +5194,7 @@ uint64_t D3D12CommandProcessor::NormalizeOcclusionSamples(uint64_t samples) cons
++}  // namespace rex::gpu
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <bit>
++#include "gpu/xenos/zpd_report.h"
+ #include <algorithm>
+ #include <cstdarg>
+ #include <cstring>
+@@ -4669,7 +4670,7 @@
    if (scale <= 1) {
      return samples;
    }
 -  return (samples + (scale >> 1)) / scale;
-+  return XenosZPDReport::FromNativeQuery(samples).Normalized(uint32_t(scale)).z_pass;
++  return XenosZPDReport::FromNativeQuery(samples).Normalized(static_cast<u32>(scale)).z_pass;
  }
  
- void D3D12CommandProcessor::WriteGuestOcclusionResult(
-@@ -5201,15 +5202,7 @@ void D3D12CommandProcessor::WriteGuestOcclusionResult(
+ void D3D12CommandProcessor::WriteGuestOcclusionResult(xenos::DepthSampleCounts* sample_counts,
+@@ -4677,8 +4678,7 @@
    if (!sample_counts) {
      return;
    }
--  uint32_t clamped = samples > uint64_t(UINT32_MAX) ? UINT32_MAX : uint32_t(samples);
--  sample_counts->Total_A = clamped;
--  sample_counts->Total_B = 0;
--  sample_counts->ZPass_A = clamped;
--  sample_counts->ZPass_B = 0;
--  sample_counts->ZFail_A = 0;
--  sample_counts->ZFail_B = 0;
--  sample_counts->StencilFail_A = 0;
--  sample_counts->StencilFail_B = 0;
+-  u32 clamped = samples > static_cast<u64>(UINT32_MAX) ? UINT32_MAX : static_cast<u32>(samples);
+-  WriteSampleCounts(*sample_counts, clamped);
 +  XenosZPDReport::FromNativeQuery(samples).WriteTo(sample_counts);
  }
  
  void D3D12CommandProcessor::WriteGammaRampSRV(bool is_pwl,
-diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
-index 59dab6b..d2defdd 100644
---- a/src/graphics/vulkan/command_processor.cpp
-+++ b/src/graphics/vulkan/command_processor.cpp
-@@ -43,6 +43,7 @@
- #include <rex/graphics/vulkan/shader.h>
- #include <rex/graphics/vulkan/shared_memory.h>
- #include <rex/graphics/xenos.h>
-+#include <rex/graphics/xenos_zpd_report.h>
- #include <rex/kernel/xboxkrnl/video.h>
- #include <rex/types.h>
- #include <rex/memory/utils.h>
-@@ -5304,7 +5305,7 @@ uint64_t VulkanCommandProcessor::NormalizeOcclusionSamples(uint64_t samples) con
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <algorithm>
++#include "gpu/xenos/zpd_report.h"
+ #include <array>
+ #include <bit>
+ #include <cstdint>
+@@ -4645,7 +4646,7 @@
    if (scale <= 1) {
      return samples;
    }
 -  return (samples + (scale >> 1)) / scale;
-+  return XenosZPDReport::FromNativeQuery(samples).Normalized(uint32_t(scale)).z_pass;
++  return XenosZPDReport::FromNativeQuery(samples).Normalized(static_cast<u32>(scale)).z_pass;
  }
  
- void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_address,
-@@ -5314,15 +5315,7 @@ void VulkanCommandProcessor::WriteGuestOcclusionResult(uint32_t sample_count_add
+ void VulkanCommandProcessor::WriteGuestOcclusionResult(u32 sample_count_address, u64 samples) {
+@@ -4654,8 +4655,7 @@
    if (!sample_counts) {
      return;
    }
--  uint32_t clamped = samples > uint64_t(UINT32_MAX) ? UINT32_MAX : uint32_t(samples);
--  sample_counts->Total_A = clamped;
--  sample_counts->Total_B = 0;
--  sample_counts->ZPass_A = clamped;
--  sample_counts->ZPass_B = 0;
--  sample_counts->ZFail_A = 0;
--  sample_counts->ZFail_B = 0;
--  sample_counts->StencilFail_A = 0;
--  sample_counts->StencilFail_B = 0;
+-  u32 clamped = samples > static_cast<u64>(UINT32_MAX) ? UINT32_MAX : static_cast<u32>(samples);
+-  WriteSampleCounts(*sample_counts, clamped);
 +  XenosZPDReport::FromNativeQuery(samples).WriteTo(sample_counts);
  }
  
- void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(uint64_t await_submission) {
+ void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(u64 await_submission) {

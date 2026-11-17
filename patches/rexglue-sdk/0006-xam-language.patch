@@ -1,110 +1,118 @@
-diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
-index b2818f2..dc1bd70 100644
---- a/include/rex/kernel/xam/module.h
-+++ b/include/rex/kernel/xam/module.h
-@@ -40,8 +40,11 @@ class XamModule : public system::KernelModule {
-   const LoaderData& loader_data() const { return loader_data_; }
-   LoaderData& loader_data() { return loader_data_; }
+diff --git a/src/xam/xam_state.h b/src/xam/xam_state.h
+--- a/src/xam/xam_state.h
++++ b/src/xam/xam_state.h
+@@ -146,6 +146,8 @@
  
-+  uint32_t GetLanguageLocaleFallback(uint32_t language);
+   rex::kernel::XLanguage GetUserLanguage() const { return user_language_; }
+ 
++  u32 GetLanguageLocaleFallback(u32 language);
 +
-  private:
-   LoaderData loader_data_;
-+  uint32_t language_fallback_table_ = 0;  // Owned guest UTF16 strings, 16 bytes per ID.
- };
+   const XAMTitle& GetTitle() const { return title_; }
  
- }  // namespace xam
-diff --git a/src/kernel/xam/xam_locale.cpp b/src/kernel/xam/xam_locale.cpp
-index 4496ac3..0aa755a 100644
---- a/src/kernel/xam/xam_locale.cpp
-+++ b/src/kernel/xam/xam_locale.cpp
-@@ -13,10 +13,12 @@
+   XAMLoaderState& GetLoaderState() { return loader_state_; }
+@@ -163,6 +165,8 @@
+   std::unique_ptr<rex::xam::UserProfile> user_profile_;
+   std::unique_ptr<ContentManager> content_manager_;
+   std::unique_ptr<AchievementManager> achievement_manager_;
++  std::mutex language_fallback_mutex_;
++  u32 language_fallback_table_ = 0;
+   std::mutex heap_mutex_;
+   std::unordered_map<u32, u32> heap_blocks_;
+   rex::hid::IInputSystem* input_ = nullptr;
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -1,6 +1,7 @@
+ #include "xam/xam_state.h"
  
- #include <rex/cvar.h>
- #include <rex/kernel/xam/private.h>
-+#include <rex/kernel/xam/module.h>
- #include <rex/logging.h>
- #include <rex/hook.h>
- #include <rex/types.h>
- #include <rex/system/kernel_state.h>
-+#include <rex/system/flags.h>
- #include <rex/system/xenumerator.h>
- #include <rex/system/xthread.h>
- #include <rex/system/xtypes.h>
-@@ -385,6 +387,22 @@ u32 XamGetCountryFromOnlineCountry_entry(u32 id) {
-   return xeXamGetCountryFromOnlineCountry(static_cast<uint8_t>(id));
+ #include <atomic>
++#include <rex/memory/endian.h>
+ 
+ #include <rex/assert.h>
+ #include <rex/module.h>
+@@ -85,6 +86,27 @@
+   app_manager_.reset();
  }
  
-+// Xenia Canary 2372a54105d9: XamGetLanguage uses the configured system
-+// language with extended IDs (1..17). ReXGlue's XConfig USER_LANGUAGE
-+// already reads user_language. Invalid settings fall back to English;
-+// this does not implement font resources or change XGetLanguage.
++u32 XAMState::GetLanguageLocaleFallback(u32 language) {
++  // Xenia Canary 2372a54105d9: English is an owned empty string, not a null pointer.
++  static constexpr char16_t strings[18][8] = {
++      u"", u"", u"ja-JP", u"de-DE", u"fr-FR", u"es-ES", u"it-IT", u"ko-KR",
++      u"zh-TW", u"pt-BR", u"zh-CHS", u"pl-PL", u"ru-RU", u"sv-SE", u"tr-TR",
++      u"nb-NO", u"nl-NL", u"zh-CHS"};
++  if (!language || language >= 18) return 0;
++  std::lock_guard lock(language_fallback_mutex_);
++  if (!language_fallback_table_) {
++    const u32 address = AllocHeap(sizeof(strings));
++    if (!address) return 0;
++    auto* dest = title_.membase.TranslateVirtual(address);
++    for (size_t i = 0; i < 18; ++i)
++      for (size_t j = 0; j < 8; ++j)
++        memory::store_and_swap<u16>(dest + i * 16 + j * 2, strings[i][j]);
++    language_fallback_table_ = address;
++  }
++  // AllocHeap registers the block for this title's normal XAM teardown.
++  return language_fallback_table_ + language * 16;
++}
++
+ u32 XAMState::AllocHeap(u32 size) {
+   const u32 address = title_.heap.SystemHeapAlloc(size);
+   if (address) {
+diff --git a/src/xam/xam_locale.cpp b/src/xam/xam_locale.cpp
+--- a/src/xam/xam_locale.cpp
++++ b/src/xam/xam_locale.cpp
+@@ -23,6 +23,7 @@
+ #include <rex/kernel/object/kernel_thread.h>
+ #include <rex/kernel/types/status.h>
+ #include "xam/xam_module.h"
++#include "xam/xam_state.h"
+ #include "xam/xam_bodies.h"
+ 
+ namespace rex {
+@@ -361,6 +362,15 @@
+   return XamGetCountryFromOnlineCountry(static_cast<u8>(id));
+ }
+ 
 +u32 XamGetLanguage_entry() {
-+  const uint32_t language = REXCVAR_GET(user_language);
-+  if (language > 0 && language < 18) return language;
-+  REXKRNL_WARN("XamGetLanguage: invalid user_language {}; using English (1)", language);
-+  return 1;
++  const u32 language = static_cast<u32>(CurrentXAM().GetUserLanguage());
++  return language > 0 && language < 18 ? language : 1;
 +}
 +
 +u32 XamGetLanguageLocaleFallbackString_entry(u32 language) {
-+  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
-+  return xam->GetLanguageLocaleFallback(language);
++  return CurrentXAM().GetLanguageLocaleFallback(language);
 +}
 +
  u32 XamGetLocaleEx_entry(u32 max_country_id, u32 max_locale_id) {
-   return xeXamGetLocaleEx(static_cast<uint8_t>(max_country_id),
-                           static_cast<uint8_t>(max_locale_id));
-@@ -418,8 +436,9 @@ REX_EXPORT_STUB(__imp__XamFormatMessage);
+   return XamGetLocaleEx(static_cast<u8>(max_country_id), static_cast<u8>(max_locale_id));
+ }
+@@ -383,3 +393,7 @@
+ REX_XAM_BODY(__imp__XamGetOnlineLanguageString, rex::xam::XamGetOnlineLanguageString_entry)
+ REX_XAM_BODY(__imp__XamGetCountryFromOnlineCountry, rex::xam::XamGetCountryFromOnlineCountry_entry)
+ REX_XAM_BODY(__imp__XamGetLocaleEx, rex::xam::XamGetLocaleEx_entry)
++
++REX_XAM_BODY(__imp__XamGetLanguage, rex::xam::XamGetLanguage_entry)
++REX_XAM_BODY(__imp__XamGetLanguageLocaleFallbackString,
++             rex::xam::XamGetLanguageLocaleFallbackString_entry)
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -239,3 +239,7 @@
+ REX_XAM_FORWARD(rexshim_lstrcpyA)
+ REX_XAM_FORWARD(rexshim_lstrcpynA)
+ REX_XAM_FORWARD(rexshim_lstrlenA)
++
++REX_XAM_FORWARD(__imp__XamGetLanguage)
++
++REX_XAM_FORWARD(__imp__XamGetLanguageLocaleFallbackString)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1120,8 +1120,6 @@
  REX_EXPORT_STUB(__imp__XamFormatSystemDateString);
  REX_EXPORT_STUB(__imp__XamGetCountry);
  REX_EXPORT_STUB(__imp__XamGetCurrencyFormat);
 -REX_EXPORT_STUB(__imp__XamGetLanguage);
 -REX_EXPORT_STUB(__imp__XamGetLanguageLocaleFallbackString);
-+REX_EXPORT(__imp__XamGetLanguage, rex::kernel::xam::XamGetLanguage_entry)
-+REX_EXPORT(__imp__XamGetLanguageLocaleFallbackString,
-+           rex::kernel::xam::XamGetLanguageLocaleFallbackString_entry)
  REX_EXPORT_STUB(__imp__XamGetLanguageTypeface);
  REX_EXPORT_STUB(__imp__XamGetLanguageTypefacePatch);
  REX_EXPORT_STUB(__imp__XamGetLocaleDateFormat);
-diff --git a/src/kernel/xam/xam_module.cpp b/src/kernel/xam/xam_module.cpp
-index 6bad7c7..984211c 100644
---- a/src/kernel/xam/xam_module.cpp
-+++ b/src/kernel/xam/xam_module.cpp
-@@ -67,7 +67,36 @@ void XamModule::RegisterExportTable(rex::runtime::ExportResolver* export_resolve
-   export_resolver->RegisterTable("xam.xex", &xam_exports);
- }
- 
--XamModule::~XamModule() {}
-+uint32_t XamModule::GetLanguageLocaleFallback(uint32_t language) {
-+  // Xenia Canary 2372a54105d9, XamState::LoadLanguageLocaleFallback.
-+  // English is a pointer to an empty string, not a null or residual register.
-+  static constexpr char16_t strings[18][8] = {
-+      u"", u"", u"ja-JP", u"de-DE", u"fr-FR", u"es-ES", u"it-IT", u"ko-KR",
-+      u"zh-TW", u"pt-BR", u"zh-CHS", u"pl-PL", u"ru-RU", u"sv-SE", u"tr-TR",
-+      u"nb-NO", u"nl-NL", u"zh-CHS"};
-+  if (!language || language >= 18) {
-+    REXKRNL_WARN("XamGetLanguageLocaleFallbackString: invalid language {}", language);
-+    return 0;
-+  }
-+  auto lock = global_critical_region_.Acquire();
-+  if (!language_fallback_table_) {
-+    const uint32_t address = memory_->SystemHeapAlloc(sizeof(strings));
-+    if (!address) {
-+      REXKRNL_ERROR("XamGetLanguageLocaleFallbackString: allocation failed");
-+      return 0;
-+    }
-+    auto* dest = memory_->TranslateVirtual(address);
-+    for (size_t i = 0; i < 18; ++i)
-+      for (size_t j = 0; j < 8; ++j)
-+        memory::store_and_swap<uint16_t>(dest + i * 16 + j * 2, strings[i][j]);
-+    language_fallback_table_ = address;
-+  }
-+  return language_fallback_table_ + language * 16;
-+}
-+
-+XamModule::~XamModule() {
-+  memory_->SystemHeapFree(language_fallback_table_);
-+}
- 
- }  // namespace xam
- }  // namespace kernel

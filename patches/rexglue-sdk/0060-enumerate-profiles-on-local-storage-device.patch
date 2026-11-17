@@ -1,15 +1,25 @@
---- a/src/kernel/xam/xam_enum.cpp
-+++ b/src/kernel/xam/xam_enum.cpp
-@@ -60,9 +60,9 @@
- u32 XamProfileCreateEnumerator_entry(u32 filter, mapped_u32 handle) {
-   if (!handle) return X_ERROR_INVALID_PARAMETER;
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -63,7 +63,8 @@
+ u32 XamProfileCreateEnumerator_entry(u32 filter, MappedU32 handle) {
+   if (!handle) return kernel::X_ERROR_INVALID_PARAMETER;
    *handle = 0;
--  // The original Sign-in requests filter=0. Other enumeration filters are
--  // outside this local-only contract; do not silently ignore them.
--  if (filter) return X_ERROR_INVALID_PARAMETER;
-+  // Sign-in uses 0 (all devices); CreateProfile uses the selected local
-+  // storage device (1) to enforce its per-device profile limit.
-+  if (filter > 1) return X_ERROR_DEVICE_NOT_CONNECTED;
-   auto e = make_object<XStaticEnumerator<LocalProfileRecord>>(REX_KERNEL_STATE(), 1);
-   auto status = e->Initialize(0xFF, 0xFE, 0x23001, 0x23003, 0);
-   if (XFAILED(status)) return X_ERROR_FUNCTION_FAILED;
+-  if (filter) return kernel::X_ERROR_INVALID_PARAMETER;
++  // Original Sign-in enumerates all devices (0); CreateProfile selects local device 1.
++  if (filter > 1) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+   StaticItemList items(1, sizeof(LocalProfileRecord));
+   for (const auto& identity : CurrentXAM().GetUserProfile().local_profiles()) {
+     auto* record = items.Append<LocalProfileRecord>();
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -480,7 +480,7 @@
+     const auto handle_ptr = caller.Alloc(4), buffer = caller.Alloc(424);
+     const auto account = caller.Alloc(400), device = caller.Alloc(4);
+     std::memset(caller.GetBase() + buffer, 0xCD, 424);
+-    CHECK(caller.XAM("XamProfileCreateEnumerator", {1, handle_ptr}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(caller.XAM("XamProfileCreateEnumerator", {2, handle_ptr}) == rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED);
+     CHECK(caller.Load32(handle_ptr) == 0);
+     REQUIRE(caller.XAM("XamProfileCreateEnumerator", {0, handle_ptr}) == 0);
+     const auto handle = caller.Load32(handle_ptr);

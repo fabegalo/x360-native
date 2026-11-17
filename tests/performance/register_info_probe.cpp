@@ -1,6 +1,6 @@
 // Exhaustive metadata equivalence and a bounded lookup microbenchmark.
 // This synthetic benchmark is not a substitute for real-game measurements.
-#include <rex/graphics/register_file.h>
+#include <rex/xenos/register.h>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -9,13 +9,13 @@
 #include <vector>
 
 int main() {
-  using rex::graphics::RegisterFile;
-  using rex::graphics::RegisterInfo;
+  using rex::xenos::RegisterFile;
+  using rex::xenos::RegisterInfo;
   std::vector<RegisterInfo> expected(65536);
-#define XE_GPU_REGISTER(index, type, name) \
+#define REXGPU_REGISTER(index, type, name) \
   expected[index] = {RegisterInfo::Type::type, #name};
-#include <rex/graphics/register_table.inc>
-#undef XE_GPU_REGISTER
+#include <rex/xenos/register_table.inc>
+#undef REXGPU_REGISTER
   unsigned known = 0;
   for (uint32_t i = 0; i < expected.size(); ++i) {
     const auto* actual = RegisterFile::GetRegisterInfo(i);

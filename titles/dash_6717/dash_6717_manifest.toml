@@ -2,7 +2,7 @@
 
 [project]
 name = "dash_6717"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../.local/inputs/dashboards/6717/blades_retail"
 # Retail 2.0.6717.0 (Blades), SHA256
 # f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8.

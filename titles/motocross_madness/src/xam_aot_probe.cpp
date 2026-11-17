@@ -19,20 +19,23 @@
 //   ABI       r1, r2, r13-r31 and f14-f31 are unchanged across each XAM call
 //   errors    executing an unregistered address returns the dispatcher's failure
 //             value and leaves memory unchanged
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <rex/cvar.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/logging.h>
+#include <format>
+#include <rex/filesystem/file_system.h>
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/object/module_object.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/string/text.h>
+#include "../../common/launch_handoff.h"
+#include "../../../src/supervisor/fs_io.h"
+#include <rex/logging/log_category.h>
 #include <rex/memory.h>
 #include <rex/ppc/context.h>
-#include <rex/runtime.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/lzx.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xex_module.h>
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/thread_state.h>
 
 #include <algorithm>
 #include <array>
@@ -52,38 +55,71 @@
 #include "../../common/avatar/avatar_toc.h"
 #include "../../dash_17559/src/experimental_region.h"
 
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe, false, "Motocross Madness",
-                    "Diagnostic: once, at the XamAvatarInitialize call site, load the original "
+namespace {
+class ProbeSettings final : public rex::SettingOwner {
+ public:
+  ProbeSettings() : SettingOwner("motocross") {}
+  REX_SETTING(bool, xam_aot_probe, false, "Diagnostic: once, at the XamAvatarInitialize call site, load the original "
                     "XAM 2.0.17559.0 (AOT) and run integration checks; the game's registers are "
                     "restored afterwards");
-REXCVAR_DEFINE_STRING(x360n_xam17559_root, "", "x360n",
-                      "Host folder with the original xam.xex 2.0.17559.0, mounted read-only as "
+  REX_SETTING(std::string, xam17559_root, "", "Host folder with the original xam.xex 2.0.17559.0, mounted read-only as "
                       "x360nsys:");
-// Defined by the shared avatar service (titles/common/avatar/avatar_service_17559.cpp).
-REXCVAR_DECLARE(std::string, x360n_avatar_catalog_17559);
-REXCVAR_DECLARE(bool, x360n_avatar_service);
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_strb, false, "Motocross Madness",
-                    "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
+  REX_SETTING(bool, xam_aot_probe_strb, false, "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
                     "XAM's original Structured Binary reader and compare with the bytes");
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_sizes, false, "Motocross Madness",
-                    "Diagnostic, with the probe: run XAM's GetAssets size routine 0x81965EC0 on "
+  REX_SETTING(bool, xam_aot_probe_sizes, false, "Diagnostic, with the probe: run XAM's GetAssets size routine 0x81965EC0 on "
                     "every valid component mask and compare with the C++ ResultSizeFor");
-
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_colors, false, "Motocross Madness",
-                    "Diagnostic: expand original STRB color palettes with XAM AOT and verify every byte");
-
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_meshes, false, "Motocross Madness",
-                    "Diagnostic: only field 3 meshes/textures with real game "
+  REX_SETTING(bool, xam_aot_probe_colors, false, "Diagnostic: expand original STRB color palettes with XAM AOT and verify every byte");
+  REX_SETTING(bool, xam_aot_probe_meshes, false, "Diagnostic: only field 3 meshes/textures with real game "
                     "callbacks; skip prior suites");
-
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_ldi, false, "Motocross Madness",
-                    "Diagnostic: original compressed stream and per-asset "
+  REX_SETTING(bool, xam_aot_probe_ldi, false, "Diagnostic: original compressed stream and per-asset "
                     "GetAssets worker only");
+  REX_SETTING(bool, xam_aot_probe_aggregate, false, "Diagnostic: aggregate result and request lifecycle only");
+  REX_SETTING(bool, avatar_service_probe, false, "Diagnostic: avatar service integration");
+  REX_SETTING(bool, xam_aot_probe_initialize, false, "Diagnostic, after the probe: call the original XAM XamAvatarInitialize with "
+                    "the game's arguments and a private buffer; the game still gets the SDK's "
+                    "result");
+};
+ProbeSettings& ProbeOptions() { static ProbeSettings options; return options; }
+auto* ProbeMemory() {
+  auto* thread = rex::kernel::ThreadState::Get();
+  REX_CHECK(thread && thread->GetRuntime() == REX_RUNTIME(), "XAM probe requires its title thread");
+  return thread->GetAddressSpace();
+}
+auto* ProbeFunctions() {
+  auto* runtime = REX_RUNTIME();
+  const auto executable = runtime->GetModuleRegistry().GetExecutable();
+  REX_CHECK(executable, "XAM probe requires a loaded executable");
+  auto module = runtime->GetObjectTable().Get<rex::kernel::ModuleObject>(*executable);
+  REX_CHECK(module && module->processor_module, "XAM probe executable image is unavailable");
+  return module->processor_module->GetFunctionDispatcher();
+}
+std::string HeaderText(std::span<const uint32_t> header) {
+  std::string text;
+  for (auto value : header) {
+    if (!text.empty()) text += '/';
+    text += std::format("{:X}", value);
+  }
+  return text;
+}
+}
+namespace motocross {
+rex::Result<void> RegisterXamAotProbeSettings(rex::SettingsRegistry& registry) {
+  REX_TRY_VOID(registry.Register(ProbeOptions()));
+  registry.AddAlias("motocross_xam_aot_probe", "motocross.xam_aot_probe");
+  registry.AddAlias("x360n_xam17559_root", "motocross.xam17559_root");
+  registry.AddAlias("motocross_xam_aot_probe_strb", "motocross.xam_aot_probe_strb");
+  registry.AddAlias("motocross_xam_aot_probe_sizes", "motocross.xam_aot_probe_sizes");
+  registry.AddAlias("motocross_xam_aot_probe_colors", "motocross.xam_aot_probe_colors");
+  registry.AddAlias("motocross_xam_aot_probe_meshes", "motocross.xam_aot_probe_meshes");
+  registry.AddAlias("motocross_xam_aot_probe_ldi", "motocross.xam_aot_probe_ldi");
+  registry.AddAlias("motocross_xam_aot_probe_aggregate", "motocross.xam_aot_probe_aggregate");
+  registry.AddAlias("motocross_avatar_service_probe", "motocross.avatar_service_probe");
+  registry.AddAlias("motocross_xam_aot_probe_initialize", "motocross.xam_aot_probe_initialize");
+  return rex::Ok();
+}
+void UnregisterXamAotProbeSettings(rex::SettingsRegistry& registry) { registry.Unregister(ProbeOptions()); }
+}
 
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_aggregate, false, "Motocross Madness",
-                    "Diagnostic: aggregate result and request lifecycle only" );
-
-REXCVAR_DEFINE_BOOL(motocross_avatar_service_probe, false, "Motocross Madness", "Diagnostic: avatar service integration" );
 namespace {
 
 constexpr uint32_t kXamBase = 0x815F0000, kXamSize = 0x610000;
@@ -127,28 +163,28 @@ bool SameNonVolatile(const NonVolatile& a, const NonVolatile& b) {
 }
 
 std::vector<uint8_t> Slurp(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
+  x360n::io::ifstream in(rex::string::to_path(path), std::ios::binary);
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-uint64_t Call(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t, uint32_t fn,
+uint64_t Call(rex::kernel::FunctionDispatcher* d, rex::kernel::ThreadState* t, uint32_t fn,
               std::initializer_list<uint64_t> args, const char* what) {
   std::vector<uint64_t> a(args);
-  auto* ctx = t->context();
+  auto* ctx = t->GetContext();
   const auto before = Snapshot(*ctx);
-  const uint64_t r = d->Execute(t, fn, a.data(), a.size());
+  const uint64_t r = d->Run(t, fn, a) ? ctx->r3.u64 : kFailValue;
   Check(SameNonVolatile(before, Snapshot(*ctx)),
         std::string("ABI: non-volatile registers preserved across ") + what);
   return r;
 }
 
 // Same as Call, for loops: ABI breaks are counted instead of logged one by one.
-uint64_t CallQuiet(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t, uint32_t fn,
+uint64_t CallQuiet(rex::kernel::FunctionDispatcher* d, rex::kernel::ThreadState* t, uint32_t fn,
                    std::initializer_list<uint64_t> args, uint32_t* abi_breaks) {
   std::vector<uint64_t> a(args);
-  auto* ctx = t->context();
+  auto* ctx = t->GetContext();
   const auto before = Snapshot(*ctx);
-  const uint64_t r = d->Execute(t, fn, a.data(), a.size());
+  const uint64_t r = d->Run(t, fn, a) ? ctx->r3.u64 : kFailValue;
   if (!SameNonVolatile(before, Snapshot(*ctx))) ++*abi_breaks;
   return r;
 }
@@ -167,8 +203,8 @@ struct StrbResult {
   std::string error;         // reader +40
 };
 
-StrbResult DecodeStrb(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t,
-                      rex::memory::Memory* memory, uint32_t scratch, std::span<const uint8_t> blob,
+StrbResult DecodeStrb(rex::kernel::FunctionDispatcher* d, rex::kernel::ThreadState* t,
+                      rex::kernel::GuestAddressSpace* memory, uint32_t scratch, std::span<const uint8_t> blob,
                       uint32_t* abi_breaks) {
   constexpr uint32_t kStream = 0x000, kReader = 0x040, kDoc = 0x240, kData = 0x400;
   auto* host = memory->TranslateVirtual<uint8_t*>(scratch);
@@ -192,10 +228,9 @@ StrbResult DecodeStrb(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadS
 }
 
 void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
-  auto* runtime = rex::Runtime::instance();
-  auto* thread = rex::runtime::ThreadState::Get();
-  auto* memory = runtime->memory();
-  auto* dispatcher = runtime->function_dispatcher();
+  auto* thread = rex::kernel::ThreadState::Get();
+  auto* memory = ProbeMemory();
+  auto* dispatcher = ProbeFunctions();
   size_t largest = 0, used = 0;
   for (size_t i = 0; i < toc.size(); ++i) largest = std::max(largest, toc.Blob(i).size());
   const uint32_t scratch = memory->SystemHeapAlloc(uint32_t(0x400 + largest));
@@ -224,15 +259,15 @@ void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
     if (expected && same) {
       ++ok;
     } else if (++mismatched == 1) {
-      first_bad = fmt::format("record {}: expected {} valid {} parsed {} error '{}'", i, expected,
+      first_bad = std::format("record {}: expected {} valid {} parsed {} error '{}'", i, expected,
                               r.valid, r.parsed, r.error);
     }
   }
   Check(used > 0 && ok == used,
-        fmt::format("strb: XAM decoded {}/{} original 17559 blobs with header fields equal to "
+        std::format("strb: XAM decoded {}/{} original 17559 blobs with header fields equal to "
                     "the bytes{}",
                     ok, used, first_bad.empty() ? "" : "; first difference " + first_bad));
-  Check(abi == 0, fmt::format("strb: ABI preserved in all {} XAM calls ({} breaks)", used * 6, abi));
+  Check(abi == 0, std::format("strb: ABI preserved in all {} XAM calls ({} breaks)", used * 6, abi));
 
   // XAM's own error paths, on copies of the first blob with one byte changed.
   for (size_t i = 0; i < toc.size(); ++i) {
@@ -242,12 +277,12 @@ void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
     auto r = DecodeStrb(dispatcher, thread, memory, scratch, bad, &abi);
     Check(r.valid == 0 && r.parsed == 0 &&
               r.error == "Location not recognized as a Structured Binary",
-          fmt::format("strb: magic STRX rejected by XAM: valid {} error '{}'", r.valid, r.error));
+          std::format("strb: magic STRX rejected by XAM: valid {} error '{}'", r.valid, r.error));
     bad[3] = 'B';
     bad[4] = 2;
     r = DecodeStrb(dispatcher, thread, memory, scratch, bad, &abi);
     Check(r.valid == 0 && r.parsed == 0 && r.error == "Structured Binary version too high",
-          fmt::format("strb: version 2 rejected by XAM: valid {} error '{}'", r.valid, r.error));
+          std::format("strb: version 2 rejected by XAM: valid {} error '{}'", r.valid, r.error));
     break;
   }
   memory->SystemHeapFree(scratch);
@@ -260,10 +295,9 @@ void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
 // 0x82958130, Keflings 0x822F9C18), and both games pass 0x1FFF (Motocross 0x824377D4,
 // Keflings 0x8223F564).
 void RunSizeCheck() {
-  auto* runtime = rex::Runtime::instance();
-  auto* thread = rex::runtime::ThreadState::Get();
-  auto* memory = runtime->memory();
-  auto* dispatcher = runtime->function_dispatcher();
+  auto* thread = rex::kernel::ThreadState::Get();
+  auto* memory = ProbeMemory();
+  auto* dispatcher = ProbeFunctions();
   const uint32_t out = memory->SystemHeapAlloc(8);
   if (!out) {
     Check(false, "sizes: allocate the output words");
@@ -288,13 +322,13 @@ void RunSizeCheck() {
     }
   }
   Check(equal == 0x1FFF,
-        fmt::format("sizes: XAM 0x81965EC0 = C++ ResultSizeFor for {}/8191 masks{}", equal,
-                    first_mask ? fmt::format("; first difference mask 0x{:04X}: XAM 0x{:X}/0x{:X}, "
+        std::format("sizes: XAM 0x81965EC0 = C++ ResultSizeFor for {}/8191 masks{}", equal,
+                    first_mask ? std::format("; first difference mask 0x{:04X}: XAM 0x{:X}/0x{:X}, "
                                              "C++ 0x{:X}/0x{:X}",
                                              first_mask, first_xam.result, first_xam.gpu_resources,
                                              first_cpp.result, first_cpp.gpu_resources)
                                : std::string()));
-  Check(abi == 0, fmt::format("sizes: ABI preserved in all 8191 XAM calls ({} breaks)", abi));
+  Check(abi == 0, std::format("sizes: ABI preserved in all 8191 XAM calls ({} breaks)", abi));
   REXLOG_INFO("xam-aot-probe: sizes: games' mask 0x1FFF -> result 0x{:X}, GPU resources 0x{:X} "
               "(XAM)",
               real.result, real.gpu_resources);
@@ -306,10 +340,9 @@ void RunSizeCheck() {
 // seven little-endian header words, followed by LSB-first packed integer deltas.
 // Output is at most 18 triples of BE u32 ARGB values, then a BE count at +216.
 void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
-  auto* rt = rex::Runtime::instance();
-  auto* memory = rt->memory();
-  auto* d = rt->function_dispatcher();
-  auto* t = rex::runtime::ThreadState::Get();
+  auto* memory = ProbeMemory();
+  auto* d = ProbeFunctions();
+  auto* t = rex::kernel::ThreadState::Get();
   constexpr uint32_t kReader = 0x40, kIter = 0x100, kFieldStream = 0x180;
   constexpr uint32_t kGuard = 0x200, kOut = kGuard + 32, kEnd = kOut + 220;
   constexpr uint32_t kData = 0x400;
@@ -338,7 +371,7 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
     // This diagnostic deliberately supports only the observed 17559 encoding.
     if (blob.size() < 32 || std::memcmp(blob.data(), "STRB", 4) || blob[4] != 1 ||
         blob[5] != 0 || blob[22] != 1 || blob[23] != 4 || blob[26] != 4) {
-      Check(false, fmt::format("colors: unsupported STRB layout at record {}", record)); break;
+      Check(false, std::format("colors: unsupported STRB layout at record {}", record)); break;
     }
     size_t pos = 32;
     uint32_t ordinal = 0;
@@ -365,7 +398,7 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
     // Bound inputs before giving them to the original trusted-data decoder.
     if (!count || count > 18 || bits[0] > 32 || bits[1] > 32 || bits[2] > 32 ||
         uint64_t(count) * stride > uint64_t(len - 28) * 8) {
-      Check(false, fmt::format("colors: unsupported palette count/width at {}", record)); break;
+      Check(false, std::format("colors: unsupported palette count/width at {}", record)); break;
     }
     std::array<uint8_t, 220> expected;
     expected.fill(0xA5);
@@ -392,7 +425,7 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
         rex::memory::load_and_swap<uint64_t>(h + kIter + 16) == len &&
         rex::memory::load_and_swap<uint64_t>(h + kIter + 24) == 1 &&
         be(h + kIter + 32) == scratch + kReader;
-    if (!iterator) { Check(false, fmt::format("colors: iterator bounds at {}", record)); break; }
+    if (!iterator) { Check(false, std::format("colors: iterator bounds at {}", record)); break; }
     call(0x81976080, {scratch + kFieldStream, scratch + kReader, scratch + kIter, 0});
     const auto result = call(0x81976598, {scratch + kOut, scratch + kFieldStream});
     const bool equal = std::memcmp(h + kOut, expected.data(), expected.size()) == 0;
@@ -402,7 +435,7 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
                     [](uint8_t b) { return b == 0xA5; });
     const bool source = std::memcmp(h + kData, blob.data(), blob.size()) == 0;
     if (result != 1 || !equal || !guards || !source) {
-      Check(false, fmt::format("colors: record {} result {} bytes {} guards {} source {} first "
+      Check(false, std::format("colors: record {} result {} bytes {} guards {} source {} first "
                                "{:08X}/{:08X} count {}/{}", record, result, equal, guards, source,
                                be(h + kOut), be(expected.data()), be(h + kOut + 216), count));
       break;
@@ -427,15 +460,15 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
       const bool untouched = std::all_of(h + kGuard, h + kEnd + 32,
                                          [](uint8_t b) { return b == 0xA5; });
       Check(short_result == 0 && untouched,
-            fmt::format("colors: truncated record {} rejected (return {}), output and guards {}",
+            std::format("colors: truncated record {} rejected (return {}), output and guards {}",
                         record, short_result, untouched ? "untouched" : "CHANGED"));
     }
 
   }
   Check(tested > 0 && packed > 0,
-        fmt::format("colors: 0x81976598 transformed {} real palettes ({} packed), {} triples",
+        std::format("colors: 0x81976598 transformed {} real palettes ({} packed), {} triples",
                     tested, packed, triples));
-  Check(abi == 0, fmt::format("colors: ABI preserved over {} calls ({} breaks)", calls, abi));
+  Check(abi == 0, std::format("colors: ABI preserved over {} calls ({} breaks)", calls, abi));
   Check(std::memcmp(callbacks.data(), memory->TranslateVirtual(0x81A975CC), callbacks.size()) == 0,
         "colors: all five title callbacks untouched; no GPU callback required by this routine");
   memory->SystemHeapFree(scratch);
@@ -467,8 +500,9 @@ bool MeshInflate(std::span<const uint8_t> src, std::vector<uint8_t>& dst) {
         offset > 16 * 1024 * 1024 - size)
       return false;
     dst.resize(offset + size);
-    if (lzx_decompress(src.data() + 12, packed, dst.data() + offset, size,
-                       0x8000, nullptr, 0))
+    auto* factory = REX_INTERFACE(rex::filesystem::IFileSystemFactory);
+    if (!factory || factory->DecompressLZX(src.subspan(12, packed),
+                                          std::span(dst).subspan(offset, size), 0x8000, {}))
       return false;
     src = src.subspan(12 + packed);
   }
@@ -650,10 +684,9 @@ bool MeshValidateBuffers(const uint8_t* base, const std::array<uint32_t, 12>& h,
 }
 
 void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
-  auto* rt = rex::Runtime::instance();
-  auto* m = rt->memory();
-  auto* d = rt->function_dispatcher();
-  auto* t = rex::runtime::ThreadState::Get();
+  auto* m = ProbeMemory();
+  auto* d = ProbeFunctions();
+  auto* t = rex::kernel::ThreadState::Get();
   constexpr std::array<uint32_t, 5> expected = {
       0x8295B630, 0x8295B720, 0x8295B3C0, 0x8295B458, 0x8295B500};
   if (!game_callbacks) {
@@ -734,15 +767,15 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
             MeshBE(blob.data() + pos + 5) != 1 ||
             !MeshInflate(blob.subspan(pos + 12, len), expanded)) {
           Check(false,
-                fmt::format("meshes: LZX framing/decode record {}", record));
+                std::format("meshes: LZX framing/decode record {}", record));
           break;
         }
         std::array<uint32_t, 12> header{};
         for (size_t i = 0; i < 12; ++i)
           header[i] = MeshLE(expanded.data() + i * 4);
         REXLOG_DEBUG(
-            "xam-aot-probe: meshes: record {} LZX {} -> {} bytes; header {:X}",
-            record, len, expanded.size(), fmt::join(header, "/"));
+            "xam-aot-probe: meshes: record {} LZX {} -> {} bytes; header {}",
+            record, len, expanded.size(), HeaderText(header));
         const bool bounds =
             header[0] <= cap && header[1] <= cap && header[11] <= cap &&
             uint64_t(header[9]) + uint64_t(header[5]) * 512 <= header[0] &&
@@ -769,7 +802,7 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
         const uint32_t result = uint32_t(CallQuiet(
             d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi));
         if (result != 1 || stream.misses || stream.pos != expanded.size())
-          Check(false, fmt::format("meshes: record {} original reader={} "
+          Check(false, std::format("meshes: record {} original reader={} "
                                    "consumed {}/{} misses={}",
                                    record, result, stream.pos, expanded.size(),
                                    stream.misses));
@@ -792,10 +825,10 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
               m->TranslateVirtual<const uint8_t*>(pair.first + pair.second);
           for (uint32_t i = 0; i < 32; ++i) guards &= b[i] == 0xCD;
         }
-        descriptors &= MeshValidateBuffers(m->virtual_membase(), header, cpu,
+        descriptors &= MeshValidateBuffers(m->GetVirtualMembase(), header, cpu,
                                            gpu, indices);
         if (!descriptors || !guards || texture_check.failures)
-          Check(false, fmt::format("meshes: record {} descriptors={} guards={} "
+          Check(false, std::format("meshes: record {} descriptors={} guards={} "
                                    "texture failures={}",
                                    record, descriptors, guards,
                                    texture_check.failures));
@@ -851,7 +884,7 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
   Check(
       tested > 3 && meshes > 0 && textures > 0 && texture_bytes > 0 &&
           negatives == 3,
-      fmt::format("meshes: coverage {} assets, {} meshes, {} textures, {} "
+      std::format("meshes: coverage {} assets, {} meshes, {} textures, {} "
                   "indices, {} tiled bytes, {} negatives",
                   tested, meshes, textures, indices, texture_bytes, negatives));
   Check(abi == 0 && g_mesh_callback_abi == 0,
@@ -869,10 +902,9 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
 // run.
 void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
                   uint32_t game_callbacks) {
-  auto* rt = rex::Runtime::instance();
-  auto* m = rt->memory();
-  auto* d = rt->function_dispatcher();
-  auto* t = rex::runtime::ThreadState::Get();
+  auto* m = ProbeMemory();
+  auto* d = ProbeFunctions();
+  auto* t = rex::kernel::ThreadState::Get();
   uint32_t abi = 0;
   auto call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
     return uint32_t(CallQuiet(d, t, fn, args, &abi));
@@ -993,7 +1025,7 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
       const bool destroyed =
           MeshBE(m->TranslateVirtual<const uint8_t*>(context)) == 0;
       Check(first && skipped && crossed && reset && again && destroyed,
-            fmt::format("ldi-assets: original stream header={} skip={} "
+            std::format("ldi-assets: original stream header={} skip={} "
                         "cross-block={} rewind={} reread={} destroy={}",
                         first, skipped, crossed, reset, again, destroyed));
       seeks += first && skipped && crossed && reset && again && destroyed;
@@ -1032,7 +1064,7 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
     uint64_t indices = 0;
     if (output_ok)
       output_ok =
-          MeshValidateBuffers(m->virtual_membase(), header, cpu, gpu, indices);
+          MeshValidateBuffers(m->GetVirtualMembase(), header, cpu, gpu, indices);
     bool guards = true;
     for (auto p : {cpu_alloc, gpu_alloc, temp_alloc}) {
       const auto* b = m->TranslateVirtual<const uint8_t*>(p);
@@ -1047,7 +1079,7 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
         MeshBE(m->TranslateVirtual<const uint8_t*>(ldi + 0x11800)) == 0;
     Check(
         output_ok && guards && source && destroyed && !texture_check.failures,
-        fmt::format(
+        std::format(
             "ldi-assets: GetAssets worker record {} HRESULT={:08X}, output={}, "
             "guards={}, source={}, destroyed={}, indices={}, tiled-bytes={}",
             record, result, output_ok, guards, source, destroyed, indices,
@@ -1062,7 +1094,7 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
   std::memcpy(m->TranslateVirtual(0x81A975CC), saved.data(), saved.size());
   for (auto p : owned) m->SystemHeapFree(p);
   Check(assets == 3 && seeks == 1 && abi == 0 && g_mesh_callback_abi == 0,
-        fmt::format("ldi-assets: {} workers, {} stream seek/reset case, ABI "
+        std::format("ldi-assets: {} workers, {} stream seek/reset case, ABI "
                     "breaks={}/{}; callbacks restored",
                     assets, seeks, abi, g_mesh_callback_abi));
 }
@@ -1070,10 +1102,9 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
 // Only the new aggregate/lifecycle route, with original compressed assets.
 void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks) {
   using namespace x360n::avatar;
-  auto* rt = rex::Runtime::instance();
-  auto* m = rt->memory();
-  auto* d = rt->function_dispatcher();
-  auto* t = rex::runtime::ThreadState::Get();
+  auto* m = ProbeMemory();
+  auto* d = ProbeFunctions();
+  auto* t = rex::kernel::ThreadState::Get();
   uint32_t abi = 0, calls = 0;
   const auto saved_protocol = MeshBE(m->TranslateVirtual<const uint8_t*>(0x81B4B238));
   std::array<uint8_t, 20> saved_callbacks{};
@@ -1150,7 +1181,7 @@ void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks)
       }
     }
     Check(aggregate,
-          fmt::format("aggregate: HRESULT={:08X}, assets={}, bones={}, "
+          std::format("aggregate: HRESULT={:08X}, assets={}, bones={}, "
                       "decoded={}, field4={}, finalized={}",
                       request.status(), count, bones, success.decoded,
                       success.applied, success.finalized));
@@ -1179,7 +1210,7 @@ void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks)
               !request.result().result && calls == before &&
               stats.allocations == stats.frees && stats.guards &&
               stats.finalized == 0,
-          fmt::format("aggregate: cancel after {} steps discards partial "
+          std::format("aggregate: cancel after {} steps discards partial "
                       "result ({} assets)",
                       steps, stats.decoded));
   }
@@ -1222,7 +1253,7 @@ void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks)
                 saved_protocol &&
             !std::memcmp(saved_callbacks.data(),
                          m->TranslateVirtual(0x81A975CC), 20),
-        fmt::format(
+        std::format(
             "aggregate: ABI breaks={}; protocol and callback table restored",
             abi));
 }
@@ -1230,28 +1261,29 @@ void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks)
 void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
                            const std::string& catalog_path, uint32_t callbacks) {
   using namespace x360n::avatar;
-  auto* rt = rex::Runtime::instance();
-  auto* thread = rex::runtime::ThreadState::Get();
+  auto* rt = REX_RUNTIME();
+  auto* thread = rex::kernel::ThreadState::Get();
   uint32_t abi = 0;
   AvatarAotCall call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
-    const auto hr = uint32_t(CallQuiet(rt->function_dispatcher(), thread, fn, args, &abi));
+    const auto hr = uint32_t(CallQuiet(ProbeFunctions(), thread, fn, args, &abi));
     REXLOG_INFO("avatar-service: {:08X} -> {:08X}", fn, hr);
     return hr;
   };
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
-      "\\Device\\X360nAvatarCatalog17559", std::filesystem::path(catalog_path).parent_path(), true);
-  if (!device->Initialize() || !rt->kernel_state()->file_system()->RegisterDevice(std::move(device))) {
+  rex::filesystem::MountEntry catalog_mount;
+  catalog_mount.path = "\\Device\\X360nAvatarCatalog17559";
+  catalog_mount.source = rex::string::to_path(catalog_path).parent_path();
+  if (!rt->GetFileSystem().Mount(catalog_mount)) {
     Check(false, "avatar-service: mount read-only catalog");
     return;
   }
-  AotAvatarCatalog catalog(*rt->memory(), call);
+  AotAvatarCatalog catalog(*ProbeMemory(), call);
   auto hr = catalog.Open("\\Device\\X360nAvatarCatalog17559\\AvatarAssetPack.toc");
-  Check(hr == 0, fmt::format("avatar-service: open original generator HRESULT={:08X}", hr));
+  Check(hr == 0, std::format("avatar-service: open original generator HRESULT={:08X}", hr));
   if (hr) return;
   std::vector<std::array<uint8_t, kMetadataSize>> descriptions;
   hr = catalog.Generate(3, 4, descriptions);
   Check(hr == 0 && descriptions.size() == 4,
-        fmt::format("avatar-service: random metadata HRESULT={:08X}, count={}", hr, descriptions.size()));
+        std::format("avatar-service: random metadata HRESULT={:08X}, count={}", hr, descriptions.size()));
   // IDs have three layouts: modifiers, body/head refs and clothing refs.
   for (size_t i = 0; i < descriptions.size(); ++i) {
     const auto& md = descriptions[i];
@@ -1264,7 +1296,7 @@ void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
       if (id.IsZero()) continue;
       std::string error;
       auto index = ResolveAsset(toc, id, &error);
-      Check(bool(index), fmt::format("avatar-service: avatar {} slot {} record {} category {:X}: {}",
+      Check(bool(index), std::format("avatar-service: avatar {} slot {} record {} category {:X}: {}",
                                     i, offset, id.index, id.category, error));
       resolved += bool(index);
     }
@@ -1272,13 +1304,13 @@ void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
   }
   for (const auto& md : descriptions) {
     AotAssetsStats stats;
-    auto backend = MakeAotMetadataAssetsBackend(*rt->memory(), call, toc, md, 0xFFF, callbacks, stats);
+    auto backend = MakeAotMetadataAssetsBackend(*ProbeMemory(), call, toc, md, 0xFFF, callbacks, stats);
     AssetsRequest request(std::move(backend));
     for (int n = 0; n < 80 && request.status() == kAssetsPending; ++n) request.Step();
     auto output = request.result();
-    uint32_t count = output.result ? MeshBE(rt->memory()->TranslateVirtual<const uint8_t*>(output.result + 8)) : 0;
+    uint32_t count = output.result ? MeshBE(ProbeMemory()->TranslateVirtual<const uint8_t*>(output.result + 8)) : 0;
     Check(request.status() == 0 && count >= 2 && stats.applied > 0,
-          fmt::format("avatar-service: full metadata HRESULT={:08X}, meshes={}, decoded={}, modifiers={}, finalized={}",
+          std::format("avatar-service: full metadata HRESULT={:08X}, meshes={}, decoded={}, modifiers={}, finalized={}",
                       request.status(), count, stats.decoded, stats.applied, stats.finalized));
   }
   Check(abi == 0, "avatar-service: original generator ABI preserved");
@@ -1286,17 +1318,16 @@ void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
 
 
 void Run(uint32_t game_callbacks) {
-  auto* runtime = rex::Runtime::instance();
-  auto* thread = rex::runtime::ThreadState::Get();
+  auto* runtime = REX_RUNTIME();
+  auto* thread = rex::kernel::ThreadState::Get();
   if (!runtime || !thread) {
     Check(false, "probe needs the runtime and a guest thread");
     return;
   }
-  auto* ks = runtime->kernel_state();
-  auto* dispatcher = runtime->function_dispatcher();
-  auto* memory = runtime->memory();
-  const std::string root = REXCVAR_GET(x360n_xam17559_root);
-  const std::string catalog_path = REXCVAR_GET(x360n_avatar_catalog_17559);
+  auto* dispatcher = ProbeFunctions();
+  auto* memory = ProbeMemory();
+  const std::string root = ProbeOptions().xam17559_root.Get();
+  const std::string catalog_path = x360n::GetLaunchSettings().avatar_catalog_17559.Get();
   if (root.empty() || catalog_path.empty()) {
     Check(
         false,
@@ -1305,33 +1336,36 @@ void Run(uint32_t game_callbacks) {
   }
 
   // Mount and load. Name lookups of "xam.xex" still reach the SDK's kernel
-  // module first (KernelState::GetModule searches kernel modules before user
-  // modules).
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
-      "\\Device\\X360nSystem17559", root, true);
-  const bool mounted = device->Initialize() &&
-                       ks->file_system()->RegisterDevice(std::move(device)) &&
-                       ks->file_system()->RegisterSymbolicLink(
-                           "x360nsys:", "\\Device\\X360nSystem17559");
+  // module first through the canonical module registry.
+  rex::filesystem::MountEntry xam_mount;
+  xam_mount.path = "x360nsys:";
+  xam_mount.source = rex::string::to_path(root);
+  const bool mounted = bool(runtime->GetFileSystem().Mount(xam_mount));
   Check(mounted, "mount " + root + " as x360nsys: (read-only)");
   if (!mounted) return;
-  auto module = ks->LoadUserModule("x360nsys:\\xam.xex", false);
-  Check(bool(module), "load x360nsys:\\xam.xex without its entry point");
-  if (!module) return;
-  const uint32_t base = module->xex_module()->base_address();
-  const uint32_t size = module->xex_module()->image_size();
-  g_xam_hmodule = module->hmodule_ptr();
+  const auto loaded = runtime->GetModuleRegistry().LoadUserModule("x360nsys:\\xam.xex", false);
+  Check(bool(loaded), "load x360nsys:\\xam.xex without its entry point");
+  if (!loaded) return;
+  uint32_t base = 0, size = 0;
+  {
+    auto module = runtime->GetObjectTable().Get<rex::kernel::ModuleObject>(*loaded);
+    if (!module || !module->processor_module) { Check(false, "loaded XAM image unavailable"); return; }
+    base = module->processor_module->GetBaseAddress();
+    size = module->processor_module->GetImageSize();
+    g_xam_hmodule = module->hmodule_ptr;
+  }
+
   Check(base == kXamBase && size == kXamSize,
-        fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})",
+        std::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})",
                     base, size, kXamBase, kXamSize));
 
-  if (REXCVAR_GET(motocross_avatar_service_probe) || REXCVAR_GET(motocross_xam_aot_probe_aggregate) || REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+  if (ProbeOptions().avatar_service_probe.Get() || ProbeOptions().xam_aot_probe_aggregate.Get() || ProbeOptions().xam_aot_probe_meshes.Get() || ProbeOptions().xam_aot_probe_ldi.Get()) {
     std::string error;
     auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
     if (!toc) { Check(false, "meshes: catalog: " + error); return; }
-    if (REXCVAR_GET(motocross_avatar_service_probe)) RunAvatarServiceProbe(*toc, catalog_path, game_callbacks);
-    else if (REXCVAR_GET(motocross_xam_aot_probe_aggregate)) RunAggregateAssets(*toc, game_callbacks);
-    else if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
+    if (ProbeOptions().avatar_service_probe.Get()) RunAvatarServiceProbe(*toc, catalog_path, game_callbacks);
+    else if (ProbeOptions().xam_aot_probe_aggregate.Get()) RunAggregateAssets(*toc, game_callbacks);
+    else if (ProbeOptions().xam_aot_probe_ldi.Get()) RunLdiAssets(*toc, game_callbacks);
     else RunMeshes(*toc, game_callbacks);
     return;
   }
@@ -1367,13 +1401,13 @@ void Run(uint32_t game_callbacks) {
         std::span<const uint8_t, x360n::avatar::kMetadataSize>(desc_host, x360n::avatar::kMetadataSize));
     const uint32_t got = uint32_t(Call(dispatcher, thread, kBodyTypeExport, {desc}, "0x816753C8"));
     Check(got == expected && expected == uint32_t(body),
-          fmt::format("game->XAM: XamAvatarManifestGetBodyType = {} (C++ {}, expected {})", got,
+          std::format("game->XAM: XamAvatarManifestGetBodyType = {} (C++ {}, expected {})", got,
                       expected, body));
   }
   memory->SystemHeapFree(desc);
-  if (REXCVAR_GET(motocross_xam_aot_probe_strb)) RunStrbDecode(*toc);
-  if (REXCVAR_GET(motocross_xam_aot_probe_colors)) RunStrbColors(*toc);
-  if (REXCVAR_GET(motocross_xam_aot_probe_sizes)) RunSizeCheck();
+  if (ProbeOptions().xam_aot_probe_strb.Get()) RunStrbDecode(*toc);
+  if (ProbeOptions().xam_aot_probe_colors.Get()) RunStrbColors(*toc);
+  if (ProbeOptions().xam_aot_probe_sizes.Get()) RunSizeCheck();
 
   // XAM -> game: the original vector iterator calls the game's constructor.
   constexpr uint32_t kCount = 4, kStride = 16;
@@ -1400,7 +1434,7 @@ void Run(uint32_t game_callbacks) {
   bool untouched = true;
   for (uint32_t k = 0; k < kCount * kStride; ++k) untouched = untouched && array_host[k] == 0x5A;
   Check(uint32_t(r) == kFailValue && untouched,
-        fmt::format("errors: unregistered address -> 0x{:08X}, memory untouched", uint32_t(r)));
+        std::format("errors: unregistered address -> 0x{:08X}, memory untouched", uint32_t(r)));
   memory->SystemHeapFree(array);
 }
 
@@ -1411,9 +1445,8 @@ void Run(uint32_t game_callbacks) {
 void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
                            const PPCRegister& processor, const PPCRegister& callbacks,
                            uint32_t size) {
-  auto* runtime = rex::Runtime::instance();
-  auto* thread = rex::runtime::ThreadState::Get();
-  auto* memory = runtime->memory();
+  auto* thread = rex::kernel::ThreadState::Get();
+  auto* memory = ProbeMemory();
   constexpr uint32_t kInitializeExport = 0x816755E8, kAppSlotF2 = 0x81AA1470;
   const uint32_t buffer = memory->SystemHeapAlloc(size);
   if (!buffer) {
@@ -1426,7 +1459,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
   // the message sender (0x816BC968) skips an app whose +0x08 is zero (E_INVALIDARG).
   // Only that store runs here; DllMain's call to the whole boot 0x816968A8 does not.
   constexpr uint32_t kSetModuleHandle = 0x816E0B58;
-  Call(runtime->function_dispatcher(), thread, kSetModuleHandle, {g_xam_hmodule},
+  Call(ProbeFunctions(), thread, kSetModuleHandle, {g_xam_hmodule},
        "module handle store 0x816E0B58");
   REXLOG_INFO("xam-aot-probe: initialize: XAM 0x{:08X}(hmodule 0x{:08X}); [0x81AA3EE0] = 0x{:08X}",
               kSetModuleHandle, g_xam_hmodule,
@@ -1447,7 +1480,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
     return;
   }
   constexpr uint32_t kSystemHeapsInit = 0x816E6618, kTitleHeapInit = 0x816E6870;
-  const uint32_t system_heaps = uint32_t(Call(runtime->function_dispatcher(), thread,
+  const uint32_t system_heaps = uint32_t(Call(ProbeFunctions(), thread,
                                               kSystemHeapsInit, {}, "system heaps init 0x816E6618"));
   REXLOG_INFO("xam-aot-probe: initialize: XAM system heaps init 0x{:08X} -> 0x{:08X}",
               kSystemHeapsInit, system_heaps);
@@ -1455,7 +1488,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
   // 0x816BA120), which allocates the TLS slot of the current XAM app (0x81A82570) and
   // starts XAM's worker threads; Initialize posts its message through it (0x816BD620).
   constexpr uint32_t kSchedulerInit = 0x816BA650;
-  const uint32_t scheduler = uint32_t(Call(runtime->function_dispatcher(), thread, kSchedulerInit,
+  const uint32_t scheduler = uint32_t(Call(ProbeFunctions(), thread, kSchedulerInit,
                                            {}, "task scheduler init 0x816BA650"));
   REXLOG_INFO("xam-aot-probe: initialize: XAM task scheduler init 0x{:08X} -> 0x{:08X}; TLS slot "
               "0x81A82570 = 0x{:08X}",
@@ -1465,7 +1498,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
   // 0x816A14B8). The avatar app asks it whether the running title is the dashboard
   // (0x8196B8C8 -> 0x816E0C68 -> 0x8169CE70, which dereferences it unconditionally).
   constexpr uint32_t kTitleManagerInit = 0x816A17B8;
-  const uint32_t manager = uint32_t(Call(runtime->function_dispatcher(), thread, kTitleManagerInit,
+  const uint32_t manager = uint32_t(Call(ProbeFunctions(), thread, kTitleManagerInit,
                                          {}, "title manager init 0x816A17B8"));
   const uint32_t manager_ptr =
       rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81A9F850));
@@ -1476,7 +1509,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
                           : 0u);
   // XAM's title heap (0x816E6870, from the title start path 0x816A01A8): sized from the
   // running title's XEX header field 0x40201 through XexExecutableModuleHandle.
-  const uint32_t heap = uint32_t(Call(runtime->function_dispatcher(), thread, kTitleHeapInit, {},
+  const uint32_t heap = uint32_t(Call(ProbeFunctions(), thread, kTitleHeapInit, {},
                                       "title heap init 0x816E6870"));
   REXLOG_INFO("xam-aot-probe: initialize: XAM title heap init 0x{:08X} -> 0x{:08X}", kTitleHeapInit,
               heap);
@@ -1484,7 +1517,7 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
               "0x{:08X}, 0x{:X})",
               kInitializeExport, uint32_t(version.u64), uint32_t(flags.u64),
               uint32_t(processor.u64), uint32_t(callbacks.u64), buffer, size);
-  const uint32_t r = uint32_t(Call(runtime->function_dispatcher(), thread, kInitializeExport,
+  const uint32_t r = uint32_t(Call(ProbeFunctions(), thread, kInitializeExport,
                                    {version.u64, flags.u64, processor.u64, callbacks.u64, buffer,
                                     size},
                                    "XamAvatarInitialize 0x816755E8"));
@@ -1500,41 +1533,40 @@ void RunOriginalInitialize(const PPCRegister& version, const PPCRegister& flags,
 
 }  // namespace
 
-REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_initialize, false, "Motocross Madness",
-                    "Diagnostic, after the probe: call the original XAM XamAvatarInitialize with "
-                    "the game's arguments and a private buffer; the game still gets the SDK's "
-                    "result");
-
 namespace motocross {
 
-void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCRegister& r6,
+void MaybeRunXamAotProbe(PPCRegister& r3, [[maybe_unused]] PPCRegister& r4,
+                         [[maybe_unused]] PPCRegister& r5, [[maybe_unused]] PPCRegister& r6,
                          PPCRegister& r7, PPCRegister& r8) {
   static bool done = false;
-  if (done || !REXCVAR_GET(motocross_xam_aot_probe)) return;
+  if (done || !ProbeOptions().xam_aot_probe.Get()) return;
   done = true;
   // The probe mounts x360nsys: itself and owns the module; the game's later
   // XamAvatarInitialize then fails in this diagnostic mode, as before.
-  REXCVAR_SET(x360n_avatar_service, false);
+  if (!x360n::GetLaunchSettings().avatar_service.Set(false)) {
+    Check(false, "Cannot disable avatar service for the explicit diagnostic run");
+    return;
+  }
   REXLOG_INFO("xam-aot-probe: avatar service disabled for this diagnostic run");
-  auto* thread = rex::runtime::ThreadState::Get();
+  auto* thread = rex::kernel::ThreadState::Get();
   if (!thread) {
     Check(false, "no guest thread");
     return;
   }
   // The registers the generated code hands to the hook are the thread's context, so a
   // call made from here sees the game's stack pointer and TLS exactly as the import would.
-  Check(&r3 == &thread->context()->r3 && &r8 == &thread->context()->r8,
+  Check(&r3 == &thread->GetContext()->r3 && &r8 == &thread->GetContext()->r8,
         "context: hook registers are the guest thread's PPCContext");
   (void)r7;
-  PPCContext saved = *thread->context();
+  PPCContext saved = *thread->GetContext();
   Run(uint32_t(saved.r6.u64));
-  if (REXCVAR_GET(motocross_xam_aot_probe_initialize) &&
-      !REXCVAR_GET(motocross_avatar_service_probe) && !REXCVAR_GET(motocross_xam_aot_probe_aggregate) && !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
-    *thread->context() = saved;
+  if (ProbeOptions().xam_aot_probe_initialize.Get() &&
+      !ProbeOptions().avatar_service_probe.Get() && !ProbeOptions().xam_aot_probe_aggregate.Get() && !ProbeOptions().xam_aot_probe_meshes.Get() && !ProbeOptions().xam_aot_probe_ldi.Get()) {
+    *thread->GetContext() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));
   }
-  *thread->context() = saved;
-  thread->context()->fpscr.restoreGuestBits(saved.fpscr.csr);
+  *thread->GetContext() = saved;
+  thread->GetContext()->fpscr.RestoreGuestBits(saved.fpscr.csr);
   REXLOG_INFO("xam-aot-probe: done, {} failure(s); game context restored", g_failures);
 }
 

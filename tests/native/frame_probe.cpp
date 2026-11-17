@@ -22,15 +22,19 @@
 // Prints each frame's scanout hash; no title data is involved.
 #include "probe_main.h"
 #include "../../src/native/capture/capture_format.h"
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/kernel/init.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/system/mmio_handler.h>
-#include <rex/graphics/registers.h>
-#include <rex/graphics/format/ucode.h>
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/cvar.h>
+#include "../../src/gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/heap.h>
+#include <rex/ppc/image.h>
+#include <rex/string/text.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/packet.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/texture.h>
+#include <rex/memory.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
+#include <gpu/xenos/command_processor.h>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -41,9 +45,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
-using rex::X_STATUS;
+using namespace rex::xenos;
 namespace {
 void Require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 uint32_t Packet(uint32_t opcode, uint32_t count) { return 0xC0000000 | ((count - 1) << 16) | (opcode << 8); }
@@ -66,25 +68,23 @@ constexpr uint32_t kSide = 32;
 // Optional game-like load per frame: extra_draws rasterized draws in
 // extra_resolves groups, each group followed by a resolve into its own guest
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
+void Run(rex::gpu::IXenosGraphicsDriver& gpu, rex::kernel::GuestAddressSpace& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
          bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases,
          bool depth_bias, bool depth_unorm, bool color64, bool depth_alias) {
-  const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
-  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto decal = (depth_bias || depth_alias) ? memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
-  const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto image = memory.SystemHeapAlloc(kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
-  const auto reports = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto targets = memory.SystemHeapAlloc(std::max(1u, extra_resolves) * kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
+  const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto decal = (depth_bias || depth_alias) ? memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical) : 0;
+  const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto image = memory.SystemHeapAlloc(kSide * kSide * 4, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto reports = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto targets = memory.SystemHeapAlloc(std::max(1u, extra_resolves) * kSide * kSide * 4, 4096, rex::kernel::kSystemHeapPhysical);
   Require(ring && vertices && rect && image && reports && done && targets, "frame probe allocations");
   Require(!(depth_bias || depth_alias) || decal, "decal fixture allocation");
   std::memset(memory.TranslateVirtual(done), 0, 4);
   const float xy[]{0, 0, float(kSide), 0, 0, float(kSide)};
   std::memcpy(memory.TranslateVirtual(rect), xy, sizeof(xy));
-  auto* mmio = memory.LookupVirtualMappedRange(0x7FC80714);
-  Require(mmio != nullptr, "probe GPU doorbell");
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 19);
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   uint32_t write = 0;
@@ -123,78 +123,78 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       words.insert(words.end(), shader.begin(), shader.end());
     };
     auto vertex_fetch = [&](uint32_t address, uint32_t dwords) {
-      xe_gpu_vertex_fetch_t fetch{}; fetch.type = FetchConstantType::kVertex;
+      VertexFetch fetch{}; fetch.type = FetchConstantType::kVertex;
       const uint32_t alias = vertex_aliases ? uint32_t(frame % 7 + 1) << 29 : 0;
       fetch.address = (address | alias) >> 2; fetch.size = dwords;
-      set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, fetch.dword_0); set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, fetch.dword_1);
+      set(static_cast<uint32_t>(Register::SHADER_CONSTANT_FETCH_00_0), fetch.dword_0); set(static_cast<uint32_t>(Register::SHADER_CONSTANT_FETCH_00_1), fetch.dword_1);
     };
-    reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 1; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
-    set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
-    set(XE_GPU_REG_RB_SURFACE_INFO, 80); set(XE_GPU_REG_RB_COLOR_MASK, 15); set(XE_GPU_REG_RB_COLOR_INFO, edram_base);
+    reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 1; set(static_cast<uint32_t>(Register::SQ_PROGRAM_CNTL), program.value);
+    set(static_cast<uint32_t>(Register::VGT_MAX_VTX_INDX), 0xFFFFFF);
+    set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
+    set(static_cast<uint32_t>(Register::RB_SURFACE_INFO), 80); set(static_cast<uint32_t>(Register::RB_COLOR_MASK), 15); set(static_cast<uint32_t>(Register::RB_COLOR_INFO), edram_base);
     if (color64) {
       reg::RB_COLOR_INFO info{};
       info.color_base = edram_base;
       info.color_format = ColorRenderTargetFormat::k_16_16_16_16_FLOAT;
-      set(XE_GPU_REG_RB_COLOR_INFO, info.value);
+      set(static_cast<uint32_t>(Register::RB_COLOR_INFO), info.value);
     }
-    set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_RB_DEPTH_INFO, 0);
+    set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), 0); set(static_cast<uint32_t>(Register::RB_DEPTH_INFO), 0);
     if (depth_bias || depth_alias) {
       reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 80;
       // Exercise all six directed changes between 1x, 2x and 4x views.
-      constexpr MsaaSamples samples[]{MsaaSamples::k1X, MsaaSamples::k2X, MsaaSamples::k1X,
-          MsaaSamples::k4X, MsaaSamples::k2X, MsaaSamples::k4X, MsaaSamples::k1X};
+      constexpr MSAASamples samples[]{MSAASamples::k1X, MSAASamples::k2X, MSAASamples::k1X,
+          MSAASamples::k4X, MSAASamples::k2X, MSAASamples::k4X, MSAASamples::k1X};
       surface.msaa_samples = samples[frame % std::size(samples)];
-      set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
+      set(static_cast<uint32_t>(Register::RB_SURFACE_INFO), surface.value);
       reg::RB_DEPTH_INFO depth{}; depth.depth_base = depth_alias ? edram_base : 64;
       depth.depth_format = depth_unorm ? DepthRenderTargetFormat::kD24S8 : DepthRenderTargetFormat::kD24FS8;
-      set(XE_GPU_REG_RB_DEPTH_INFO, depth.value);
+      set(static_cast<uint32_t>(Register::RB_DEPTH_INFO), depth.value);
       reg::PA_CL_CLIP_CNTL clip{}; clip.dx_clip_space_def = 1;
-      set(XE_GPU_REG_PA_CL_CLIP_CNTL, clip.value);
-      set(XE_GPU_REG_PA_SU_SC_MODE_CNTL, 0);
+      set(static_cast<uint32_t>(Register::PA_CL_CLIP_CNTL), clip.value);
+      set(static_cast<uint32_t>(Register::PA_SU_SC_MODE_CNTL), 0);
     }
     reg::RB_BLENDCONTROL blend{};
     // Accumulate: the scanout depends on every earlier frame's EDRAM contents.
     blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
     blend.color_destblend = blend.alpha_destblend = BlendFactor::kZero;
-    set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
-    set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
-    fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, kSide / 2.0f); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, kSide / 2.0f);
-    fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -float(kSide) / 2); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, kSide / 2.0f);
-    fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0);
-    set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, kSide | (kSide << 16));
-    set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, kSide | (kSide << 16));
-    set(XE_GPU_REG_PA_SU_VTX_CNTL, 1);
+    set(static_cast<uint32_t>(Register::RB_BLENDCONTROL0), blend.value);
+    set(static_cast<uint32_t>(Register::PA_CL_VTE_CNTL), 0x3F);
+    fp(static_cast<uint32_t>(Register::PA_CL_VPORT_XSCALE), kSide / 2.0f); fp(static_cast<uint32_t>(Register::PA_CL_VPORT_XOFFSET), kSide / 2.0f);
+    fp(static_cast<uint32_t>(Register::PA_CL_VPORT_YSCALE), -float(kSide) / 2); fp(static_cast<uint32_t>(Register::PA_CL_VPORT_YOFFSET), kSide / 2.0f);
+    fp(static_cast<uint32_t>(Register::PA_CL_VPORT_ZSCALE), 1); fp(static_cast<uint32_t>(Register::PA_CL_VPORT_ZOFFSET), 0);
+    set(static_cast<uint32_t>(Register::PA_SC_SCREEN_SCISSOR_TL), 0); set(static_cast<uint32_t>(Register::PA_SC_SCREEN_SCISSOR_BR), kSide | (kSide << 16));
+    set(static_cast<uint32_t>(Register::PA_SC_WINDOW_SCISSOR_TL), 0x80000000); set(static_cast<uint32_t>(Register::PA_SC_WINDOW_SCISSOR_BR), kSide | (kSide << 16));
+    set(static_cast<uint32_t>(Register::PA_SU_VTX_CNTL), 1);
     std::array<float, 4> color{float(frame % 7 + 1) / 8, float(frame % 3) / 4, frame < 2 ? 1.0f : 0.25f, 1};
     if (minmax_blend) color = (frame % 4) >= 2 ?
         std::array<float, 4>{.75f, .25f, .25f, .25f} :
         std::array<float, 4>{.75f, .5f, .25f, .5f};
     if (depth_bias) color = {.75f,.25f,.25f,1};
-    for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
+    for (unsigned c = 0; c < 4; ++c) fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + 256 * 4 + c, color[c]);
     if (pipeline_cache) for (unsigned i = 1; i < 32; ++i)
-      for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + i) * 4 + c, color[c]);
+      for (unsigned c = 0; c < 4; ++c) fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + (256 + i) * 4 + c, color[c]);
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     load(true); load(false);
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
     draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = 3;
     auto resolve_to = [&](uint32_t dest) {
       vertex_fetch(memory.GetPhysicalAddress(rect), 6);
-      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
-      set(XE_GPU_REG_RB_COPY_DEST_BASE, dest);
-      set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
-      set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
+      set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kCopy));
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_BASE), dest);
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_PITCH), kSide | (kSide << 16));
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_INFO), uint32_t(TextureFormat::k_8_8_8_8) << 7);
       reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
-      set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
+      set(static_cast<uint32_t>(Register::RB_COPY_CONTROL), copy.value);
       reg::VGT_DRAW_INITIATOR rect_draw = draw; rect_draw.prim_type = PrimitiveType::kRectangleList;
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect_draw.value});
-      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+      set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
       vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     };
     for (uint32_t group = 0; group < extra_resolves; ++group) {
       for (uint32_t i = group * extra_draws / extra_resolves; i < (group + 1) * extra_draws / extra_resolves; ++i) {
         const uint32_t constant = pipeline_cache ? i % 32 : 0;
         if (pipeline_cache) load(false, constant);
-        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + constant) * 4, float((frame + i) % 8) / 8);
+        fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + (256 + constant) * 4, float((frame + i) % 8) / 8);
         words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
       }
       resolve_to(memory.GetPhysicalAddress(targets) + group * kSide * kSide * 4);
@@ -203,48 +203,48 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     if (depth_bias) {
       reg::RB_DEPTHCONTROL depth{};
       depth.z_enable = depth.z_write_enable = 1; depth.zfunc = CompareFunction::kAlways;
-      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), depth.value);
       const float base_color[]{.25f,.25f,.75f,1};
-      for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, base_color[c]);
+      for (unsigned c = 0; c < 4; ++c) fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + 256 * 4 + c, base_color[c]);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
       depth.zfunc = CompareFunction::kLessEqual;
-      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), depth.value);
       reg::PA_SU_SC_MODE_CNTL mode{};
       mode.poly_offset_front_enable = mode.poly_offset_back_enable = 1;
-      set(XE_GPU_REG_PA_SU_SC_MODE_CNTL, mode.value);
-      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE, 0);
-      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE, 0);
-      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET, depth_unorm ? -0x1p-13f : -0x1p-26f);
-      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET, depth_unorm ? -0x1p-13f : -0x1p-26f);
+      set(static_cast<uint32_t>(Register::PA_SU_SC_MODE_CNTL), mode.value);
+      fp(static_cast<uint32_t>(Register::PA_SU_POLY_OFFSET_FRONT_SCALE), 0);
+      fp(static_cast<uint32_t>(Register::PA_SU_POLY_OFFSET_BACK_SCALE), 0);
+      fp(static_cast<uint32_t>(Register::PA_SU_POLY_OFFSET_FRONT_OFFSET), depth_unorm ? -0x1p-13f : -0x1p-26f);
+      fp(static_cast<uint32_t>(Register::PA_SU_POLY_OFFSET_BACK_OFFSET), depth_unorm ? -0x1p-13f : -0x1p-26f);
       vertex_fetch(memory.GetPhysicalAddress(decal), 12);
     }
     if (depth_alias) {
       vertex_fetch(memory.GetPhysicalAddress(rect), 6);
-      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
-      set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(image));
-      set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
-      set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
+      set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kCopy));
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_BASE), memory.GetPhysicalAddress(image));
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_PITCH), kSide | (kSide << 16));
+      set(static_cast<uint32_t>(Register::RB_COPY_DEST_INFO), uint32_t(TextureFormat::k_8_8_8_8) << 7);
       reg::RB_COPY_CONTROL clear{}; clear.copy_command = CopyCommand(1);
       clear.color_clear_enable = 1;
-      set(XE_GPU_REG_RB_COLOR_CLEAR, 0); set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
-      set(XE_GPU_REG_RB_DEPTH_CLEAR, 0); set(XE_GPU_REG_RB_COPY_CONTROL, clear.value);
+      set(static_cast<uint32_t>(Register::RB_COLOR_CLEAR), 0); set(static_cast<uint32_t>(Register::RB_COLOR_CLEAR_LO), 0);
+      set(static_cast<uint32_t>(Register::RB_DEPTH_CLEAR), 0); set(static_cast<uint32_t>(Register::RB_COPY_CONTROL), clear.value);
       reg::VGT_DRAW_INITIATOR rectangle = draw; rectangle.prim_type = PrimitiveType::kRectangleList;
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rectangle.value});
       // Separate clears avoid the ambiguous simultaneous color/depth overlap.
       clear.color_clear_enable = 0; clear.depth_clear_enable = 1;
-      set(XE_GPU_REG_RB_COPY_CONTROL, clear.value);
+      set(static_cast<uint32_t>(Register::RB_COPY_CONTROL), clear.value);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rectangle.value});
-      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+      set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
       vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
-      set(XE_GPU_REG_RB_COLOR_MASK, 0);
+      set(static_cast<uint32_t>(Register::RB_COLOR_MASK), 0);
       reg::RB_DEPTHCONTROL depth{}; depth.z_enable = depth.z_write_enable = 1;
       depth.zfunc = CompareFunction::kAlways;
-      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), depth.value);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
       // Red occupies bits 0:7, disjoint from depth in bits 8:31.
-      set(XE_GPU_REG_RB_COLOR_MASK, 1);
+      set(static_cast<uint32_t>(Register::RB_COLOR_MASK), 1);
       depth.z_write_enable = 0; depth.zfunc = CompareFunction::kLessEqual;
-      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), depth.value);
       color[0] = .75f;
       vertex_fetch(memory.GetPhysicalAddress(decal), 12);
     }
@@ -252,22 +252,22 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       // MIN against one / MAX against zero must both yield source * alpha.
       // Seed the destination explicitly, independently of EDRAM allocation.
       for (unsigned c = 0; c < 4; ++c)
-        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, frame & 1 ? 1.0f : 0.0f);
+        fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + 256 * 4 + c, frame & 1 ? 1.0f : 0.0f);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
       if ((frame % 4) < 2) {
         blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kSrcAlpha;
         blend.color_destblend = blend.alpha_destblend = BlendFactor::kOne;
         blend.color_comb_fcn = blend.alpha_comb_fcn = frame & 1 ? BlendOp::kMin : BlendOp::kMax;
       }
-      set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
+      set(static_cast<uint32_t>(Register::RB_BLENDCONTROL0), blend.value);
     }
-    for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
+    for (unsigned c = 0; c < 4; ++c) fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + 256 * 4 + c, color[c]);
     // ZPD around the draw: BEGIN, END with the big-endian pending token.
     const uint32_t report = memory.GetPhysicalAddress(reports) + (frame % 32) * 64;
     auto* end = memory.TranslatePhysical<uint32_t*>(report + 32);
     std::memset(end, 0, 32); end[4] = 0xEDFEFFFF;
     if (sample_counts) {
-      set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report);
+      set(static_cast<uint32_t>(Register::RB_SAMPLE_COUNT_ADDR), report);
       words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
     }
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
@@ -275,44 +275,44 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       // A second read must still see the seeded depth after the color alias write.
       vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
       reg::RB_DEPTHCONTROL depth{}; depth.z_enable = 1; depth.zfunc = CompareFunction::kGreater;
-      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
-      fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4, 1);
+      set(static_cast<uint32_t>(Register::RB_DEPTHCONTROL), depth.value);
+      fp(static_cast<uint32_t>(Register::SHADER_CONSTANT_000_X) + 256 * 4, 1);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
     }
     if (sample_counts) {
-      set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report + 32);
+      set(static_cast<uint32_t>(Register::RB_SAMPLE_COUNT_ADDR), report + 32);
       words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
     }
     // Resolve EDRAM (no clear) to the guest scanout image.
     vertex_fetch(memory.GetPhysicalAddress(rect), 6);
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
-    set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(image));
-    set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
-    set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
+    set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kCopy));
+    set(static_cast<uint32_t>(Register::RB_COPY_DEST_BASE), memory.GetPhysicalAddress(image));
+    set(static_cast<uint32_t>(Register::RB_COPY_DEST_PITCH), kSide | (kSide << 16));
+    set(static_cast<uint32_t>(Register::RB_COPY_DEST_INFO), uint32_t(TextureFormat::k_8_8_8_8) << 7);
     reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
     copy.color_clear_enable = clear_after_resolve;
-    set(XE_GPU_REG_RB_COLOR_CLEAR, 0);
-    set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
-    set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
+    set(static_cast<uint32_t>(Register::RB_COLOR_CLEAR), 0);
+    set(static_cast<uint32_t>(Register::RB_COLOR_CLEAR_LO), 0);
+    set(static_cast<uint32_t>(Register::RB_COPY_CONTROL), copy.value);
     reg::VGT_DRAW_INITIATOR rect_draw = draw; rect_draw.prim_type = PrimitiveType::kRectangleList;
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect_draw.value});
     // A visibility-tested draw after the resolve, while its result is still
     // unpublished: the renderer reads sample counters before and after it.
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+    set(static_cast<uint32_t>(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     if (sample_counts) {
       words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 5});
       reg::PA_SC_VIZ_QUERY viz{}; viz.viz_query_ena = 1; viz.viz_query_id = 5;
-      set(XE_GPU_REG_PA_SC_VIZ_QUERY, viz.value);
+      set(static_cast<uint32_t>(Register::PA_SC_VIZ_QUERY), viz.value);
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
-      set(XE_GPU_REG_PA_SC_VIZ_QUERY, 0);
+      set(static_cast<uint32_t>(Register::PA_SC_VIZ_QUERY), 0);
       words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 0x100u | 5});
     }
-    xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+    TextureFetch fetch{}; fetch.type = FetchConstantType::kTexture;
     fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_8_8_8_8;
     fetch.base_address = memory.GetPhysicalAddress(image) >> 12; fetch.pitch = kSide / 32;
     fetch.size_2d.width = kSide - 1; fetch.size_2d.height = kSide - 1; fetch.swizzle = 0x688; fetch.tiled = true;
-    for (unsigned i = 0; i < 6; ++i) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + i, reinterpret_cast<const uint32_t*>(&fetch)[i]);
+    for (unsigned i = 0; i < 6; ++i) set(static_cast<uint32_t>(Register::SHADER_CONSTANT_FETCH_00_0) + i, reinterpret_cast<const uint32_t*>(&fetch)[i]);
     words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, memory.GetPhysicalAddress(image), kSide, kSide,
         Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), frame + 1});
     if ((write + words.size()) * 4 >= (2u << 20)) {
@@ -324,14 +324,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     for (size_t i = 0; i < words.size(); ++i)
       rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t((write + i) * 4)), words[i]);
     write += uint32_t(words.size());
-    mmio->write(nullptr, mmio->callback_context, 0x7FC80714, write);
+    gpu.WriteRegister(static_cast<uint32_t>(Register::CP_RB_WPTR), write);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
     while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::microseconds(200));
     Require(*marker == frame + 1, "frame probe completion timeout");
     if (depth_alias) {
       for (unsigned y = 0; y < kSide; ++y) for (unsigned x = 0; x < kSide; ++x) {
-        const auto offset = texture_util::GetTiledOffset2D(x, y, kSide, 2);
+        const auto offset = GetTiledOffset2D(x, y, kSide, 2);
         uint32_t pixel;
         std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
         // Depth swaps 40-sample half-tiles. At 4x this is 20 guest pixels;
@@ -344,7 +344,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       }
     }
     if (depth_bias) {
-      const auto offset = texture_util::GetTiledOffset2D(frame < 2 ? 2 : 24, frame < 2 ? 24 : 16, kSide, 2);
+      const auto offset = GetTiledOffset2D(frame < 2 ? 2 : 24, frame < 2 ? 24 : 16, kSide, 2);
       uint32_t pixel;
       std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
       if (pixel != 0xFF4040BF) std::cerr << "depth bias pixel got=" << std::hex << pixel << std::dec << '\n';
@@ -352,7 +352,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     }
     if (minmax_blend) {
       const uint32_t x = frame < 2 ? 2 : 24, y = frame < 2 ? 24 : 16;
-      const auto offset = texture_util::GetTiledOffset2D(x, y, kSide, 2);
+      const auto offset = GetTiledOffset2D(x, y, kSide, 2);
       uint32_t pixel;
       std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
       const uint32_t expected = (frame % 4) >= 2 ? 0x404040BF : 0x40204060;
@@ -360,7 +360,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       Require(pixel == expected, "MIN/MAX source factors and blend reset must match guest pixels");
     }
     if (clear_after_resolve && !sample_counts) {
-      const auto offset = texture_util::GetTiledOffset2D(2, 24, kSide, 2);
+      const auto offset = GetTiledOffset2D(2, 24, kSide, 2);
       uint32_t pixel;
       std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
       Require(frame < 2 ? pixel != 0 : pixel == 0,
@@ -387,13 +387,7 @@ X360N_PROBE_MAIN {
     const uint32_t frames = uint32_t(std::stoul(std::filesystem::path(argv[3]).string()));
     Require(frames >= 1 && frames <= 2000, "frames must be in [1, 2000]");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
-    rex::InitLogging((output / "runtime.log").string().c_str());
-    rex::Runtime runtime(output, output / "user");
-    rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
     const bool xenos = argc >= 5 && ProbeArg(argv[4]) == X360N_PROBE_ARG("--xenos");
-    auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
-    Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
     bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false, color64 = false, depth_alias = false;
     int first_cvar = xenos ? 5 : 4;
@@ -423,24 +417,50 @@ X360N_PROBE_MAIN {
     Require(!depth_bias || (!minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws), "depth fixture uses its own draws");
     Require(!color64 || depth_bias, "64bpp color requires the MSAA depth fixture");
     Require(!depth_alias || (xenos && !depth_bias && !minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws && !clear_after_resolve), "aliased depth fixture requires only --xenos");
+    const auto backend = api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan";
+    const auto selected = xenos ? std::string(backend) : "native-" + std::string(backend);
+    const auto module = xenos ? "rexgpu-xenos-" + std::string(backend) : "rexgpu-native";
+    x360n::GPUProbeApp app(output, module, selected);
+    std::vector<std::string> options{
+        "--app.user_root=" + rex::string::PathToUTF8(output / "user"),
+        "--log.file_name=" + rex::string::PathToUTF8(std::filesystem::absolute(output / "runtime.log"))};
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
-      const auto equals = assignment.find('=');
-      Require(equals != std::string::npos && rex::cvar::SetFlagByName(assignment.substr(0, equals), assignment.substr(equals + 1)),
-              "invalid cvar assignment");
+      Require(assignment.find('=') != std::string::npos, "invalid setting assignment");
+      options.emplace_back("--" + assignment);
     }
-    Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
-    Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
-    struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
+    const auto initialized = app.Init(rex::CLIArgList::Parse(options));
+    if (!initialized) throw std::runtime_error(initialized.error().GetDescription());
+    auto& graphics = static_cast<rex::gpu::IGraphicsDriver&>(app.GetProbeDriver());
+    auto* gpu = graphics.AsXenos();
+    Require(gpu != nullptr, "frame probe requires a Xenos-family driver");
+    const auto surface = graphics.SetSurface({});
+    if (!surface) throw std::runtime_error(surface.error().GetDescription());
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    const auto game = runtime.GetTitlePaths().game_root.Set(output);
+    const auto entry = runtime.GetTitlePaths().entry.Set(std::string{});
+    Require(bool(game) && bool(entry), "frame probe paths unavailable");
+    const auto loaded = runtime.Load();
+    if (!loaded) throw std::runtime_error(loaded.error().GetDescription());
+    auto* memory = dynamic_cast<rex::kernel::GuestAddressSpace*>(&runtime.GetGuestHeap());
+    Require(memory != nullptr, "frame probe requires the canonical address space");
+    const auto attached = graphics.AttachTitle(rex::TitleInfo{}, runtime.GetPhysicalMemory(),
+        runtime.GetPhysicalWriteWatch(), runtime.GetGuestInterrupts());
+    if (!attached) throw std::runtime_error(attached.error().GetDescription());
+    rex::ScopeGuard detach([&] { graphics.DetachTitle(); });
     if (pipeline_cache) {
       Require(xenos && extra_draws >= 32, "--pipeline-cache requires --xenos and at least 32 extra draws");
       const auto start = std::chrono::steady_clock::now();
-      gpu->InitializeShaderStorage(output / "pipeline-cache", 0x0000F00D, true);
+      auto& driver = *static_cast<rex::gpu::XenosGraphicsDriverBase*>(gpu);
+      Require(driver.GetCommandProcessor() != nullptr, "pipeline command processor unavailable");
+      driver.GetCommandProcessor()->InitializeShaderStorage(output / "pipeline-cache", 0x0000F00D, true);
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64, depth_alias);
-    gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    Run(*gpu, *memory, frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64, depth_alias);
+    detach.Reset();
+    runtime.Unload();
+    app.Shutdown();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

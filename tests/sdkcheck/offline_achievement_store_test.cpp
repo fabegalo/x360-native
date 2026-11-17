@@ -9,17 +9,24 @@
 #include <thread>
 #include <vector>
 
-#include <rex/system/offline_achievement_store.h>
+#include <rex/xam/offline_achievement_store.h>
+#include <rex/platform/process.h>
+#include "kernel/kernel_fixture.h"
+#include "xam/xam_state.h"
 #include "offline_achievement_fixture.h"
 using offline_achievement_fixture::Metadata;
 
-using rex::system::OfflineAchievementRecord;
-using rex::system::OfflineAchievementResult;
-using rex::system::OfflineAchievementStore;
-using rex::system::OfflineAchievementTotals;
+using rex::xam::OfflineAchievementRecord;
+using rex::xam::OfflineAchievementResult;
+using rex::xam::OfflineAchievementStore;
+using rex::xam::OfflineAchievementTotals;
 using Result = OfflineAchievementResult;
 
 namespace {
+struct StoreFixture {
+  rex::test::KernelFixture runtime;
+  rex::filesystem::IFileSystemFactory& Factory() { return rex::xam::CurrentTitle().file_system_factory; }
+};
 struct StoreDirectory {
   std::filesystem::path path = std::filesystem::current_path() /
       ("x360n-achievements-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -36,12 +43,12 @@ std::vector<uint8_t> FileBytes(const std::filesystem::path& path) {
 }
 }  // namespace
 
-TEST_CASE("Offline achievements persist per account and title with exact original metadata",
+TEST_CASE_METHOD(StoreFixture, "Offline achievements persist per account and title with exact original metadata",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
   uint64_t timestamp = 0;
   {
-    OfflineAchievementStore store;
+    OfflineAchievementStore store(Factory());
     store.Configure(directory.path);
     REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
     REQUIRE(store.ImportTitle(kTitleB, Metadata(15)) == Result::kSuccess);
@@ -58,6 +65,7 @@ TEST_CASE("Offline achievements persist per account and title with exact origina
     REQUIRE(events.size() == 1);
     CHECK(events[0].info.label == "First"); CHECK(events[0].info.gamerscore == 10);
     timestamp = events[0].unlock_filetime;
+    CHECK(events[0].info.unlocked); CHECK(events[0].info.unlock_time == timestamp);
     CHECK(timestamp > 116444736000000000ULL);
     REQUIRE(store.UnlockBatch(kUserA, kTitleA, std::array{1u}, events) == Result::kSuccess);
     CHECK(events.empty());
@@ -71,12 +79,14 @@ TEST_CASE("Offline achievements persist per account and title with exact origina
   }
   // Destroy all state and reopen without importing metadata again, as the
   // dashboard does when looking up a previously played game after restart.
-  OfflineAchievementStore reopened;
+  OfflineAchievementStore reopened(Factory());
   reopened.Configure(directory.path);
   std::vector<OfflineAchievementRecord> records;
   REQUIRE(reopened.List(kUserA, kTitleA, records) == Result::kSuccess);
   REQUIRE(records.size() == 2);
   CHECK(records[0].unlock_filetime == timestamp); CHECK(records[1].unlock_filetime == 0);
+  CHECK(records[0].info.unlocked); CHECK(records[0].info.unlock_time == timestamp);
+  CHECK_FALSE(records[1].info.unlocked); CHECK(records[1].info.unlock_time == 0);
   CHECK(records[0].info.description == "Completed first");
   CHECK(records[0].info.unachieved_description == "Complete first");
   REQUIRE(reopened.List(kUserB, kTitleA, records) == Result::kSuccess);
@@ -88,10 +98,10 @@ TEST_CASE("Offline achievements persist per account and title with exact origina
   CHECK(totals.gamerscore == 25); CHECK(totals.unlocked_count == 2);
 }
 
-TEST_CASE("Offline achievement batches validate completely and preserve storage on errors",
+TEST_CASE_METHOD(StoreFixture, "Offline achievement batches validate completely and preserve storage on errors",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore store;
+  OfflineAchievementStore store(Factory());
   std::vector<OfflineAchievementRecord> events;
   CHECK(store.UnlockBatch(kUserA, kTitleA, std::array{1u}, events) == Result::kStorageError);
   store.Configure(directory.path);
@@ -119,10 +129,10 @@ TEST_CASE("Offline achievement batches validate completely and preserve storage 
   CHECK(records[1].unlock_filetime == 0);
 }
 
-TEST_CASE("Offline achievements reject corrupt or foreign snapshots without replacing them",
+TEST_CASE_METHOD(StoreFixture, "Offline achievements reject corrupt or foreign snapshots without replacing them",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore store;
+  OfflineAchievementStore store(Factory());
   store.Configure(directory.path);
   REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
   std::vector<OfflineAchievementRecord> events;
@@ -144,10 +154,10 @@ TEST_CASE("Offline achievements reject corrupt or foreign snapshots without repl
   CHECK(store.ImportTitle(kTitleB, invalid) == Result::kCorruptData);
 }
 
-TEST_CASE("Original achievement metadata updates cannot rewrite earned scores",
+TEST_CASE_METHOD(StoreFixture, "Original achievement metadata updates cannot rewrite earned scores",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore store;
+  OfflineAchievementStore store(Factory());
   store.Configure(directory.path);
   REQUIRE(store.ImportTitle(kTitleA, Metadata(10, 1)) == Result::kSuccess);
   REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
@@ -163,12 +173,12 @@ TEST_CASE("Original achievement metadata updates cannot rewrite earned scores",
   REQUIRE(events.size() == 1); CHECK(events[0].info.gamerscore == 10);
 }
 
-TEST_CASE("Achievement ID zero is accepted only when present in the original catalog",
+TEST_CASE_METHOD(StoreFixture, "Achievement ID zero is accepted only when present in the original catalog",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
   std::vector<OfflineAchievementRecord> events, records;
   {
-    OfflineAchievementStore initial;
+    OfflineAchievementStore initial(Factory());
     initial.Configure(directory.path);
     REQUIRE(initial.ImportTitle(kTitleA, Metadata(10, 2, {}, 0)) == Result::kSuccess);
     REQUIRE(initial.ImportTitle(kTitleB, Metadata()) == Result::kSuccess);
@@ -176,7 +186,7 @@ TEST_CASE("Achievement ID zero is accepted only when present in the original cat
     REQUIRE(events.size() == 1); CHECK(events[0].info.id == 0);
     CHECK(initial.UnlockBatch(kUserA, kTitleB, std::array{0u}, events) == Result::kNotFound);
   }
-  OfflineAchievementStore reopened;
+  OfflineAchievementStore reopened(Factory());
   reopened.Configure(directory.path);
   REQUIRE(reopened.List(kUserA, kTitleA, records) == Result::kSuccess);
   REQUIRE(records.size() == 2);
@@ -188,19 +198,19 @@ TEST_CASE("Achievement ID zero is accepted only when present in the original cat
   CHECK(totals.unlocked_count == 1); CHECK(totals.gamerscore == 10);
 }
 
-TEST_CASE("Interrupted achievement staging never replaces the last committed snapshot",
+TEST_CASE_METHOD(StoreFixture, "Interrupted achievement staging never replaces the last committed snapshot",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
   std::vector<OfflineAchievementRecord> events, records;
   {
-    OfflineAchievementStore initial;
+    OfflineAchievementStore initial(Factory());
     initial.Configure(directory.path);
     REQUIRE(initial.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
     REQUIRE(initial.UnlockBatch(kUserA, kTitleA, std::array{1u}, events) == Result::kSuccess);
   }
   const auto staging = directory.path / "offline-achievements-v1/profiles/E000000000000001.dat.tmp";
   { std::ofstream interrupted(staging, std::ios::binary); interrupted << "incomplete new snapshot"; }
-  OfflineAchievementStore reopened;
+  OfflineAchievementStore reopened(Factory());
   reopened.Configure(directory.path);
   REQUIRE(reopened.List(kUserA, kTitleA, records) == Result::kSuccess);
   CHECK(records[0].unlock_filetime != 0); CHECK(records[1].unlock_filetime == 0);
@@ -211,10 +221,10 @@ TEST_CASE("Interrupted achievement staging never replaces the last committed sna
   CHECK(totals.gamerscore == 35); CHECK(totals.unlocked_count == 2);
 }
 
-TEST_CASE("Concurrent duplicate achievement writes publish only one new unlock",
+TEST_CASE_METHOD(StoreFixture, "Concurrent duplicate achievement writes publish only one new unlock",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore store;
+  OfflineAchievementStore store(Factory());
   store.Configure(directory.path);
   REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
   std::atomic<unsigned> errors{0}, event_count{0};
@@ -231,10 +241,10 @@ TEST_CASE("Concurrent duplicate achievement writes publish only one new unlock",
   CHECK(totals.unlocked_count == 1); CHECK(totals.gamerscore == 10);
 }
 
-TEST_CASE("Shared profile root reconfiguration isolates achievement state",
+TEST_CASE_METHOD(StoreFixture, "Shared profile root reconfiguration isolates achievement state",
           "[sdk][offline-achievements]") {
   StoreDirectory first, second;
-  OfflineAchievementStore store;
+  OfflineAchievementStore store(Factory());
   std::vector<OfflineAchievementRecord> events, records;
   store.Configure(first.path);
   REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
@@ -249,10 +259,10 @@ TEST_CASE("Shared profile root reconfiguration isolates achievement state",
   CHECK(records[0].unlock_filetime != 0);
 }
 
-TEST_CASE("Independent achievement stores serialize updates without losing either unlock",
+TEST_CASE_METHOD(StoreFixture, "Independent achievement stores serialize updates without losing either unlock",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore first, second;
+  OfflineAchievementStore first(Factory()), second(Factory());
   first.Configure(directory.path); second.Configure(directory.path);
   REQUIRE(first.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
   std::atomic<bool> start{false};
@@ -272,10 +282,10 @@ TEST_CASE("Independent achievement stores serialize updates without losing eithe
   CHECK(totals.unlocked_count == 2); CHECK(totals.gamerscore == 35);
 }
 
-TEST_CASE("Profile and title achievement counters share a committed snapshot during writes",
+TEST_CASE_METHOD(StoreFixture, "Profile and title achievement counters share a committed snapshot during writes",
           "[sdk][offline-achievements]") {
   StoreDirectory directory;
-  OfflineAchievementStore reader, writer;
+  OfflineAchievementStore reader(Factory()), writer(Factory());
   reader.Configure(directory.path); writer.Configure(directory.path);
   REQUIRE(reader.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
   REQUIRE(reader.ImportTitle(kTitleB, Metadata(40)) == Result::kSuccess);
@@ -319,14 +329,14 @@ TEST_CASE("Profile and title achievement counters share a committed snapshot dur
   CHECK(title.gamerscore == 0); CHECK(title.unlocked_count == 0);
 }
 
-TEST_CASE("Offline achievements survive independent write and read processes",
+TEST_CASE_METHOD(StoreFixture, "Offline achievements survive independent write and read processes",
           "[sdk][offline-achievements][offline-achievement-process]") {
-  const auto* path = std::getenv("X360N_ACHIEVEMENT_TEST_STORE");
-  const auto* phase = std::getenv("X360N_ACHIEVEMENT_TEST_PHASE");
+  const auto path = rex::platform::GetEnvironmentValue("X360N_ACHIEVEMENT_TEST_STORE");
+  const auto phase = rex::platform::GetEnvironmentValue("X360N_ACHIEVEMENT_TEST_PHASE");
   if (!path || !phase) SKIP("Run tests/local/offline-achievements-process.ps1 for independent process evidence");
-  OfflineAchievementStore store;
-  store.Configure(std::filesystem::u8path(path));
-  if (std::string(phase) == "write") {
+  OfflineAchievementStore store(Factory());
+  store.Configure(std::filesystem::u8path(*path));
+  if (*phase == "write") {
     REQUIRE(store.ImportTitle(kTitleA, Metadata()) == Result::kSuccess);
     REQUIRE(store.ImportTitle(kTitleB, Metadata(15)) == Result::kSuccess);
     std::vector<OfflineAchievementRecord> events;
@@ -335,7 +345,7 @@ TEST_CASE("Offline achievements survive independent write and read processes",
     REQUIRE(store.UnlockBatch(kUserA, kTitleB, std::array{1u}, events) == Result::kSuccess);
     REQUIRE(store.UnlockBatch(kUserB, kTitleA, std::array{2u}, events) == Result::kSuccess);
   } else {
-    REQUIRE(std::string(phase) == "read");
+    REQUIRE(*phase == "read");
     std::vector<OfflineAchievementRecord> records;
     REQUIRE(store.List(kUserA, kTitleA, records) == Result::kSuccess);
     REQUIRE(records.size() == 2);

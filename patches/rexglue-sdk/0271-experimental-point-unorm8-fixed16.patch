@@ -1,51 +1,53 @@
---- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
-+++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
-@@ -123,6 +123,8 @@
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.h b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.h
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+@@ -51,6 +51,7 @@
+   bool use_switch = true;
+   bool fuzzy_alpha_epsilon = false;
+   bool scaled_texture_offsets = true;
++  bool unorm8_fixed16 = true;
+ };
+ 
+ class DXBCShaderTranslator : public ShaderTranslator {
+@@ -85,6 +86,8 @@
      // and surviving sample coverage to a host render target (opaque only).
-     static constexpr uint64_t kNativeHardwareColor = uint64_t(1) << 59;
-     static constexpr uint64_t kNativeStripedSampleCounts = uint64_t(1) << 58;
+     static constexpr u64 kNativeHardwareColor = static_cast<u64>(1) << 59;
+     static constexpr u64 kNativeStripedSampleCounts = static_cast<u64>(1) << 58;
 +    // Experimental texture normalization; separate persistent shader variant.
-+    static constexpr uint64_t kUnorm8Fixed16 = uint64_t(1) << 57;
-     static constexpr uint32_t kNativeSampleCountBuckets = 256;
++    static constexpr u64 kUnorm8Fixed16 = static_cast<u64>(1) << 57;
+     static constexpr u32 kNativeSampleCountBuckets = 256;
      // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
-     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
---- a/src/graphics/pipeline/shader/dxbc_translator.cpp
-+++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
-@@ -27,6 +27,8 @@
- REXCVAR_DEFINE_BOOL(dxbc_switch, true, "GPU/Shader", "Use switch statements in DXBC");
- 
- REXCVAR_DEFINE_BOOL(dxbc_source_map, false, "GPU/Shader", "Generate source maps for DXBC");
-+REXCVAR_DEFINE_BOOL(dxbc_unorm8_fixed16, true, "GPU/Shader",
-+                    "Experimental upward fixed16 normalization for explicit point UNORM8 fetches");
- 
- namespace rex::graphics {
- using namespace ucode;
-@@ -104,6 +106,8 @@
+     static constexpr u64 kInterpolatorNoPerspective = static_cast<u64>(1) << 62;
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
+@@ -84,6 +84,8 @@
        dynamic_addressable_register_count;
    shader_modification.vertex.host_vertex_shader_type = host_vertex_shader_type;
    shader_modification.vertex.interpolator_mask = (UINT32_C(1) << xenos::kMaxInterpolators) - 1;
-+  if (REXCVAR_GET(dxbc_unorm8_fixed16))
++  if (options_.unorm8_fixed16)
 +    shader_modification.value |= Modification::kUnorm8Fixed16;
    return shader_modification.value;
  }
  
-@@ -113,6 +117,8 @@
+@@ -93,6 +95,8 @@
    shader_modification.pixel.dynamic_addressable_register_count = dynamic_addressable_register_count;
    shader_modification.pixel.interpolator_mask = (UINT32_C(1) << xenos::kMaxInterpolators) - 1;
    shader_modification.pixel.depth_stencil_mode = Modification::DepthStencilMode::kNoModifiers;
-+  if (REXCVAR_GET(dxbc_unorm8_fixed16))
++  if (options_.unorm8_fixed16)
 +    shader_modification.value |= Modification::kUnorm8Fixed16;
    return shader_modification.value;
  }
  
---- a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
-+++ b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
-@@ -2023,6 +2023,30 @@
-     // sampler filtering).
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
+@@ -1670,6 +1670,30 @@
+     // Gamma is applied after filtering as host sampler filtering is outside translator control.
      if (instr.opcode == FetchOpcode::kTextureFetch) {
-       assert_true(signs_temp != UINT32_MAX);
-+      uint32_t unorm8_temp = UINT32_MAX;
-+      if ((GetDxbcShaderModification().value & Modification::kUnorm8Fixed16) &&
+       REX_ASSERT(signs_temp != UINT32_MAX);
++      u32 unorm8_temp = UINT32_MAX;
++      if ((GetDXBCShaderModification().value & Modification::kUnorm8Fixed16) &&
 +          instr.attributes.mag_filter == xenos::TextureFilter::kPoint &&
 +          instr.attributes.min_filter == xenos::TextureFilter::kPoint &&
 +          instr.attributes.mip_filter == xenos::TextureFilter::kPoint) {
@@ -54,9 +56,9 @@
 +                 RequestTextureFetchConstantWord(tfetch_index, 1), dxbc::Src::LU(63));
 +        a_.OpIEq(dxbc::Dest::R(unorm8_temp, 0b0111),
 +                 dxbc::Src::R(unorm8_temp, dxbc::Src::kXXXX),
-+                 dxbc::Src::LU(uint32_t(xenos::TextureFormat::k_8),
-+                               uint32_t(xenos::TextureFormat::k_8_8),
-+                               uint32_t(xenos::TextureFormat::k_8_8_8_8), 0));
++                 dxbc::Src::LU(static_cast<u32>(xenos::TextureFormat::k_8),
++                               static_cast<u32>(xenos::TextureFormat::k_8_8),
++                               static_cast<u32>(xenos::TextureFormat::k_8_8_8_8), 0));
 +        a_.OpOr(dxbc::Dest::R(unorm8_temp, 0b0001),
 +                dxbc::Src::R(unorm8_temp).Select(0), dxbc::Src::R(unorm8_temp).Select(1));
 +        a_.OpOr(dxbc::Dest::R(unorm8_temp, 0b0001),
@@ -68,15 +70,15 @@
 +        a_.OpAnd(dxbc::Dest::R(unorm8_temp, 0b0001),
 +                 dxbc::Src::R(unorm8_temp).Select(0), dxbc::Src::R(unorm8_temp).Select(1));
 +      }
-       for (uint32_t i = 0; i < 4; ++i) {
+       for (u32 i = 0; i < 4; ++i) {
          if (!(used_result_nonzero_components & (1 << i))) {
            continue;
-@@ -2030,6 +2054,16 @@
+@@ -1677,6 +1701,16 @@
          dxbc::Dest component_dest(dxbc::Dest::R(system_temp_result_, 1 << i));
          dxbc::Src component_src(dxbc::Src::R(system_temp_result_).Select(i));
          a_.OpSwitch(dxbc::Src::R(signs_temp).Select(i));
 +        if (unorm8_temp != UINT32_MAX) {
-+          a_.OpCase(dxbc::Src::LU(uint32_t(xenos::TextureSign::kUnsigned)));
++          a_.OpCase(dxbc::Src::LU(static_cast<u32>(xenos::TextureSign::kUnsigned)));
 +          a_.OpIf(true, dxbc::Src::R(unorm8_temp).Select(0));
 +          // Hypothesis under test, not a claim of measured console precision.
 +          a_.OpMul(component_dest, component_src, dxbc::Src::LF(-65536.0f));
@@ -85,10 +87,10 @@
 +          a_.OpEndIf();
 +          a_.OpBreak();
 +        }
-         a_.OpCase(dxbc::Src::LU(uint32_t(xenos::TextureSign::kUnsignedBiased)));
+         a_.OpCase(dxbc::Src::LU(std::to_underlying(xenos::TextureSign::kUnsignedBiased)));
          a_.OpMAd(component_dest, component_src, dxbc::Src::LF(2.0f), dxbc::Src::LF(-1.0f));
          a_.OpBreak();
-@@ -2043,6 +2077,7 @@
+@@ -1688,6 +1722,7 @@
          a_.OpBreak();
          a_.OpEndSwitch();
        }
@@ -96,3 +98,38 @@
      }
      if (signs_temp != UINT32_MAX) {
        PopSystemTemp();
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_settings.h b/src/gpu/xenos/host/d3d12/d3d12_settings.h
+--- a/src/gpu/xenos/host/d3d12/d3d12_settings.h
++++ b/src/gpu/xenos/host/d3d12/d3d12_settings.h
+@@ -45,6 +45,8 @@
+               "graphics cards");
+   REX_SETTING(bool, dxbc_switch, true, "Use switch statements in DXBC");
+   REX_SETTING(bool, dxbc_source_map, false, "Generate source maps for DXBC");
++  REX_SETTING(bool, dxbc_unorm8_fixed16, true,
++              "Experimental upward fixed16 normalization for explicit point UNORM8 fetches");
+   REX_SETTING(bool, native_stencil_value_output_intel, false,
+               "Native stencil value output for Intel");
+   REX_SETTING(std::string, render_target_path, "", "Render target implementation path",
+diff --git a/src/gpu/xenos/d3d12/pipeline_cache.cpp b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+--- a/src/gpu/xenos/d3d12/pipeline_cache.cpp
++++ b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+@@ -77,6 +77,7 @@
+   const D3D12Settings& settings = command_processor_.GetD3D12Settings();
+   DXBCOptions options;
+   options.source_map = settings.dxbc_source_map.Get();
++  options.unorm8_fixed16 = settings.dxbc_unorm8_fixed16.Get();
+   options.use_switch = settings.dxbc_switch.Get();
+   options.fuzzy_alpha_epsilon = settings.use_fuzzy_alpha_epsilon.Get();
+   options.scaled_texture_offsets = command_processor_.GetXenosSettings().draw_resolution_scaled_texture_offsets.Get();
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -139,6 +139,8 @@
+     {"vulkan.prefer_fill_mode_non_solid", "gpu.vulkan.prefer_fill_mode_non_solid"},
+     {"xenos.vulkan_readback_resolve", "gpu.vulkan.readback_resolve"},
+     {"xenos.vulkan_readback_memexport", "gpu.vulkan.readback_memexport"},
++    {"dxbc_unorm8_fixed16", "gpu.d3d12.dxbc_unorm8_fixed16"},
++    {"xenos.dxbc_unorm8_fixed16", "gpu.d3d12.dxbc_unorm8_fixed16"},
+     {"vulkan_depth_bias_force_unorm", "gpu.vulkan.depth_bias_force_unorm"},
+     {"vulkan.vulkan_depth_bias_force_unorm", "gpu.vulkan.depth_bias_force_unorm"},
+     {"xenos.vulkan_async_skip_incomplete_frames", "gpu.vulkan.async_skip_incomplete_frames"},

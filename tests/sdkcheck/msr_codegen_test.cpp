@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/filesystem/xex.h>
+#include <rex/module.h>
 #include "synthetic_xex.h"
 #include <fstream>
 
@@ -24,7 +27,13 @@ TEST_CASE("MSR interrupt writes produce a compilable native fixture",
   std::ofstream(work.dir / "test.toml") <<
       "project_name='msr'\nfile_path='test.xex'\nout_directory_path='out'\n"
       "[functions]\n0x82010020={size=12}\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
+  if (auto* files = REX_INTERFACE(rex::filesystem::IFileSystemFactory)) {
+    const auto parsed = files->ParseXEX(bytes);
+    INFO((parsed ? std::string{} : parsed.error().GetDescription()));
+    REQUIRE(parsed);
+  }
+  INFO((pipeline ? std::string{} : pipeline.error().message));
   REQUIRE(pipeline);
   REQUIRE(pipeline->RunAnalyze());
   REQUIRE(pipeline->RunWrite());

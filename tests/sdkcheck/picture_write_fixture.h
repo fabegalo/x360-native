@@ -2,7 +2,21 @@
 // Synthetic solid-color PNG fixtures generated with stdlib zlib/CRC32.
 // No original dashboard/game image is included in these tests.
 #include <vector>
+#include <filesystem>
+#include <string>
 namespace picture_write_fixture {
+inline std::string PictureStageDescription(const std::filesystem::path& package) {
+  const auto stage = package / ".x360n-picture-update";
+  std::error_code error;
+  std::string result = "stage exists=" + std::to_string(std::filesystem::exists(stage, error));
+  result += "; status=" + std::to_string(error.value());
+  std::filesystem::directory_iterator entry(stage, error), end;
+  for (unsigned count = 0; !error && entry != end && count < 16; ++count, entry.increment(error))
+    result += "; entry=" + entry->path().filename().string();
+  return result + "; enumeration=" + std::to_string(error.value());
+}
+
+
 // Synthetic, valid PNG format fixtures for unit tests only; no original assets.
 inline const std::vector<uint8_t> A64{137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,64,0,0,0,64,8,6,0,0,0,170,105,113,222,0,0,0,155,73,68,65,84,120,156,237,208,49,13,0,32,0,192,48,44,96,1,11,248,215,6,50,74,194,142,253,205,198,92,251,252,220,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,64,3,116,13,208,0,93,3,52,64,215,0,13,208,53,96,62,128,144,3,46,105,51,81,75,75,147,99,7,0,0,0,0,73,69,78,68,174,66,96,130};
 inline const std::vector<uint8_t> A32{137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,32,0,0,0,32,8,6,0,0,0,115,122,122,244,0,0,0,49,73,68,65,84,120,156,237,206,33,1,0,0,8,3,48,42,188,2,21,232,159,13,98,96,38,230,87,233,217,79,37,32,32,32,32,32,32,32,32,32,32,32,32,32,32,144,231,192,1,60,138,148,76,160,37,158,30,0,0,0,0,73,69,78,68,174,66,96,130};

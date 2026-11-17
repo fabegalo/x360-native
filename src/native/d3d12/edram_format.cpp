@@ -10,11 +10,12 @@
  */
 
 // Only the pure format math is reused; no render-target cache or executor.
-#include <rex/graphics/pipeline/render_target/cache.h>
+#include "../commands/draw_types.h"
 #include <cmath>
 #include <stdexcept>
-namespace rex::graphics {
-void RenderTargetCache::GetPSIColorFormatInfo(xenos::ColorRenderTargetFormat format,
+namespace x360n::native {
+namespace xenos = rex::xenos;
+void GetNativeColorClampsAndKeepMasks(xenos::ColorRenderTargetFormat format,
                                               uint32_t write_mask, float& clamp_rgb_low,
                                               float& clamp_alpha_low, float& clamp_rgb_high,
                                               float& clamp_alpha_high, uint32_t& keep_mask_low,

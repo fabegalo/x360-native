@@ -24,18 +24,22 @@ TEST_CASE("fullscreen preference persists independently and old settings remain 
   std::filesystem::remove_all(root);
 }
 // The default session API of this host: D3D12 on Windows, Vulkan elsewhere.
-const std::string kDefaultBackend = RendererSettings{}.api == GraphicsApi::Vulkan ? "--gpu_backend=vulkan" : "--gpu_backend=d3d12";
+const std::string kDefaultBackend = RendererSettings{}.api == GraphicsApi::Vulkan ? "vulkan" : "d3d12";
 TEST_CASE("global renderer overrides manifests and requires development access", "[renderer]") {
   const std::vector<std::string> args{"--gpu_plugin=xenos", "--mnk_mode=true", "--gpu_plugin", "other", "--gpu-plugin=native"};
-  CHECK(SessionRendererArguments(args, {}) == std::vector<std::string>{"--mnk_mode=true", "--gpu_plugin=xenos", kDefaultBackend});
+  CHECK(SessionRendererArguments(args, {}) == std::vector<std::string>{"--mnk_mode=true", "--gpu.driver=" + kDefaultBackend});
   CHECK(SessionRendererArguments(args, {Renderer::Native, true}) == std::vector<std::string>{
-      "--mnk_mode=true", "--gpu_plugin=native", kDefaultBackend, "--native_enhanced=false",
+      "--mnk_mode=true", "--gpu.driver=native-" + kDefaultBackend, "--native_enhanced=false",
       "--native_framerate=30", "--native_present_rate=0", "--native_scale_x=1", "--native_scale_y=1",
       "--native_anisotropy=0", "--present_effect=bilinear", "--swap_post_effect=none", "--native_ultrawide=false"});
   CHECK_THROWS(SessionRendererArguments(args, {Renderer::Native, false}));
   CHECK_THROWS(SessionRendererArguments({"--gpu_plugin"}, {}));
+  CHECK_THROWS(SessionRendererArguments({"--gpu.driver"}, {}));
+  CHECK_THROWS(SessionRendererArguments({"--gpu.driver", "--foo"}, {}));
+  CHECK(SessionRendererArguments({"--gpu.driver=native-vulkan", "--gpu.driver", "none"}, {}) ==
+        std::vector<std::string>{"--gpu.driver=" + kDefaultBackend});
   CHECK_THROWS(SessionRendererArguments({"--"}, {}));
-  CHECK(SessionRendererArguments({"=value"}, {}) == std::vector<std::string>{"=value", "--gpu_plugin=xenos", kDefaultBackend});
+  CHECK(SessionRendererArguments({"=value"}, {}) == std::vector<std::string>{"=value", "--gpu.driver=" + kDefaultBackend});
 }
 TEST_CASE("global renderer persists and session snapshot does not change", "[renderer]") {
   const auto root = PathFromUtf8(X360N_SOURCE_ROOT) / ".local/tmp" / UniqueTempPath("renderer").filename();
@@ -46,7 +50,7 @@ TEST_CASE("global renderer persists and session snapshot does not change", "[ren
   CHECK(session.renderer == Renderer::Native); CHECK(session.experimental);
   SaveRendererSettings(paths, {});
   CHECK(LoadRendererSettings(paths).renderer == Renderer::Xenos);
-  CHECK(SessionRendererArguments({}, session).at(0) == "--gpu_plugin=native");
+  CHECK(SessionRendererArguments({}, session).at(0) == "--gpu.driver=native-" + kDefaultBackend);
   CHECK_THROWS(CheckSessionRenderer(root / "game.exe", session));
 #ifdef _WIN32
   CHECK_NOTHROW(CheckSessionRenderer(root / "game.exe", {}));
@@ -68,7 +72,7 @@ TEST_CASE("graphics API migrates old files and strips every conflicting manifest
   CHECK(session.api == GraphicsApi::Vulkan);
   CHECK(LoadRendererSettings(paths).api == RendererSettings{}.api);
   const std::vector<std::string> args{"--gpu_backend", "any", "--gpu-backend=d3d12", "--gpu_plugin=native", "--mnk_mode=true"};
-  CHECK(SessionRendererArguments(args, session) == std::vector<std::string>{"--mnk_mode=true", "--gpu_plugin=xenos", "--gpu_backend=vulkan"});
+  CHECK(SessionRendererArguments(args, session) == std::vector<std::string>{"--mnk_mode=true", "--gpu.driver=vulkan"});
   CHECK_THROWS(SessionRendererArguments({"--gpu-backend"}, session));
   CHECK_THROWS(SessionRendererArguments({"--gpu_backend", "--foo"}, session));
   CHECK_THROWS(CheckSessionRenderer(root / "game.exe", session)); // Missing preflight.
@@ -107,6 +111,13 @@ TEST_CASE("Native enhancements persist and cannot leak from manifest into origin
   CHECK(std::count(args.begin(), args.end(), "--swap_post_effect=fxaa_extreme") == 1);
   CHECK(SessionRendererArguments(manifest, {Renderer::Native, true}) == SessionRendererArguments({}, {Renderer::Native, true}));
   CHECK(SessionRendererArguments({"--native-framerate=240", "--native-ultrawide=true"}, {}) == SessionRendererArguments({}, {}));
+  const std::vector<std::string> canonical{"--gpu.native.enhanced=true", "--gpu.native.framerate", "240",
+      "--gpu.native.scale-x=4", "--gpu.native.ultrawide=true", "--gpu.xenos.present_effect=cas",
+      "--gpu.xenos.swap_post_effect=fxaa", "--gpu.xenos.present_cas_additional_sharpness=1"};
+  CHECK(SessionRendererArguments(canonical, loaded) == SessionRendererArguments({}, loaded));
+  CHECK(SessionRendererArguments({"--gpu.native.framerate=240"}, {}) == SessionRendererArguments({}, {}));
+  CHECK_THROWS(SessionRendererArguments({"--gpu.native.framerate"}, loaded));
+  CHECK_THROWS(SessionRendererArguments({"--gpu.xenos.present_effect", "--gpu.driver=vulkan"}, loaded));
   s.framerate = 241; CHECK_THROWS(SaveRendererSettings(paths, s));
   s.framerate = 144; s.anisotropy = 3; CHECK_THROWS(SaveRendererSettings(paths, s));
   std::filesystem::remove_all(root);

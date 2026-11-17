@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 #include "sha256.h"
 #include "paths.h"
@@ -111,7 +111,7 @@ TEST_CASE("inventory of .local/inputs classifies every XEX", "[local]") {
     }
   }
   std::string summary;
-  for (const auto& [k, v] : counts) summary += fmt::format("{} {}; ", v, k);
+  for (const auto& [k, v] : counts) summary += std::format("{} {}; ", v, k);
   report << "# " << xexes.size() << " files: " << summary << '\n';
   WARN("inventory: " << xexes.size() << " .xex files: " << summary << "report "
                      << PathUtf8(report_dir / "inventory.tsv"));
@@ -156,7 +156,7 @@ TEST_CASE("integration targets are the expected XEX2 files", "[local]") {
       CHECK_FALSE(id.has_execution_info);
     } else {
       REQUIRE(id.has_execution_info);
-      CHECK(fmt::format("{:08X}", id.title_id) == title_id);
+      CHECK(std::format("{:08X}", id.title_id) == title_id);
       CHECK(id.version.ToString() == version);
     }
   }

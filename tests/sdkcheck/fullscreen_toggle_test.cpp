@@ -1,13 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <windows.h>
 #include <chrono>
-#include <rex/ui/keybinds.h>
+#include <rex/input_keys.h>
 #include <rex/ui/ui_event.h>
 #include "session_window.h"
 
 namespace {
-bool Key(rex::ui::VirtualKey key, bool alt, bool repeat = false) {
-  rex::ui::KeyEvent e(nullptr, key, 1, repeat, false, false, alt, false);
+bool Key(rex::VirtualKey key, bool alt, bool repeat = false) {
+  rex::InputEvent e{.type = rex::InputEvent::Type::kKeyDown, .key = key,
+      .modifiers = alt ? rex::KeyModifiers::kAlt : rex::KeyModifiers{}, .repeat = repeat};
   return rex::ui::IsFullscreenToggleKey(e);
 }
 bool Popup(HWND window) { return (GetWindowLongPtrW(window, GWL_STYLE) & WS_POPUP) != 0; }
@@ -19,7 +20,7 @@ bool WaitPopup(HWND window, bool expected) {
 }
 
 TEST_CASE("Alt+Enter and F11 are the fullscreen toggle keys", "[sdk][fullscreen-toggle]") {
-  using rex::ui::VirtualKey;
+  using rex::VirtualKey;
   CHECK(Key(VirtualKey::kReturn, true));
   CHECK(Key(VirtualKey::kF11, false));
   CHECK(Key(VirtualKey::kReturn, true, true));  // repeats are consumed too

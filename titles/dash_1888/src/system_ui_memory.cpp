@@ -1,30 +1,41 @@
 #include <algorithm>
 #include <cstring>
-#include <rex/cvar.h>
-#include <rex/logging.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
+#include <rex/settings_registry.h>
+#include <rex/setting.h>
+#include <rex/logging/log_category.h>
+#include <rex/ppc/hook.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/memory.h>
 
-// Defined in this XAM DLL, which owns the hooked keystroke boundary.
-REXCVAR_DEFINE_BOOL(dash1888_ui_input_trace, false, "Diagnostics",
-                   "Log each keystroke delivered to the original system UI (opt-in)");
+namespace {
+bool TraceInput() {
+  const auto setting = REX_SETTINGS().Find("dash1888.ui_input_trace");
+  return setting && (*setting)->GetText() == "true";
+}
+auto* Memory() {
+  auto* thread = rex::kernel::KernelThread::GetCallingThread();
+  REX_CHECK(thread, "1888 allocator requires a guest calling thread");
+  return thread->GetAddressSpace();
+}
+}
 
 // Original 1888 private allocation boundaries. The full XAM heap/task manager
 // is not started; virtual allocations share the SDK's guest system heap.
 // Physical command memory retains the original allocator and protection flags.
 extern "C" REX_FUNC(__imp__sub_818E8870);
-extern "C" REX_FUNC(sub_818E8870) {
+REX_HOOK_RAW(sub_818E8870) {
   if (ctx.r4.u32 & 0x80000000u) __imp__sub_818E8870(ctx, base);
-  else ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32), 0x20);
+  else ctx.r3.u64 = Memory()->SystemHeapAlloc(std::max(1u, ctx.r3.u32), 0x20);
 }
-extern "C" REX_FUNC(sub_818E8900) {
-  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32), 0x20);
+REX_HOOK_RAW(sub_818E8900) {
+  ctx.r3.u64 = Memory()->SystemHeapAlloc(std::max(1u, ctx.r3.u32), 0x20);
 }
-extern "C" REX_FUNC(sub_818E8940) { sub_818E8900(ctx, base); }
+REX_HOOK_RAW(sub_818E8940) { sub_818E8900(ctx, base); }
 extern "C" REX_FUNC(__imp__sub_818E8980);
-extern "C" REX_FUNC(sub_818E8980) {
+REX_HOOK_RAW(sub_818E8980) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_818E8980(ctx, base);
-  else if (ctx.r3.u32) REX_KERNEL_MEMORY()->SystemHeapFree(ctx.r3.u32);
+  else if (ctx.r3.u32) Memory()->SystemHeapFree(ctx.r3.u32);
 }
 extern "C" REX_FUNC(__imp__XamAlloc);
 extern "C" REX_FUNC(__imp__XamAllocEx);
@@ -32,17 +43,17 @@ extern "C" REX_FUNC(__imp__XamFree);
 extern "C" REX_FUNC(__imp__XamAllocSize);
 extern "C" REX_FUNC(__imp__sub_818E8608);
 extern "C" REX_FUNC(__imp__sub_818E8680);
-extern "C" REX_FUNC(sub_818E8580) { __imp__XamAlloc(ctx, base); }
-extern "C" REX_FUNC(sub_818E8608) {
+REX_HOOK_RAW(sub_818E8580) { __imp__XamAlloc(ctx, base); }
+REX_HOOK_RAW(sub_818E8608) {
   if (ctx.r4.u32 & 0x40000000u) __imp__sub_818E8608(ctx, base);
   else __imp__XamAllocEx(ctx, base);
 }
-extern "C" REX_FUNC(sub_818E8680) {
+REX_HOOK_RAW(sub_818E8680) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_818E8680(ctx, base);
   else __imp__XamFree(ctx, base);
 }
 extern "C" REX_FUNC(__imp__sub_818E8770);
-extern "C" REX_FUNC(sub_818E8770) {
+REX_HOOK_RAW(sub_818E8770) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_818E8770(ctx, base);
   else __imp__XamAllocSize(ctx, base);
 }
@@ -51,7 +62,7 @@ extern "C" REX_FUNC(sub_818E8770) {
 // as imported calls. Addresses are from this exact XAM's export table.
 #define SERVICE(address, name) \
   extern "C" REX_FUNC(__imp__##name); \
-  extern "C" REX_FUNC(sub_##address) { __imp__##name(ctx, base); }
+  REX_HOOK_RAW(sub_##address) { __imp__##name(ctx, base); }
 SERVICE(818E2498, XamUserGetXUID)
 SERVICE(818E2538, XamUserGetIndexFromXUID)
 SERVICE(818E25C8, XamUserGetGamerTag)
@@ -80,7 +91,7 @@ SERVICE(818D4CF8, XNotifyBroadcast)
 
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
 extern "C" REX_FUNC(__imp__sub_818ECC48);
-extern "C" REX_FUNC(sub_818ECC48) {
+REX_HOOK_RAW(sub_818ECC48) {
   // 818D00C8 packs the system queue's user selector into flags, not r3.
   // Keep the original path for other queues, and the SDK latch for HUD keys.
   const uint32_t flags = ctx.r4.u32, output = ctx.r5.u32, caller = uint32_t(ctx.lr);
@@ -88,7 +99,7 @@ extern "C" REX_FUNC(sub_818ECC48) {
     ctx.r3.u64 = flags & 0xFF;
     __imp__XamInputGetKeystrokeHudEx(ctx, base);
   } else __imp__sub_818ECC48(ctx, base);
-  if (REXCVAR_GET(dash1888_ui_input_trace) && !ctx.r3.u32 && output) {
+  if (TraceInput() && !ctx.r3.u32 && output) {
     const auto* stroke = base + output;
     REXLOG_INFO("1888 diagnostic: UI keystroke vk={:04X} flags={:04X} user={} queue={:08X} lr={:08X}",
                 rex::memory::load_and_swap<uint16_t>(stroke),

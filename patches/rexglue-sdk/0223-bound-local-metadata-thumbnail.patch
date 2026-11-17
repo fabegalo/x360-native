@@ -1,0 +1,45 @@
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -1108,6 +1108,15 @@
+     if (!stored) return kernel::ToXResult(stored);
+     if (stored->xuid != data.xuid || stored->title_id != data.title_id ||
+         stored->content_type != data.content_type || stored->GetFileName() != data.GetFileName()) return 13;
++    const auto thumbnail_path = ResolvePackagePath(data.xuid, data) / detail::kThumbnailFileName;
++    std::error_code thumbnail_error;
++    const bool has_thumbnail = std::filesystem::exists(thumbnail_path, thumbnail_error);
++    if (thumbnail_error) return kernel::X_ERROR_ACCESS_DENIED;
++    if (has_thumbnail) {
++      const auto size = std::filesystem::file_size(thumbnail_path, thumbnail_error);
++      if (thumbnail_error) return kernel::X_ERROR_ACCESS_DENIED;
++      if (size > filesystem::XContentMetadata::kThumbLengthV2) return 13;
++    }
+     std::array<u8, 36> attributes{};
+     if (const auto error = GetContentAttributes(data, attributes.data())) return error;
+     filesystem::XContentMetadata metadata{};
+@@ -1120,13 +1129,18 @@
+     metadata.flags.as_byte = 0x40;
+     for (u32 language = 1; language <= filesystem::XContentMetadata::kNumLanguagesV2; ++language)
+       metadata.SetDisplayName(static_cast<kernel::XLanguage>(language), stored->GetDisplayName());
+-    auto thumbnail = GetContentThumbnail(data.xuid, data);
+-    if (!thumbnail && kernel::ToXResult(thumbnail) != kernel::X_ERROR_FILE_NOT_FOUND)
+-      return kernel::ToXResult(thumbnail);
+-    if (thumbnail) {
+-      if (thumbnail->size() > filesystem::XContentMetadata::kThumbLengthV2) return 13;
+-      metadata.thumbnail_size = static_cast<u32>(thumbnail->size());
+-      if (!thumbnail->empty()) std::memcpy(metadata.thumbnail, thumbnail->data(), thumbnail->size());
++    if (has_thumbnail) {
++      // Bound allocation and reads even if the file grows after the size snapshot.
++      std::vector<u8> thumbnail(filesystem::XContentMetadata::kThumbLengthV2 + 1);
++      auto* file = platform::OpenFile(thumbnail_path, "rb");
++      if (!file) return kernel::X_ERROR_ACCESS_DENIED;
++      const auto count = std::fread(thumbnail.data(), 1, thumbnail.size(), file);
++      const bool read_error = std::ferror(file) != 0;
++      const bool closed = std::fclose(file) == 0;
++      if (read_error || !closed) return kernel::X_ERROR_ACCESS_DENIED;
++      if (count > filesystem::XContentMetadata::kThumbLengthV2) return 13;
++      metadata.thumbnail_size = static_cast<u32>(count);
++      if (count) std::memcpy(metadata.thumbnail, thumbnail.data(), count);
+     }
+     std::memcpy(output, &metadata, sizeof(metadata));
+     return kernel::X_ERROR_SUCCESS;

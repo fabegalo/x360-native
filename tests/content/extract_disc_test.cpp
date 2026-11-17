@@ -148,7 +148,7 @@ TEST_CASE("extract-disc refuses file ranges outside the image", "[content]") {
   CHECK_FALSE(fs::exists(s.dir / "out" / "ok.bin"));
   CHECK_FALSE(fs::exists(s.dir / "out" / "far.bin"));
   CHECK_FALSE(fs::exists(s.dir / "out" / "long.bin"));
-  CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+  CHECK(s.Err().find("GDFX reader failed") != std::string::npos);
   CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
 }
 
@@ -205,7 +205,7 @@ TEST_CASE("extract-disc rejects malformed GDFX without crashing or looping", "[c
   REQUIRE(result.launched);
   CHECK_FALSE(result.timed_out);
   CHECK(result.exit_code == 1);
-  CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+  CHECK(s.Err().find("GDFX reader failed") != std::string::npos);
   CHECK_FALSE(fs::exists(s.dir / "out"));
   CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
 }
@@ -253,7 +253,7 @@ TEST_CASE("extract-disc bounds deep directories but accepts long sibling chains"
     }
     auto result = s.Extract(s.Write(img), s.dir / "out");
     CHECK(result.exit_code == 1);
-    CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+    CHECK(s.Err().find("GDFX reader failed") != std::string::npos);
     CHECK_FALSE(fs::exists(s.dir / "out"));
   }
   SECTION("300 siblings") {
@@ -320,6 +320,6 @@ TEST_CASE("extract-disc refuses an existing destination and a non-GDFX file", "[
   r = s.Extract(blank, s.dir / "out");
   REQUIRE(r.launched);
   CHECK(r.exit_code == 1);
-  CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+  CHECK(s.Err().find("GDFX reader failed") != std::string::npos);
   CHECK_FALSE(fs::exists(s.dir / "out"));
 }

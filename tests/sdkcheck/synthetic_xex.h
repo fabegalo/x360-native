@@ -8,7 +8,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <vector>
+
+namespace rex::codegen { class ToolApp; }
 
 namespace x360n::test {
 
@@ -47,7 +50,8 @@ enum class Entry {
 
 // Builds the XEX and fills `placed` with the address of every slot and thunk.
 std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::vector<Placed>* placed,
-                              uint16_t call_ordinal = 0, Entry entry = Entry::kFrameCall);
+                              uint16_t call_ordinal = 0, Entry entry = Entry::kFrameCall,
+                              uint32_t image_base = kXexBase);
 
 // A fresh directory under %TEMP%/<group>/<name>, removed again on destruction.
 struct Workdir {
@@ -57,6 +61,10 @@ struct Workdir {
   Workdir(const Workdir&) = delete;
   Workdir& operator=(const Workdir&) = delete;
   void write(const char* file, const std::vector<uint8_t>& bytes) const;
+  rex::codegen::ToolApp& GetTools();
+
+ private:
+  std::unique_ptr<rex::codegen::ToolApp> tools_;
 };
 
 }  // namespace x360n::test

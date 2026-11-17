@@ -1,0 +1,320 @@
+diff --git a/include/rex/chrono/frame_timing.h b/include/rex/chrono/frame_timing.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/chrono/frame_timing.h
+@@ -0,0 +1,35 @@
++#pragma once
++#include <cstdint>
++#include <rex/platform.h>
++#include <rex/setting.h>
++#include <rex/types.h>
++namespace rex::chrono {
++class NativeFrameSettings final : public SettingOwner {
++ public:
++  NativeFrameSettings() : SettingOwner("gpu.native") {}
++  REX_SETTING(bool, enhanced, false, "Enable Native enhancements", kUntilLaunch);
++  REX_SETTING(u32, framerate, 30, "Simulation target for an identity-checked title profile", Range{30, 240}, kUntilLaunch);
++  REX_SETTING(u32, present_rate, 0, "Presentation limit independent of guest simulation and vblank; 0 uncapped", Range{0, 480}, kUntilLaunch);
++  REX_SETTING(bool, ultrawide, false, "Use aspect declared by verified camera and UI producers", kUntilLaunch);
++};
++REX_API NativeFrameSettings& GetNativeFrameSettings();
++
++// One runtime-owned timeline across the title and GPU plugin. No clock scaling,
++// frame generation or synthetic source-frame counts are performed here.
++class REX_API FrameTiming {
++ public:
++  struct Source { uint64_t sequence, tick, wake; double interval; };
++  static bool Enhanced();
++  static void Reset();
++  static void ActivateNative();
++  // Only an identity-checked title host may select a simulation/vblank cadence.
++  // 0 restores the guest video mode. This does not change VdQueryVideoMode.
++  static void SetGuestVblankRate(uint32_t hz);
++  static uint32_t GuestVblankRate();
++  static void PacePresentation();
++  static void NotifySourceFrame();
++  static Source ReadSource();
++  static void WaitSource(Source previous, uint32_t milliseconds);
++  static void WakeSourceWaiters();
++};
++}
+diff --git a/include/rex/chrono/frame_layout.h b/include/rex/chrono/frame_layout.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/chrono/frame_layout.h
+@@ -0,0 +1,14 @@
++#pragma once
++#include <cstdint>
++#include <rex/platform.h>
++namespace rex::chrono {
++// The identity-checked title host declares presentation geometry after adjusting
++// its guest camera and UI producers. Renderers never identify titles or shaders.
++class REX_API FrameLayout {
++ public:
++  struct Aspect { uint32_t x, y; };
++  static void SetDisplayAspect(uint32_t x, uint32_t y);
++  // {0,0} means preserve the original guest display aspect.
++  static Aspect DisplayAspect();
++};
++}
+diff --git a/src/base/clock.cpp b/src/base/clock.cpp
+--- a/src/base/clock.cpp
++++ b/src/base/clock.cpp
+@@ -10,6 +10,12 @@
+  */
+ 
+ #include <algorithm>
++#include <atomic>
++#include <condition_variable>
++#include <thread>
++#include <stdexcept>
++#include <rex/chrono/frame_timing.h>
++#include <rex/chrono/frame_layout.h>
+ #include <cstdio>
+ #include <limits>
+ #include <mutex>
+@@ -19,6 +25,99 @@
+ #include <rex/settings_registry.h>
+ 
+ #include "base/core_settings.h"
++
++
++namespace rex::chrono {
++NativeFrameSettings& GetNativeFrameSettings() {
++  static NativeFrameSettings& settings = []() -> NativeFrameSettings& {
++    static NativeFrameSettings owner;
++    if (auto registered = REX_SETTINGS().Register(owner); !registered)
++      std::fprintf(stderr, "Native frame settings are not registered, %s\n", registered.error().message.c_str());
++    return owner;
++  }();
++  return settings;
++}
++
++namespace { std::atomic<uint64_t> display_aspect{0}; }
++void FrameLayout::SetDisplayAspect(uint32_t x, uint32_t y) {
++  if ((!x) != (!y)) throw std::invalid_argument("Display aspect must have two nonzero dimensions, or both zero");
++  display_aspect.store((uint64_t(x) << 32) | y, std::memory_order_release);
++}
++FrameLayout::Aspect FrameLayout::DisplayAspect() {
++  if (!FrameTiming::Enhanced() || !GetNativeFrameSettings().ultrawide.Get()) return {};
++  const auto value = display_aspect.load(std::memory_order_acquire);
++  return {uint32_t(value >> 32), uint32_t(value)};
++}
++
++namespace {
++std::atomic<uint32_t> title_vblank_rate{0};
++std::atomic<bool> native_active{false};
++std::mutex source_mutex;
++std::condition_variable source_condition;
++FrameTiming::Source source{};
++}
++bool FrameTiming::Enhanced() { return native_active.load(std::memory_order_relaxed) && GetNativeFrameSettings().enhanced.Get(); }
++void FrameTiming::ActivateNative() { native_active.store(true, std::memory_order_relaxed); }
++void FrameTiming::SetGuestVblankRate(uint32_t hz) {
++  if (hz && (hz < 30 || hz > 480)) throw std::out_of_range("Title vblank rate must be 30-480 Hz");
++  title_vblank_rate.store(hz, std::memory_order_release);
++}
++uint32_t FrameTiming::GuestVblankRate() { return title_vblank_rate.load(std::memory_order_acquire); }
++void FrameTiming::PacePresentation() {
++  if (!Enhanced()) return;
++  const uint32_t rate = GetNativeFrameSettings().present_rate.Get();
++  if (!rate) return;
++  using HostClock = std::chrono::steady_clock;
++  thread_local HostClock::time_point deadline{};
++  const auto period = std::chrono::duration_cast<HostClock::duration>(std::chrono::duration<double>(1.0 / rate));
++  const auto now = HostClock::now();
++  // Do not burst through missed slots following a load or a GPU stall.
++  if (deadline < now) deadline = now;
++  else std::this_thread::sleep_until(deadline);
++  deadline += period;
++}
++void FrameTiming::NotifySourceFrame() {
++  if (!Enhanced()) return;
++  const uint64_t now = rex::Clock::QueryGuestTickCount();
++  {
++    std::lock_guard lock(source_mutex);
++    if (source.tick && now > source.tick) {
++      const double interval = double(now - source.tick);
++      source.interval = source.interval ? source.interval + (interval - source.interval) / 16.0 : interval;
++    }
++    source.tick = now;
++    ++source.sequence;
++  }
++  source_condition.notify_all();
++}
++FrameTiming::Source FrameTiming::ReadSource() { std::lock_guard lock(source_mutex); return source; }
++void FrameTiming::WaitSource(Source previous, uint32_t milliseconds) {
++  std::unique_lock lock(source_mutex);
++  source_condition.wait_for(lock, std::chrono::milliseconds(milliseconds), [&] {
++    return source.sequence != previous.sequence || source.wake != previous.wake;
++  });
++}
++void FrameTiming::WakeSourceWaiters() {
++  { std::lock_guard lock(source_mutex); ++source.wake; }
++  source_condition.notify_all();
++}
++
++
++
++void FrameTiming::Reset() {
++  native_active.store(false, std::memory_order_relaxed);
++  title_vblank_rate.store(0, std::memory_order_release);
++  display_aspect.store(0, std::memory_order_release);
++  {
++    std::lock_guard lock(source_mutex);
++    const auto wake = source.wake + 1;
++    source = {};
++    source.wake = wake;
++  }
++  source_condition.notify_all();
++}
++
++}  // namespace rex::chrono
+ 
+ namespace rex {
+ 
+diff --git a/src/base/core_settings.h b/src/base/core_settings.h
+--- a/src/base/core_settings.h
++++ b/src/base/core_settings.h
+@@ -11,6 +11,7 @@
+ #pragma once
+ 
+ #include <rex/path_settings.h>
++#include <rex/chrono/frame_timing.h>
+ #include <rex/setting.h>
+ 
+ namespace rex {
+@@ -41,6 +42,7 @@
+ 
+ inline void RegisterCoreSettings() {
+   (void)GetClockSettings();
++  (void)chrono::GetNativeFrameSettings();
+   (void)GetPerfSettings();
+   (void)REX_PATHS();
+ }
+diff --git a/src/base/CMakeLists.txt b/src/base/CMakeLists.txt
+--- a/src/base/CMakeLists.txt
++++ b/src/base/CMakeLists.txt
+@@ -55,6 +55,7 @@
+   rexbase
+   TOP
+   DIRS
++  chrono
+   logging
+   memory
+   platform
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.cpp b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+--- a/src/gpu/xenos/xenos_graphics_driver_base.cpp
++++ b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+@@ -24,6 +24,7 @@
+ #include <rex/string/text.h>
+ #include "gpu/xenos/command_processor.h"
+ #include "gpu/xenos/vblank_pacing.h"
++#include <rex/chrono/frame_timing.h>
+ #include <rex/assert.h>
+ #include <rex/chrono.h>
+ #include <rex/logging/log_category.h>
+@@ -165,7 +166,10 @@
+     constexpr std::chrono::milliseconds kLongestSleep{50};
+     u64 last_frame_time = Clock::QueryGuestTickCount();
+     while (vsync_worker_running_) {
+-      u64 interval_ticks = IsVSyncEnabled() ? vsync_interval_ticks : no_vsync_interval_ticks;
++      const u32 title_hz = chrono::FrameTiming::GuestVblankRate();
++      const u64 interval_ticks = chrono::FrameTiming::Enhanced()
++          ? (title_hz ? std::max(u64{1}, guest_tick_frequency / title_hz) : vsync_interval_ticks)
++          : (IsVSyncEnabled() ? vsync_interval_ticks : no_vsync_interval_ticks);
+       DeliverVblanks(
+           Clock::QueryGuestTickCount(), last_frame_time, interval_ticks, kMaxVblankCatchUp,
+           [this] { MarkVblank(); }, [this] { return vsync_worker_running_.load(); });
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -3,6 +3,7 @@
+ #include <format>
+ 
+ #include <rex/chrono.h>
++#include <rex/chrono/frame_timing.h>
+ #include <rex/filesystem/mount.h>
+ #include <rex/filesystem/file_system.h>
+ #include "gpu/graphics_control.h"
+@@ -452,6 +453,7 @@
+     return;
+   }
+   StopThreads();
++  chrono::FrameTiming::Reset();
+   system_commands_.callback.store(nullptr);
+   DetachSystems();
+   DestroySubsystems();
+diff --git a/src/app/command_line.cpp b/src/app/command_line.cpp
+--- a/src/app/command_line.cpp
++++ b/src/app/command_line.cpp
+@@ -20,8 +20,12 @@
+   std::string_view setting;
+ };
+ 
+-constexpr std::array<Flag, 8> kFlags = {{
++constexpr std::array<Flag, 12> kFlags = {{
+     {"modules", ""},
++    {"native_enhanced", "gpu.native.enhanced"},
++    {"native_framerate", "gpu.native.framerate"},
++    {"native_present_rate", "gpu.native.present_rate"},
++    {"native_ultrawide", "gpu.native.ultrawide"},
+     {"game_data_root", "title.game_root"},
+     {"user_data_root", "app.user_root"},
+     {"content_data_root", "title.content_root"},
+diff --git a/tests/unit/base/chrono_test.cpp b/tests/unit/base/chrono_test.cpp
+--- a/tests/unit/base/chrono_test.cpp
++++ b/tests/unit/base/chrono_test.cpp
+@@ -15,6 +15,10 @@
+ #include "rex_test.h"
+ 
+ #include <rex/chrono.h>
++#include <rex/chrono/frame_timing.h>
++#include <rex/chrono/frame_layout.h>
++#include <rex/utility.h>
++#include <stdexcept>
+ 
+ using rex::WinSystemClock;
+ 
+@@ -144,3 +148,41 @@
+   CHECK(usec == 0);
+   rex::Clock::SetGuestTimeScalar(scalar);
+ }
++
++REX_TEST_CASE("Native frame contracts gate enhancement without changing guest clocks", "[native-frame][chrono]") {
++  using T = rex::chrono::FrameTiming;
++  using L = rex::chrono::FrameLayout;
++  auto& settings = rex::chrono::GetNativeFrameSettings();
++  REQUIRE(settings.enhanced.Set(false)); REQUIRE(settings.ultrawide.Set(true));
++  rex::ScopeGuard restore([&] {
++    T::Reset(); CHECK(settings.enhanced.Reset()); CHECK(settings.ultrawide.Reset()); CHECK(settings.present_rate.Reset());
++  });
++  T::Reset();
++  const auto scalar = rex::Clock::GetGuestTimeScalar();
++  const auto ratio = rex::Clock::GetGuestTickRatio();
++  L::SetDisplayAspect(3440, 1440);
++  CHECK(L::DisplayAspect().x == 0);
++  const auto before = T::ReadSource();
++  T::NotifySourceFrame(); CHECK(T::ReadSource().sequence == before.sequence);
++  REQUIRE(settings.enhanced.Set(true)); CHECK_FALSE(T::Enhanced());
++  T::ActivateNative(); CHECK(T::Enhanced());
++  CHECK(L::DisplayAspect().x == 3440); CHECK(L::DisplayAspect().y == 1440);
++  REQUIRE(settings.ultrawide.Set(false)); CHECK(L::DisplayAspect().x == 0);
++  CHECK_THROWS_AS(L::SetDisplayAspect(3440, 0), std::invalid_argument);
++  for (rex::u32 fps : {30u, 60u, 120u, 144u, 165u, 240u}) {
++    T::SetGuestVblankRate(2 * fps); CHECK(T::GuestVblankRate() == 2 * fps);
++    CHECK(rex::Clock::GetGuestTimeScalar() == scalar); CHECK(rex::Clock::GetGuestTickRatio() == ratio);
++  }
++  CHECK_THROWS_AS(T::SetGuestVblankRate(481), std::out_of_range);
++  CHECK_THROWS_AS(T::SetGuestVblankRate(29), std::out_of_range);
++  T::NotifySourceFrame(); const auto source = T::ReadSource();
++  CHECK(source.sequence == before.sequence + 1);
++  T::WakeSourceWaiters(); CHECK(T::ReadSource().sequence == source.sequence);
++  CHECK(T::ReadSource().wake != source.wake);
++  T::WaitSource(source, 1000);
++  REQUIRE(settings.present_rate.Set(144)); T::PacePresentation();
++  CHECK(T::ReadSource().sequence == source.sequence);
++  T::Reset(); CHECK_FALSE(T::Enhanced()); CHECK(T::GuestVblankRate() == 0);
++  CHECK(T::ReadSource().sequence == 0); CHECK(L::DisplayAspect().x == 0);
++  CHECK(rex::Clock::GetGuestTimeScalar() == scalar);
++}

@@ -1,8 +1,22 @@
 #pragma once
 #include <string>
 #include <string_view>
+#include <charconv>
+#include <cstdint>
+#include <rex/settings_registry.h>
+#include <rex/setting.h>
 
 namespace dash17559 {
+// Read the host-owned setting across AOT modules; never register a second owner here.
+inline uint32_t OriginalUiModuleHandle() {
+  const auto setting = REX_SETTINGS().Find("dash17559.ui_self");
+  if (!setting) return 0;
+  const auto text = (*setting)->GetText();
+  uint32_t handle = 0;
+  const auto parsed = std::from_chars(text.data(), text.data() + text.size(), handle);
+  return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? handle : 0;
+}
+
 // The host has already verified xam_ui.xex and vk.xex against the 17559
 // manifest. Resolve this dependency from that exact module's namespace, never
 // the foreground game's partition or a basename search across dashboards.

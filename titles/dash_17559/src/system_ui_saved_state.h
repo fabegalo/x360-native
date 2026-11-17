@@ -1,5 +1,6 @@
 #pragma once
-#include <rex/system/xmemory.h>
+#include <rex/kernel/heap.h>
+#include <rex/memory/endian.h>
 #include <cstdint>
 #include <span>
 
@@ -7,7 +8,7 @@ namespace dash17559 {
 // Sign-in 17559 90106EC0 duplicates four 34-byte strings into its serialized
 // 956-byte state, at 252 + 232*i. Restore 90106CF8 consumes/frees them. When
 // UnloadStack discards a suspended app, no restore will consume that ownership.
-inline void ReleaseDiscardedSystemUiState(rex::memory::Memory& memory,
+inline void ReleaseDiscardedSystemUiState(rex::kernel::ISystemHeap& memory,
                                          uint32_t message,
                                          std::span<const uint8_t> state) {
   if (message != 0x21001 || state.size() != 956) return;

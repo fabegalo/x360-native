@@ -1,6 +1,6 @@
-diff --git a/include/rex/graphics/display_overlay.h b/include/rex/graphics/display_overlay.h
---- a/include/rex/graphics/display_overlay.h
-+++ b/include/rex/graphics/display_overlay.h
+diff --git a/include/rex/xenos/display_overlay.h b/include/rex/xenos/display_overlay.h
+--- a/include/rex/xenos/display_overlay.h
++++ b/include/rex/xenos/display_overlay.h
 @@ -41,10 +41,12 @@
    out.fetch.pitch = pitch >> 5;
    out.fetch.base_address = address >> 12;
@@ -12,7 +12,7 @@ diff --git a/include/rex/graphics/display_overlay.h b/include/rex/graphics/displ
    out.fetch.size_2d.width = width - 1;
    out.fetch.size_2d.height = height - 1;
 -  out.fetch.swizzle = 0x688;  // RGBA.
-+  out.fetch.swizzle = XE_GPU_MAKE_TEXTURE_SWIZZLE(B, G, R, A);
++  out.fetch.swizzle = REXGPU_SWIZZLE(B, G, R, A);
    out.valid = true;
    return out;
  }

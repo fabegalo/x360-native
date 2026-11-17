@@ -3,12 +3,10 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <memory>
-#include <rex/runtime.h>
-#include <rex/filesystem/vfs.h>
+#include "kernel/title_fixture.h"
+#include <rex/filesystem/file_system.h>
 #include <rex/filesystem/file.h>
 
-using namespace rex;
 namespace {
 struct UtilityRoot {
   std::filesystem::path path = std::filesystem::temp_directory_path() /
@@ -16,27 +14,46 @@ struct UtilityRoot {
   UtilityRoot() { std::filesystem::create_directories(path / "game"); }
   ~UtilityRoot() { std::error_code ec; std::filesystem::remove_all(path, ec); }
 };
-void CheckStream(Runtime& runtime, const char* name, bool create) {
-  filesystem::File* file = nullptr;
-  filesystem::FileAction action{};
-  REQUIRE(runtime.file_system()->OpenFile(nullptr, name,
-      create ? filesystem::FileDisposition::kOpenIf : filesystem::FileDisposition::kOpen,
-      filesystem::FileAccess::kGenericRead | filesystem::FileAccess::kGenericWrite,
-      false, true, &file, &action) == X_STATUS_SUCCESS);
-  const auto close = [](filesystem::File* value) { value->Destroy(); };
-  std::unique_ptr<filesystem::File, decltype(close)> owned(file, close);
+struct UtilitySession {
+  static rex::ppc::PPCImage Image(bool analysis) {
+    return analysis ? rex::ppc::PPCImage{} : rex::ppc::PPCImage{0x82001000, 4, 0x82000000, 0x10000, nullptr};
+  }
+  UtilitySession(const std::filesystem::path& game, const std::filesystem::path& user,
+                 const std::filesystem::path& cache = {}, bool analysis = false)
+      : app("utility_contract", user.parent_path() / "utility-host"), runtime(Image(analysis)) {
+    rex::test::ReleaseTestMemory();
+    const std::vector<std::string> args{"--app.config_file=", "--app.user_root=" + user.string(),
+                                        "--app.cache_root=" + cache.string()};
+    REQUIRE(app.Init(rex::CLIArgList::Parse(args)));
+    REQUIRE(runtime.GetTitlePaths().game_root.Set(game));
+    REQUIRE(runtime.GetTitlePaths().entry.Set(""));
+    REQUIRE(runtime.GetTitlePaths().imports.Set(""));
+  }
+  ~UtilitySession() {
+    runtime.Unload();
+    CHECK(runtime.GetTitlePaths().game_root.Reset());
+    CHECK(runtime.GetTitlePaths().entry.Reset());
+    CHECK(runtime.GetTitlePaths().imports.Reset());
+    app.Shutdown();
+  }
+  rex::test::KernelHostApp app;
+  rex::kernel::TitleRuntime runtime;
+};
+void CheckStream(rex::kernel::TitleRuntime& runtime, const char* name, bool create) {
+  auto opened = runtime.GetFileSystem().Open(name, {
+      .disposition=create ? rex::filesystem::Disposition::kOpenIf : rex::filesystem::Disposition::kOpen,
+      .access=rex::filesystem::Access::kReadAccess | rex::filesystem::Access::kWriteAccess});
+  REQUIRE(opened);
+  auto& file = opened->file;
   const std::array<uint8_t, 4> expected{1, 2, 3, 4};
-  size_t bytes = 0;
   if (create) {
-    CHECK(action == filesystem::FileAction::kCreated);
-    REQUIRE(file->WriteSync(expected, 0, &bytes) == X_STATUS_SUCCESS);
-    CHECK(bytes == expected.size());
-    REQUIRE(file->Flush() == X_STATUS_SUCCESS);
+    CHECK(opened->action == rex::filesystem::OpenAction::kCreated);
+    auto bytes = file->Write(expected, 0); REQUIRE(bytes); CHECK(*bytes == expected.size());
+    REQUIRE(file->Flush());
   } else {
-    CHECK(action == filesystem::FileAction::kOpened);
+    CHECK(opened->action == rex::filesystem::OpenAction::kOpened);
     std::array<uint8_t, 4> actual{};
-    REQUIRE(file->ReadSync(actual, 0, &bytes) == X_STATUS_SUCCESS);
-    CHECK(bytes == expected.size());
+    auto bytes = file->Read(actual, 0); REQUIRE(bytes); CHECK(*bytes == expected.size());
     CHECK(actual == expected);
   }
 }
@@ -45,17 +62,17 @@ void CheckStream(Runtime& runtime, const char* name, bool create) {
 TEST_CASE("utility drive persists replay streams and isolates title roots", "[sdk][utility-drive]") {
   UtilityRoot root;
   for (const bool create : {true, false}) {
-    Runtime runtime(root.path / "game", root.path / "title-a");
-    REQUIRE(runtime.Setup(RuntimeConfig{}) == X_STATUS_SUCCESS);
-    CheckStream(runtime, "cache:\\replay_stream", create);
-    CheckStream(runtime, "cache:\\ghost_stream_0", create);
+    UtilitySession session(root.path / "game", root.path / "title-a");
+    REQUIRE(session.runtime.Load());
+    CheckStream(session.runtime, "cache:\\replay_stream", create);
+    CheckStream(session.runtime, "cache:\\ghost_stream_0", create);
   }
   CHECK(std::filesystem::file_size(root.path / "title-a/cache/utility/replay_stream") == 4);
   CHECK(std::filesystem::is_empty(root.path / "game"));
-  Runtime other(root.path / "game", root.path / "title-b");
-  REQUIRE(other.Setup(RuntimeConfig{}) == X_STATUS_SUCCESS);
-  CHECK(other.file_system()->ResolvePath("cache:\\replay_stream") == nullptr);
-  CheckStream(other, "cache:\\replay_stream", true);
+  UtilitySession other(root.path / "game", root.path / "title-b");
+  REQUIRE(other.runtime.Load());
+  CHECK_FALSE(other.runtime.GetFileSystem().Stat("cache:\\replay_stream"));
+  CheckStream(other.runtime, "cache:\\replay_stream", true);
 }
 
 TEST_CASE("utility drive reuses the configured legacy cache root", "[sdk][utility-drive]") {
@@ -64,9 +81,9 @@ TEST_CASE("utility drive reuses the configured legacy cache root", "[sdk][utilit
   std::filesystem::create_directories(cache / "utility");
   { std::ofstream out(cache / "utility/replay_stream", std::ios::binary);
     const char bytes[]{1, 2, 3, 4}; out.write(bytes, sizeof(bytes)); }
-  Runtime runtime(root.path / "game", root.path / "user", {}, cache);
-  REQUIRE(runtime.Setup(RuntimeConfig{}) == X_STATUS_SUCCESS);
-  CheckStream(runtime, "cache:\\replay_stream", false);
+  UtilitySession session(root.path / "game", root.path / "user", cache);
+  REQUIRE(session.runtime.Load());
+  CheckStream(session.runtime, "cache:\\replay_stream", false);
   CHECK_FALSE(std::filesystem::exists(root.path / "user/cache"));
 }
 
@@ -75,13 +92,12 @@ TEST_CASE("utility drive setup reports storage errors and leaves analysis read o
   const auto cache = root.path / "blocked";
   { std::ofstream file(cache); file << "preserve"; }
   {
-    Runtime runtime(root.path / "game", root.path / "user", {}, cache);
-    CHECK(runtime.Setup(RuntimeConfig{}) == X_STATUS_UNSUCCESSFUL);
+    UtilitySession session(root.path / "game", root.path / "user", cache);
+    CHECK_FALSE(session.runtime.Load());
   }
-  Runtime analysis(root.path / "game");
-  RuntimeConfig config{}; config.tool_mode = true;
-  REQUIRE(analysis.Setup(std::move(config)) == X_STATUS_SUCCESS);
-  CHECK(analysis.file_system()->ResolvePath("cache:\\") == nullptr);
+  UtilitySession analysis(root.path / "game", root.path / "game", {}, true);
+  REQUIRE(analysis.runtime.Load());
+  CHECK_FALSE(analysis.runtime.GetFileSystem().Stat("cache:\\"));
   CHECK(std::filesystem::is_empty(root.path / "game"));
   CHECK(std::filesystem::file_size(cache) == 8);
 }

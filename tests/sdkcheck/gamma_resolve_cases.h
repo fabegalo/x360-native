@@ -7,14 +7,17 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/graphics/util/draw.h>
+#include <rex/xenos/texture.h>
+#include <gpu/xenos/draw_state.h>
 #include <string>
 #include <stdexcept>
 #include <vector>
 
 namespace gamma_probe {
-using namespace rex::graphics;
+using namespace rex::gpu;
+namespace xenos=rex::xenos;
+namespace draw_util=rex::gpu::draw_state;
+namespace texture_util=rex::xenos;
 inline constexpr unsigned kEdramBytes = 10 * 1024 * 1024 * 16;
 inline constexpr unsigned kDestBytes = 4 * 1024 * 1024;
 inline constexpr unsigned kWidth = 32, kHeight = 8;
@@ -121,7 +124,7 @@ struct Case {
     draw_util::ResolveCopyShaderConstants c{};
     auto &e = c.dest_relative.edram_info;
     e.pitch_tiles = Pitch();
-    e.msaa_samples = xenos::MsaaSamples(msaa);
+    e.msaa_samples = xenos::MSAASamples(msaa);
     e.base_tiles = edram_base & (edram_tiles - 1);
     e.format = unsigned(
         fixed16    ? (source64 ? xenos::ColorRenderTargetFormat::k_16_16_16_16
@@ -141,7 +144,7 @@ struct Case {
     dest.copy_dest_exp_bias = bias;
     dest.copy_dest_swap = swap;
     dest.copy_dest_array = array;
-    dest.copy_dest_slice = slice;
+    dest.copy_dest_layer = slice;
     dest.copy_dest_endian = xenos::Endian128(endian);
     auto &dc = c.dest_relative.dest_coordinate_info;
     dc.pitch_aligned_div_32 = DestPitch() / 32;

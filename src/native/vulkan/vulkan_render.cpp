@@ -1,10 +1,10 @@
 #include "vulkan_render.h"
-#include <rex/ui/vulkan/provider.h>
-#include <rex/ui/vulkan/instance.h>
+#include <gpu/xenos/host/vulkan/vulkan_provider.h>
+#include <gpu/xenos/host/vulkan/vulkan_instance.h>
 #if defined(_WIN32)
 #include <Windows.h>
 #endif
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -12,13 +12,14 @@
 #include "../../supervisor/fs_io.h"
 
 namespace x360n::native {
-VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
-    : device_(*provider.vulkan_device()), submissions_(device_),
+namespace draw_util = rex::gpu::draw_state;
+VulkanRender::VulkanRender(rex::gpu::vulkan::VulkanProvider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch)
+    : settings_(settings), watch_(watch), device_(*provider.GetVulkanDevice()), submissions_(device_),
       pipeline_workers_(std::make_unique<PipelineWorkers>(NativePipelineThreads())) {
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   try {
-    if (edram_size_+sizeof(SampleCounts)>device_.properties().maxStorageBufferRange)
+    if (edram_size_+sizeof(SampleCounts)>device_.GetProperties().maxStorageBufferRange)
       throw std::runtime_error("Native: requested scale exceeds device EDRAM storage buffer range");
     guest_buffer_ = std::make_unique<VulkanBuffer>(device_, GuestMemoryMirror::kSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
@@ -39,7 +40,7 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     CheckVulkan(fn.vkCreateDescriptorSetLayout(vk, &set, nullptr, &storage_layout_), "create resolve storage layout");
     const VkDescriptorSetLayout copy_sets[]{storage_layout_, storage_layout_};
     VkPushConstantRange constants{VK_SHADER_STAGE_COMPUTE_BIT, 0,
-        sizeof(rex::graphics::draw_util::ResolveCopyShaderConstants)};
+        sizeof(rex::gpu::draw_state::ResolveCopyShaderConstants)};
     VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout.setLayoutCount = 2;
     layout.pSetLayouts = copy_sets;
@@ -50,7 +51,7 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     constants.size = 8 * sizeof(uint32_t);
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &downscale_layout_), "create scaled resolve publication layout");
     layout.setLayoutCount = 1;
-    constants.size = sizeof(rex::graphics::draw_util::ResolveClearShaderConstants);
+    constants.size = sizeof(rex::gpu::draw_state::ResolveClearShaderConstants);
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &clear_layout_), "create resolve clear layout");
     Begin();
     UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -78,8 +79,8 @@ void VulkanRender::Destroy() {
   scaled_.Clear();
   DestroyScaled();
   mirror_.reset();
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   SavePipelineCache();
   if (pipeline_cache_) LoadNativeVulkanFunction<PFN_vkDestroyPipelineCache>(device_, "vkDestroyPipelineCache")(
       vk, pipeline_cache_, nullptr);
@@ -134,10 +135,10 @@ void VulkanRender::Begin() {
   if (!arena.readback) arena.readback = std::make_unique<VulkanBuffer>(device_, 16ull << 20,
       VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kReadback);
   readback_ = arena.readback.get();
-  CheckVulkan(device_.functions().vkResetDescriptorPool(device_.device(), arena.descriptors, 0),
+  CheckVulkan(device_.GetFunctions().vkResetDescriptorPool(device_.GetDevice(), arena.descriptors, 0),
               "reset render descriptor arena");
   for (auto pool : arena.extra_descriptor_pools)
-    CheckVulkan(device_.functions().vkResetDescriptorPool(device_.device(), pool, 0), "reset render descriptor overflow pool");
+    CheckVulkan(device_.GetFunctions().vkResetDescriptorPool(device_.GetDevice(), pool, 0), "reset render descriptor overflow pool");
   arena.descriptor_pool_index = 0;
   arena.descriptor_pool_sets = 0;
   arena.descriptor_count = 0;
@@ -278,7 +279,7 @@ VkDescriptorPool VulkanRender::CreateDescriptorPool() {
   pool.poolSizeCount = uint32_t(std::size(sizes));
   pool.pPoolSizes = sizes;
   VkDescriptorPool result = VK_NULL_HANDLE;
-  CheckVulkan(device_.functions().vkCreateDescriptorPool(device_.device(), &pool, nullptr, &result),
+  CheckVulkan(device_.GetFunctions().vkCreateDescriptorPool(device_.GetDevice(), &pool, nullptr, &result),
               "create render descriptor arena");
   return result;
 }
@@ -297,7 +298,7 @@ VkDescriptorSet VulkanRender::AllocateDescriptors(VkDescriptorSetLayout layout) 
     allocate.descriptorPool = arena.descriptor_pool_index
         ? arena.extra_descriptor_pools[arena.descriptor_pool_index - 1] : arena.descriptors;
     const auto status = arena.descriptor_pool_sets < 4096
-        ? device_.functions().vkAllocateDescriptorSets(device_.device(), &allocate, &result)
+        ? device_.GetFunctions().vkAllocateDescriptorSets(device_.GetDevice(), &allocate, &result)
         : VK_ERROR_OUT_OF_POOL_MEMORY;
     if (status == VK_SUCCESS) break;
     // Failure in an empty pool cannot be fixed by allocating another equal
@@ -329,11 +330,11 @@ VulkanRender::PendingPipeline VulkanRender::ComputePipeline(VkPipelineLayout lay
     info.stage.pName = "main";
     info.layout = layout;
     VkPipeline result = VK_NULL_HANDLE;
-    const auto status = device_.functions().vkCreateComputePipelines(device_.device(), pipeline_cache_,
+    const auto status = device_.GetFunctions().vkCreateComputePipelines(device_.GetDevice(), pipeline_cache_,
                                                                     1, &info, nullptr, &result);
-    device_.functions().vkDestroyShaderModule(device_.device(), module, nullptr);
+    device_.GetFunctions().vkDestroyShaderModule(device_.GetDevice(), module, nullptr);
     if (status != VK_SUCCESS && result)
-      device_.functions().vkDestroyPipeline(device_.device(), result, nullptr);
+      device_.GetFunctions().vkDestroyPipeline(device_.GetDevice(), result, nullptr);
     CheckVulkan(status, "create resolve compute pipeline");
     return result;
   });
@@ -354,7 +355,7 @@ void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) 
   uint32_t header[4];
   std::memcpy(header, bytes.data(), sizeof(header));
   VkPhysicalDeviceProperties props;
-  device_.vulkan_instance()->functions().vkGetPhysicalDeviceProperties(device_.physical_device(), &props);
+  device_.GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceProperties(device_.GetPhysicalDevice(), &props);
   if (header[0] != 32 || header[1] != VK_PIPELINE_CACHE_HEADER_VERSION_ONE ||
       header[2] != props.vendorID || header[3] != props.deviceID ||
       std::memcmp(bytes.data() + 16, props.pipelineCacheUUID, VK_UUID_SIZE)) return;
@@ -363,7 +364,7 @@ void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) 
   info.pInitialData = bytes.data();
   VkPipelineCache loaded = VK_NULL_HANDLE;
   if (LoadNativeVulkanFunction<PFN_vkCreatePipelineCache>(device_, "vkCreatePipelineCache")(
-      device_.device(), &info, nullptr, &loaded) != VK_SUCCESS) return;
+      device_.GetDevice(), &info, nullptr, &loaded) != VK_SUCCESS) return;
   // The command thread owns every submitted future, so waiting for them here
   // gives vkMergePipelineCaches exclusive cache access even when shader storage
   // is initialized after a resolve. Ordinary creations remain concurrent.
@@ -374,19 +375,19 @@ void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) 
   for (const auto& pipeline : clear_pipelines_) wait(pipeline);
   wait(downscale_pipeline_);
   const auto status = LoadNativeVulkanFunction<PFN_vkMergePipelineCaches>(device_, "vkMergePipelineCaches")(
-      device_.device(), pipeline_cache_, 1, &loaded);
+      device_.GetDevice(), pipeline_cache_, 1, &loaded);
   LoadNativeVulkanFunction<PFN_vkDestroyPipelineCache>(device_, "vkDestroyPipelineCache")(
-      device_.device(), loaded, nullptr);
+      device_.GetDevice(), loaded, nullptr);
   if (status != VK_SUCCESS) REXLOG_WARN("Native Vulkan: pipeline cache merge failed ({})", int(status));
 }
 void VulkanRender::SavePipelineCache() {
   if (pipeline_file_.empty() || !pipeline_cache_) return;
   const auto get_data = LoadNativeVulkanFunction<PFN_vkGetPipelineCacheData>(device_, "vkGetPipelineCacheData");
   size_t size = 0;
-  if (get_data(device_.device(), pipeline_cache_, &size, nullptr) != VK_SUCCESS ||
+  if (get_data(device_.GetDevice(), pipeline_cache_, &size, nullptr) != VK_SUCCESS ||
       !size || size > (64 << 20)) return;
   std::vector<uint8_t> bytes(size);
-  if (get_data(device_.device(), pipeline_cache_, &size, bytes.data()) != VK_SUCCESS) return;
+  if (get_data(device_.GetDevice(), pipeline_cache_, &size, bytes.data()) != VK_SUCCESS) return;
   std::error_code error;
   x360n::io::create_directories(pipeline_file_.parent_path(), error);
   if (error) return;
@@ -474,16 +475,16 @@ void VulkanRender::SetSampleCounts(const SampleCounts& counts, bool visibility_o
   cmd_.CopyBuffer(upload.buffer, edram_buffer_->handle(), 1, &copy);
   visibility_only_ = visibility_only;
 }
-GuestMemoryMirror& VulkanRender::Mirror(rex::memory::Memory& memory) {
+GuestMemoryMirror& VulkanRender::Mirror(rex::IPhysicalMemory& memory) {
   if (memory_ && memory_ != &memory) throw std::logic_error("Native Vulkan: guest memory domain changed");
   memory_ = &memory;
-  if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory,
+  if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory, watch_,
       [this](uint32_t start, uint32_t length) { UploadGuest(start, length); });
   scaled_.Attach(*mirror_);
   return *mirror_;
 }
 void VulkanRender::UploadGuest(uint32_t address, uint32_t length) {
-  const auto upload = Upload(memory_->TranslatePhysical(address), length, 4);
+  const auto upload = Upload(memory_->GetReadOnlyPhysicalSpan({address, length}).value().data(), length, 4);
   EndRendering();
   UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
   const VkBufferCopy copy{upload.offset, address, length};

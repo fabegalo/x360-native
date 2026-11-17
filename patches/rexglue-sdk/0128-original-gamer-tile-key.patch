@@ -1,39 +1,42 @@
-diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
-index 15742cc..e855005 100644
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -13,6 +13,7 @@
- #pragma GCC diagnostic ignored "-Wunused-parameter"
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -11,6 +11,7 @@
  
+ #include "xam/xam_state.h"
  #include <cstring>
 +#include <array>
- #include <limits>
- #include <mutex>
  
-@@ -982,9 +983,60 @@ u32 XamUserCreateTitlesPlayedEnumerator_entry(u32 title_id, u32 user_index, u64
+ #include "xam/xam_ui.h"
+ #include <rex/logging/log_category.h>
+@@ -837,11 +838,63 @@
+   return kernel::X_ERROR_SUCCESS;
+ }
  
- u32 XamParseGamerTileKey_entry(mapped_u32 key_ptr, mapped_u32 out1_ptr, mapped_u32 out2_ptr,
-                                mapped_u32 out3_ptr) {
+-u32 XamParseGamerTileKey_entry([[maybe_unused]] MappedU32 key_ptr, MappedU32 out1_ptr,
++u32 XamParseGamerTileKey_entry(MappedU32 key_ptr, MappedU32 out1_ptr,
+                                MappedU32 out2_ptr, MappedU32 out3_ptr) {
 -  *out1_ptr = 0xC0DE0001;
 -  *out2_ptr = 0xC0DE0002;
 -  *out3_ptr = 0xC0DE0003;
 +  // Retail 17559 export 30A (81670A50): XAM string descriptor, three
 +  // eight-WCHAR hexadecimal components, and the original reserved fallback.
-+  auto* memory = REX_KERNEL_MEMORY();
-+  const auto key = key_ptr.guest_address();
-+  if (!AchievementGuestSpan(memory, key, 16, memory::kMemoryProtectRead | memory::kMemoryProtectWrite) ||
-+      !AchievementGuestSpan(memory, out1_ptr.guest_address(), 4, memory::kMemoryProtectWrite) ||
-+      !AchievementGuestSpan(memory, out2_ptr.guest_address(), 4, memory::kMemoryProtectWrite) ||
-+      !AchievementGuestSpan(memory, out3_ptr.guest_address(), 4, memory::kMemoryProtectWrite))
++  const auto& title = CurrentTitle();
++  const auto valid = [&](u32 address, u32 size, u32 flags) { return title.heap.IsGuestRangeAccessible(address, size, flags); };
++  const auto key = key_ptr.GetGuestAddress();
++  if (!valid(key, 16, kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite) ||
++      !valid(out1_ptr.GetGuestAddress(), 4, kernel::kMemoryProtectWrite) ||
++      !valid(out2_ptr.GetGuestAddress(), 4, kernel::kMemoryProtectWrite) ||
++      !valid(out3_ptr.GetGuestAddress(), 4, kernel::kMemoryProtectWrite))
 +    return X_ERROR_INVALID_PARAMETER;
-+  const uint32_t buffer = memory::load_and_swap<uint32_t>(memory->TranslateVirtual(key + 12));
++  const uint32_t buffer = memory::load_and_swap<uint32_t>(title.membase.TranslateVirtual<u8*>(key + 12));
 +  std::array<uint32_t, 3> components{0xFFFE07D1u, 0x20000u, 0x10000u};
 +  uint32_t length = 0;
 +  auto read = [&](uint32_t index, uint16_t& value) {
 +    const uint64_t address = uint64_t(buffer) + uint64_t(index) * 2;
-+    if (address > UINT32_MAX || !AchievementGuestSpan(memory, uint32_t(address), 2, memory::kMemoryProtectRead))
++    if (address > UINT32_MAX || !valid(uint32_t(address), 2, kernel::kMemoryProtectRead))
 +      return false;
-+    value = memory::load_and_swap<uint16_t>(memory->TranslateVirtual(uint32_t(address)));
++    value = memory::load_and_swap<uint16_t>(title.membase.TranslateVirtual<u8*>(uint32_t(address)));
 +    return true;
 +  };
 +  if (buffer) {
@@ -69,8 +72,59 @@ index 15742cc..e855005 100644
 +    if (components[0] == 0xFFFE0854u || prefix == 0x10000 || prefix == 0x20000)
 +      components = {0xFFFE07D1u, 0x20000u, 0x10000u};
 +  }
-+  memory::store_and_swap<uint32_t>(memory->TranslateVirtual(key + 8), length);
++  memory::store_and_swap<uint32_t>(title.membase.TranslateVirtual<u8*>(key + 8), length);
 +  *out1_ptr = components[0]; *out2_ptr = components[1]; *out3_ptr = components[2];
-   return X_ERROR_SUCCESS;
+   return kernel::X_ERROR_SUCCESS;
  }
  
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1698,3 +1698,47 @@
+     CHECK(c.XAM("XamContentGetMetaDataInternal", {input, 0x7F100000, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
+   });
+ }
++
++REX_TEST_CASE("gamer tile keys preserve the descriptor ABI and bounded hexadecimal parsing", "[kernel][xam][gamer-tile-key]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    const auto descriptor = c.Alloc(16), text = c.Alloc(100), output = c.Alloc(12);
++    auto query = [&](std::u16string_view value) {
++      std::memset(c.GetBase() + text, 0, 100);
++      for (size_t i = 0; i < value.size(); ++i)
++        rex::memory::store_and_swap<u16>(c.GetBase() + text + i * 2, static_cast<u16>(value[i]));
++      c.Store32(descriptor + 12, text);
++      c.Store32(descriptor + 8, 0xCDCDCDCD);
++      return c.XAM("XamParseGamerTileKey", {descriptor, output, output + 4, output + 8});
++    };
++    REQUIRE(query(u"1234ABCD0002000000010000") == 0);
++    CHECK(c.Load32(output) == 0x1234ABCD);
++    CHECK(c.Load32(output + 4) == 0x20000);
++    CHECK(c.Load32(output + 8) == 0x10000);
++    CHECK(c.Load32(descriptor + 8) == 50);
++    REQUIRE(query(u"FFFE08540002000000010000") == 0);
++    CHECK(c.Load32(output) == 0xFFFE07D1);
++    REQUIRE(query(u"000100010000000200000003") == 0);
++    CHECK(c.Load32(output) == 0xFFFE07D1);
++    CHECK(c.Load32(output + 4) == 0x20000);
++    REQUIRE(query(u"  -0xAbC+000001f   0X100") == 0);
++    CHECK(c.Load32(output) == 0u - 0xABC);
++    CHECK(c.Load32(output + 4) == 0x1F);
++    CHECK(c.Load32(output + 8) == 0x100);
++    c.Store32(descriptor + 12, 0);
++    REQUIRE(c.XAM("XamParseGamerTileKey", {descriptor, output, output + 4, output + 8}) == 0);
++    CHECK(c.Load32(descriptor + 8) == 0);
++    CHECK(c.Load32(output) == 0xFFFE07D1);
++    REQUIRE(query(std::u16string(48, u'F')) == 0);
++    CHECK(c.Load32(descriptor + 8) == 98);
++    CHECK(c.Load32(output) == 0xFFFFFFFF);
++    c.Store32(descriptor + 12, 0x7F100000);
++    c.Store32(output, 0xCAFEBABE);
++    c.Store32(descriptor + 8, 0xDEADBEEF);
++    CHECK(c.XAM("XamParseGamerTileKey", {descriptor, output, output + 4, output + 8}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.Load32(output) == 0xCAFEBABE);
++    CHECK(c.Load32(descriptor + 8) == 0xDEADBEEF);
++    CHECK(c.XAM("XamParseGamerTileKey", {descriptor, output, 0, output + 8}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XamParseGamerTileKey", {0, output, output + 4, output + 8}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++  });
++}

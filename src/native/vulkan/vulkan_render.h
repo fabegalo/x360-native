@@ -1,5 +1,5 @@
 #pragma once
-#include <rex/graphics/flags.h>
+#include <gpu/xenos/xenos_settings.h>
 #include "../quality/settings.h"
 #include "../memory/scaled_resolve.h"
 #include "vulkan_core.h"
@@ -11,8 +11,8 @@
 #include "../memory/guest_memory_mirror.h"
 #include "../memory/guest_writeback.h"
 #include "../commands/scanout_backend.h"
-#include <rex/graphics/util/draw.h>
-#include <rex/ui/vulkan/provider.h>
+#include <gpu/xenos/draw_state.h>
+#include <gpu/xenos/host/vulkan/vulkan_provider.h>
 #include <unordered_map>
 #include <map>
 #include <optional>
@@ -21,28 +21,31 @@
 #include <atomic>
 
 namespace x360n::native {
+namespace draw_util = rex::gpu::draw_state;
 struct TextureLoadPlan;
 // Native's Vulkan command recording and memory domain. The shared SDK types
 // below describe guest registers and shader semantics, never execute Xenos.
 class VulkanRender {
+  const rex::gpu::XenosSettings& settings_;
+  rex::IPhysicalWriteWatch& watch_;
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
   const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
-  const uint32_t edram_tile_count_ = rex::graphics::GetConfiguredEdramTileCount();
-  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::graphics::xenos::kEdramTileSizeBytes * scale_x_ * scale_y_;
+  const uint32_t edram_tile_count_ = settings_.GetEDRAMTileCount();
+  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::xenos::kEDRAMTileSizeBytes * scale_x_ * scale_y_;
  public:
-  explicit VulkanRender(rex::ui::vulkan::VulkanProvider&);
+  explicit VulkanRender(rex::gpu::vulkan::VulkanProvider&, const rex::gpu::XenosSettings&, rex::IPhysicalWriteWatch&);
   ~VulkanRender();
   VulkanRender(const VulkanRender&) = delete;
   VulkanRender& operator=(const VulkanRender&) = delete;
-  rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t);
-  void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*,
-      rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
+  rex::gpu::Shader* LoadShader(rex::xenos::ShaderType, const uint32_t*, uint32_t);
+  void Draw(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&, rex::gpu::Shader*,
+      rex::gpu::Shader*, rex::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
   // With resolution scale, a front buffer holding scaled resolve data is
   // recorded as a linear scaled surface (output describes it, readable by
   // later fragment shaders on the queue); otherwise VK_NULL_HANDLE and the 1x
   // guest bytes are presented. Call before the presenting submission (Flush).
   VkBuffer PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output);
-  void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
+  void Resolve(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&);
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
   void SetPipelineDirectory(const std::filesystem::path&);
@@ -54,7 +57,7 @@ class VulkanRender {
   void WriteEdram(const EdramSnapshot&);
   void EndFrame();
  private:
-  using Device = rex::ui::vulkan::VulkanDevice;
+  using Device = rex::gpu::vulkan::VulkanDevice;
   using PendingPipeline = std::shared_future<VkPipeline>;
   void Destroy();
   void SavePipelineCache();
@@ -69,7 +72,7 @@ class VulkanRender {
   VkDescriptorPool CreateDescriptorPool();
   VkDescriptorSet AllocateDescriptors(VkDescriptorSetLayout);
   PendingPipeline ComputePipeline(VkPipelineLayout, std::span<const uint32_t>);
-  GuestMemoryMirror& Mirror(rex::memory::Memory&);
+  GuestMemoryMirror& Mirror(rex::IPhysicalMemory&);
   void UploadGuest(uint32_t address, uint32_t length);
   using BufferAccess = VulkanBufferAccess;
   void UseBuffer(VkBuffer, BufferAccess&, VkPipelineStageFlags, VkAccessFlags, bool force = false);
@@ -83,24 +86,24 @@ class VulkanRender {
   };
   static void TextureWatch(void*, void*, uint64_t, bool);
   void Unwatch(TextureEntry&);
-  VkDescriptorSetLayout TextureLayout(rex::graphics::SpirvShader*);
-  VkDescriptorSet BindTextures(const rex::graphics::RegisterFile&, rex::memory::Memory&,
-                               rex::graphics::SpirvShader*);
-  void SyncTextureReads(const rex::graphics::RegisterFile&, rex::graphics::SpirvShader*);
+  VkDescriptorSetLayout TextureLayout(rex::gpu::SPIRVShader*);
+  VkDescriptorSet BindTextures(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&,
+                               rex::gpu::SPIRVShader*);
+  void SyncTextureReads(const rex::xenos::RegisterFile&, rex::gpu::SPIRVShader*);
   void DestroyTextures();
   void InitializeDraw();
   void DestroyDraw();
   // The layout is created at once; the pipeline by pipeline_workers_ and bound
   // through cmd_ while it may still be compiling (see VulkanCommands).
   struct DrawPipeline { VkPipelineLayout layout = VK_NULL_HANDLE; std::shared_future<VkPipeline> pipeline; };
-  DrawPipeline& Pipeline(rex::graphics::SpirvShader*, rex::graphics::SpirvShader*, VkShaderModule,
+  DrawPipeline& Pipeline(rex::gpu::SPIRVShader*, rex::gpu::SPIRVShader*, VkShaderModule,
       VkShaderModule, VkPrimitiveTopology, VkSampleCountFlagBits, VkCullModeFlags, VkFrontFace,
       bool clamp, bool restart, bool discard, const Tessellation&, VkPolygonMode fill, uint32_t point_key);
   const Device& device_;
   VulkanSubmissionRing submissions_;
   VkCommandBuffer commands_ = VK_NULL_HANDLE;
   // Every command of commands_ is recorded through cmd_.
-  VulkanCommands cmd_{device_.functions()};
+  VulkanCommands cmd_{device_.GetFunctions()};
   std::unique_ptr<PipelineWorkers> pipeline_workers_;
   bool rendering_ = false;
   struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; VkDescriptorSet load_set = VK_NULL_HANDLE; };
@@ -164,7 +167,7 @@ class VulkanRender {
   std::unique_ptr<GuestMemoryMirror> mirror_;
   ScaledResolveCache scaled_{scale_x_, scale_y_};
   uint32_t textures_resolution_scaled_ = 0;
-  rex::memory::Memory* memory_ = nullptr;
+  rex::IPhysicalMemory* memory_ = nullptr;
   GuestWriteback writeback_;
   size_t pending_readback_batches_ = 0;
   uint64_t readback_used_ = 0;
@@ -172,17 +175,17 @@ class VulkanRender {
   VkPipelineLayout copy_layout_ = VK_NULL_HANDLE, clear_layout_ = VK_NULL_HANDLE;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::filesystem::path pipeline_file_;
-  std::array<PendingPipeline, size_t(rex::graphics::draw_util::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
+  std::array<PendingPipeline, size_t(rex::gpu::draw_state::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
   VkPipelineLayout downscale_layout_ = VK_NULL_HANDLE;
   PendingPipeline downscale_pipeline_;
   std::array<PendingPipeline, 2> clear_pipelines_{};
   std::unordered_map<std::string, TextureEntry> textures_;
   uint64_t texture_use_ = 0, texture_bytes_ = 0;
   std::map<std::string, VkSampler> samplers_;
-  std::unordered_map<const rex::graphics::SpirvShader*, VkDescriptorSetLayout> texture_layouts_;
+  std::unordered_map<const rex::gpu::SPIRVShader*, VkDescriptorSetLayout> texture_layouts_;
   std::array<std::shared_ptr<TextureResource>, 3> null_textures_;
   std::unique_ptr<VulkanShaderCache> shaders_;
-  std::unordered_map<const rex::graphics::Shader*, bool> memexport_addresses_known_;
+  std::unordered_map<const rex::gpu::Shader*, bool> memexport_addresses_known_;
   VkDescriptorSetLayout memory_layout_ = VK_NULL_HANDLE, constants_layout_ = VK_NULL_HANDLE;
   VkRenderPass draw_pass_ = VK_NULL_HANDLE;
   VkFramebuffer draw_framebuffer_ = VK_NULL_HANDLE;

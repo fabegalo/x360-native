@@ -1,0 +1,114 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -104,6 +104,8 @@
+       u32 destination_device, u64 destination_xuid, bool move,
+       const TransferProgress& progress = {}, bool* destination_committed = nullptr,
+       const TransferCheckpoint& checkpoint = {}, bool* source_removed = nullptr);
++  u32 DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data,
++      bool* source_removed, const TransferCheckpoint& checkpoint = {});
+   void RetireStaleSaves();
+   static bool ValidName(std::string_view name);
+   u32 FlushContent(std::string_view root_name);
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -1269,57 +1269,47 @@
+   return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+-Result<void> ContentManager::DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) try {
+-  auto package_path = ResolvePackagePath(xuid, data);
+-  u64 used_xuid =
+-      (data.xuid != static_cast<u64>(-1) && data.xuid != 0) ? static_cast<u64>(data.xuid) : xuid;
+-  auto header_path =
+-      ResolvePackageHeaderPath(data.GetFileName(), used_xuid, data.title_id, data.content_type, data.device_id);
+-  const std::filesystem::path manifest_path = ResolveManifestPath(used_xuid, data);
+-  const u32 title_id =
+-      data.title_id == kernel::kRunningTitleID ? GetTitleID() : static_cast<u32>(data.title_id);
+-
+-  {
+-    std::lock_guard lock(mutex_);
+-
+-    auto opened_data = data;
+-    if (opened_data.content_type == kernel::XContentType::kSavedGame) {
+-      opened_data.xuid = used_xuid; opened_data.title_id = title_id;
+-    }
+-    if (IsContentOpenLocked(opened_data)) {
+-      return Err(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+-    }
+-
+-    std::error_code ec;
+-    auto dir_removed = std::filesystem::remove_all(package_path, ec);
+-    if (ec ||
+-        std::filesystem::status(package_path, ec).type() != std::filesystem::file_type::not_found) {
+-      return Err(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+-    }
+-
+-    std::error_code ec2;
+-    bool header_removed = std::filesystem::remove(header_path, ec2);
+-    if (ec2) return Err(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+-    std::filesystem::remove(manifest_path, ec2);
+-
+-    std::vector<EnableEntry>& entries = LoadEnableEntriesLocked();
+-    const std::string file_name = data.GetFileName();
+-    if (std::erase_if(entries, [&](const EnableEntry& entry) {
+-          return entry.title_id == title_id && entry.content_type == data.content_type &&
+-                 entry.file_name == file_name;
+-        }) != 0) {
+-      SaveEnableEntriesLocked();
+-    }
+-
+-    if (dir_removed == 0 && !header_removed) {
+-      return Err(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
+-    }
+-  }
+-  NotifyContentChanged();
+-  return Ok();
+-} catch (const std::filesystem::filesystem_error&) {
+-  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+-}
++Result<void> ContentManager::DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
++  const u32 error = DeleteContent(xuid, data, nullptr);
++  return error ? Err(kernel::XResultError(error)) : Ok();
++}
++
++u32 ContentManager::DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data,
++    bool* source_removed, const TransferCheckpoint& checkpoint) try {
++  if (source_removed) *source_removed = false;
++  auto storage_lock = user_profile_.LockSettings();
++  const auto volume = GetDevice(data.device_id);
++  if (!volume) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++  auto normalized = data;
++  normalized.xuid = data.xuid != u64(-1) && data.xuid != 0 ? u64(data.xuid) : xuid;
++  normalized.title_id = data.title_id == kernel::kRunningTitleID ? GetTitleID() : u32(data.title_id);
++  if (IsContentOpen(normalized) || SignedInProfile(normalized)) return kernel::X_ERROR_ACCESS_DENIED;
++  const auto package = ResolvePackagePath(xuid, normalized);
++  const auto header = ResolveHeaderPathFor(xuid, normalized);
++  bool ignored_removed = false;
++  bool& removed = source_removed ? *source_removed : ignored_removed;
++  u32 result = RetireContent(*volume, normalized, package, header, checkpoint, removed, false);
++  if (result) {
++    std::lock_guard lock(recovery_mutex_);
++    recovered_devices_.erase(data.device_id);
++  }
++  if (removed) {
++    {
++      std::lock_guard lock(mutex_);
++      // Keep the official package manifest and enable-state cleanup; source originals stay external.
++      std::error_code error;
++      std::filesystem::remove(ResolveManifestPath(normalized.xuid, normalized), error);
++      if (error && !result) result = kernel::X_ERROR_ACCESS_DENIED;
++      auto& entries = LoadEnableEntriesLocked();
++      if (std::erase_if(entries, [&](const EnableEntry& entry) {
++            return entry.title_id == normalized.title_id && entry.content_type == normalized.content_type &&
++                   entry.file_name == normalized.GetFileName();
++          })) SaveEnableEntriesLocked();
++    }
++    NotifyContentChanged();
++  }
++  return result;
++} catch (const std::filesystem::filesystem_error&) { return kernel::X_ERROR_ACCESS_DENIED; }
+ 
+ std::filesystem::path ContentManager::ResolveGameUserContentPath() {
+   auto title_id = std::format("{:08X}", this->GetTitleID());

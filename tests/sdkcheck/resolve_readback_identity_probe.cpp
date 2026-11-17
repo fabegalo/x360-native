@@ -1,11 +1,12 @@
+#include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <unordered_map>
-#include <rex/graphics/register_file.h>
-#if __has_include(<rex/graphics/readback_resolve_key.h>)
-#include <rex/graphics/readback_resolve_key.h>
+#include <rex/xenos/register.h>
+#if __has_include(<gpu/xenos/readback_resolve_key.h>)
+#include <gpu/xenos/readback_resolve_key.h>
 #else
 // The old production identity, so this check also runs against the baseline.
-namespace rex::graphics {
+namespace rex::gpu {
 struct ReadbackResolveKey {
   uint32_t address, length, signature;
   bool operator==(const ReadbackResolveKey&) const = default;
@@ -15,25 +16,29 @@ inline ReadbackResolveKey MakeReadbackResolveKey(const RegisterFile&, uint32_t a
 }
 }
 #endif
-using namespace rex::graphics;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+namespace reg = rex::xenos::reg;
 namespace {
 struct ConstantHash {
   size_t operator()(const ReadbackResolveKey&) const { return 0; }
 };
 }
-int main() {
+TEST_CASE("Resolve readbacks keep format identity even under hash collisions", "[sdk][gpu][resolve-dest]") {
   int checks = 0, failures = 0;
   auto check = [&](bool ok, const char* name) {
     ++checks;
-    if (!ok && ++failures <= 16) std::cerr << "FAIL " << name << '\n';
+    INFO(name);
+    CHECK(ok);
   };
   RegisterFile regs{};
   reg::RB_COPY_CONTROL control{};
   reg::RB_COPY_DEST_INFO dest{};
   dest.copy_dest_format = xenos::ColorFormat::k_8_8_8_8;
   auto key = [&] {
-    regs[XE_GPU_REG_RB_COPY_CONTROL] = control.value;
-    regs[XE_GPU_REG_RB_COPY_DEST_INFO] = dest.value;
+    regs[std::to_underlying(rex::xenos::Register::RB_COPY_CONTROL)] = control.value;
+    regs[std::to_underlying(rex::xenos::Register::RB_COPY_DEST_INFO)] = dest.value;
     return MakeReadbackResolveKey(regs, 0x04000000, 0x384000);
   };
   const auto color = key();
@@ -68,10 +73,10 @@ int main() {
   check(MakeReadbackResolveKey(regs, 0x04000000, 0x384004) != color, "length is part of identity");
   // Swapping the source and destination dimensions must not introduce a new
   // first-seen pass or an extra GPU wait if its written range is unchanged.
-  regs[XE_GPU_REG_RB_SURFACE_INFO] = 0x12345678;
-  regs[XE_GPU_REG_RB_DEPTH_INFO] = 0x87654321;
-  regs[XE_GPU_REG_RB_COPY_DEST_PITCH] = 0x01230321;
+  regs[std::to_underlying(rex::xenos::Register::RB_SURFACE_INFO)] = 0x12345678;
+  regs[std::to_underlying(rex::xenos::Register::RB_DEPTH_INFO)] = 0x87654321;
+  regs[std::to_underlying(rex::xenos::Register::RB_COPY_DEST_PITCH)] = 0x01230321;
   check(key() == color, "source storage and pitch are not representation identity");
   std::cout << "resolve-readback-identity checks=" << checks << " failures=" << failures << '\n';
-  return failures ? 1 : 0;
+  REQUIRE(failures == 0);
 }

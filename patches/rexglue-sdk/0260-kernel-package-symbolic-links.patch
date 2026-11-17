@@ -1,0 +1,130 @@
+diff --git a/include/rex/filesystem/file_system.h b/include/rex/filesystem/file_system.h
+--- a/include/rex/filesystem/file_system.h
++++ b/include/rex/filesystem/file_system.h
+@@ -74,6 +74,11 @@
+    * link matches.
+    */
+   [[nodiscard]] virtual std::optional<std::string> FindLink(std::string_view path) const = 0;
++
++  /** Resolves every symbolic-link prefix without requiring a mount or file to exist.
++   * Returns the canonical input when no link matches and kInvalidPath for a link cycle.
++   */
++  [[nodiscard]] virtual Result<std::string> ResolveLinks(std::string_view path) const = 0;
+ 
+   /**
+    * Replaces the table with the standard game, update and Harddisk0 mounts.
+diff --git a/src/filesystem/file_system.h b/src/filesystem/file_system.h
+--- a/src/filesystem/file_system.h
++++ b/src/filesystem/file_system.h
+@@ -55,6 +55,8 @@
+                                     IFile* root = nullptr) override;
+   [[nodiscard]] Result<VolumeStat> GetVolume(std::string_view path) override;
+ 
++  [[nodiscard]] Result<std::string> ResolveLinks(std::string_view path) const override;
++
+  private:
+   [[nodiscard]] Result<void> Move(Node& node, std::string_view to, bool replace_existing,
+                                   Node* root);
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -50,8 +50,8 @@
+ 
+ }  // namespace
+ 
+-Result<FileSystem::Resolved> FileSystem::ResolveMount(std::string_view path,
+-                                                      bool log_missing) const {
++Result<std::string> FileSystem::ResolveLinks(std::string_view path) const {
++  std::lock_guard lock(mutex_);
+   std::string resolved = string::utf8_canonicalize_guest_path(path);
+   for (size_t depth = 0;; ++depth) {
+     const auto link = std::ranges::find_if(
+@@ -60,11 +60,17 @@
+       break;
+     }
+     if (depth == kMaxLinkDepth) {
+-      return Err<Resolved>(
++      return Err<std::string>(
+           BuildError(FileSystemError::kInvalidPath, std::format("links of '{}' do not end", path)));
+     }
+     resolved = link->second + resolved.substr(link->first.size());
+   }
++  return resolved;
++}
++
++Result<FileSystem::Resolved> FileSystem::ResolveMount(std::string_view path,
++                                                      bool log_missing) const {
++  REX_TRY(std::string resolved, ResolveLinks(path));
+   const auto provider = std::ranges::find_if(providers_, [&](const auto& entry) {
+     return StartsWithComponents(resolved, entry->GetMountPath());
+   });
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 6)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 7)
+ /**
+  * Creates an empty mount table.
+  *
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <utility>
++#include <cstring>
+ #include <variant>
+ 
+ #include <rex/assert.h>
+@@ -219,6 +220,37 @@
+   return X_STATUS_SUCCESS;
+ }
+ 
++// Original XAM passes OBJECT_ATTRIBUTES (root -3 is \??) and a counted ANSI output.
++u32 ObTranslateSymbolicLink_entry(GuestPtrT<X_OBJECT_ATTRIBUTES> attributes,
++    GuestPtrT<X_ANSI_STRING> target) {
++  auto* memory = kernel::GetCurrentState().GetAddressSpace();
++  const auto readable = [&](u32 address, u32 size) {
++    return address && memory->IsGuestRangeAccessible(address, size, kMemoryProtectRead);
++  };
++  if (!readable(attributes.GetGuestAddress(), sizeof(X_OBJECT_ATTRIBUTES)) ||
++      !target || !memory->IsGuestRangeAccessible(target.GetGuestAddress(), sizeof(X_ANSI_STRING),
++          kMemoryProtectRead | kMemoryProtectWrite)) return X_STATUS_INVALID_PARAMETER;
++  const auto object = *attributes;
++  if (!readable(object.name_ptr, sizeof(X_ANSI_STRING))) return X_STATUS_INVALID_PARAMETER;
++  const auto name = *memory->TranslateVirtual<X_ANSI_STRING*>(object.name_ptr);
++  if (name.length > name.maximum_length || (name.length && !readable(name.pointer, name.length)))
++    return X_STATUS_INVALID_PARAMETER;
++  if (!name.length) return X_STATUS_OBJECT_NAME_NOT_FOUND;
++  const std::string input(memory->TranslateVirtual<const char*>(name.pointer), name.length);
++  if (input.find('\0') != std::string::npos) return X_STATUS_OBJECT_NAME_INVALID;
++  auto canonical = rex::string::utf8_canonicalize_guest_path(input);
++  if (rex::string::utf8_starts_with(canonical, u8"\\??\\")) canonical.erase(0, 4);
++  auto resolved = kernel::GetCurrentState().GetFileSystem()->ResolveLinks(canonical);
++  if (!resolved) return X_STATUS_OBJECT_NAME_INVALID;
++  if (resolved->empty() || resolved->front() != '\\') return X_STATUS_OBJECT_NAME_NOT_FOUND;
++  if (resolved->size() > target->maximum_length) return X_STATUS_BUFFER_TOO_SMALL;
++  if (!memory->IsGuestRangeAccessible(target->pointer, static_cast<u32>(resolved->size()), kMemoryProtectWrite))
++    return X_STATUS_INVALID_PARAMETER;
++  std::memcpy(memory->TranslateVirtual(target->pointer), resolved->data(), resolved->size());
++  target->length = static_cast<u16>(resolved->size());
++  return X_STATUS_SUCCESS;
++}
++
+ u32 ObDeleteSymbolicLink_entry(GuestPtrT<X_ANSI_STRING> path_ptr) {
+   auto path = rex::string::utf8_canonicalize_guest_path(
+       kernel::TranslateAnsiPath(kernel::GetCurrentState().GetAddressSpace(), path_ptr));
+@@ -308,7 +340,7 @@
+ REX_EXPORT_STUB(__imp__ObIsTitleObject);
+ REX_EXPORT_STUB(__imp__ObLookupAnyThreadByThreadId);
+ REX_EXPORT_STUB(__imp__ObMakeTemporaryObject);
+-REX_EXPORT_STUB(__imp__ObTranslateSymbolicLink);
++REX_EXPORT(__imp__ObTranslateSymbolicLink, rex::kernel::xboxkrnl::ObTranslateSymbolicLink_entry)
+ REX_EXPORT_STUB(__imp__NtCreateDirectoryObject);
+ REX_EXPORT_STUB(__imp__NtCreateSymbolicLinkObject);
+ REX_EXPORT_STUB(__imp__NtMakeTemporaryObject);

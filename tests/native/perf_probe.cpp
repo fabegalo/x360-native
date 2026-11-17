@@ -3,12 +3,16 @@
 #include "../../src/native/vulkan/vulkan_storage_buffer_range.h"
 #include "../../src/native/textures/texture_load.h"
 #include "../../src/native/commands/primitive_indices.h"
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/cvar.h>
+#include "../../src/gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/heap.h>
+#include <rex/ppc/image.h>
+#include <rex/string/text.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
 #include <rex/chrono/frame_timing.h>
-#include <rex/logging.h>
-#include <rex/graphics/format/ucode.h>
+#include <rex/logging/log_category.h>
+#include <rex/xenos/ucode.h>
 #include <Windows.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -25,8 +29,12 @@
 #include <mutex>
 #include <thread>
 using namespace x360n::native;
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using namespace rex::xenos;
+namespace xenos=rex::xenos;
+namespace ucode=rex::xenos::ucode;
+namespace texture_util=rex::xenos;
+extern "C" rex::IInterface* ReXCreateInterface(const char*,rex::u32);
 namespace {
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 void CheckBufferDependencies() {
@@ -106,9 +114,9 @@ uint64_t CpuNs() {
   auto ticks=[](FILETIME t) { return (uint64_t(t.dwHighDateTime)<<32)|t.dwLowDateTime; };
   return (ticks(k)+ticks(u))*100;
 }
-DXGI_QUERY_VIDEO_MEMORY_INFO VideoMemory(const rex::ui::vulkan::VulkanDevice& device) {
+DXGI_QUERY_VIDEO_MEMORY_INFO VideoMemory(const rex::gpu::vulkan::VulkanDevice& device) {
   VkPhysicalDeviceProperties properties;
-  device.vulkan_instance()->functions().vkGetPhysicalDeviceProperties(device.physical_device(),&properties);
+  device.GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceProperties(device.GetPhysicalDevice(),&properties);
   Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
   Require(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))),"memory budget DXGI factory");
   Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
@@ -124,15 +132,18 @@ DXGI_QUERY_VIDEO_MEMORY_INFO VideoMemory(const rex::ui::vulkan::VulkanDevice& de
   throw std::runtime_error("Vulkan adapter missing from DXGI budget enumeration");
 }
 void CheckResolveContracts(VulkanRender& render, RegisterFile& regs,
-    rex::memory::Memory& memory, uint32_t output) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical=memory.GetPhysicalAddress(output)+65536;
   reg::RB_COPY_CONTROL control{}; control.copy_command=CopyCommand(1); control.color_clear_enable=1;
-  regs[XE_GPU_REG_RB_COPY_CONTROL]=control.value;
+  regs[uint32_t(Register::RB_COPY_CONTROL)]=control.value;
   auto resolve=[&](unsigned index,uint32_t clear) {
-    regs[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+index*4096;
-    regs[XE_GPU_REG_RB_COLOR_CLEAR]=clear;
-    regs[XE_GPU_REG_RB_COLOR_CLEAR_LO]=clear;
-    render.Resolve(regs,memory); render.Flush(false);
+    regs[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+index*4096;
+    regs[uint32_t(Register::RB_COLOR_CLEAR)]=clear;
+    regs[uint32_t(Register::RB_COLOR_CLEAR_LO)]=clear;
+    render.Resolve(regs, physical_memory); render.Flush(false);
   };
   constexpr uint32_t a=0x332211FF,b=0x11CC22FF;
   resolve(0,a); resolve(1,b); resolve(2,0);
@@ -152,52 +163,63 @@ void CheckResolveContracts(VulkanRender& render, RegisterFile& regs,
   std::cout<<"PASS colored resolves and scaled pages\n";
 }
 void CheckTextureResolveDependency(VulkanRender& render, const RegisterFile& draw_template,
-    const RegisterFile& resolve_template, rex::memory::Memory& memory, uint32_t output) {
+    const RegisterFile& resolve_template, rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical = memory.GetPhysicalAddress(output);
   const uint32_t source = physical + 0x40000, destination = physical + 0x50000;
   RegisterFile draw(draw_template), resolve(resolve_template);
   reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3;
-  draw[XE_GPU_REG_SQ_PROGRAM_CNTL] = program.value;
-  xe_gpu_memexport_stream_t stream{};
+  draw[uint32_t(Register::SQ_PROGRAM_CNTL)] = program.value;
+  MemExportStream stream{};
   stream.base_address = destination >> 2; stream.const_0x1 = 1;
   stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
   stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
   stream.index_count = 1; stream.const_0x96 = 0x96;
-  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
+  std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)], &stream, sizeof(stream));
   const float address_scale[]{0, 1, 0, 0}, uv[]{0.5f, 0.5f, 0, 0};
-  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 4], address_scale, sizeof(address_scale));
-  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], uv, sizeof(uv));
+  std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 4], address_scale, sizeof(address_scale));
+  std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 8], uv, sizeof(uv));
   auto code = TextureExportShader();
   for (auto& word : code) word = rex::byte_swap(word);
   auto* vs = render.LoadShader(ShaderType::kVertex, code.data(), uint32_t(code.size()));
   // Exercise the GPU load and the RGBA4 CPU conversion from a real resolve.
-  // Both fetch a uniform white texture, producing an exactly representable
-  // float4 through the guest vertex shader's MEMEXPORT.
+  // The RGBA4 guest conversion is n * 17 / 256, as in the independent
+  // fixed-format MEMEXPORT oracle; RGBA8 white remains 1 in every component.
   for (const bool cpu_conversion : {false, true}) {
     render.Flush(true);
     std::memset(memory.TranslateVirtual(output + 0x40000), 0xCD, 4096);
     std::memset(memory.TranslateVirtual(output + 0x50000), 0xCD, 4096);
     reg::RB_COPY_CONTROL control{}; control.copy_command = CopyCommand(1); control.color_clear_enable = 1;
-    resolve[XE_GPU_REG_RB_COPY_CONTROL] = control.value;
-    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = physical + 0x60000;
-    resolve[XE_GPU_REG_RB_COLOR_CLEAR] = resolve[XE_GPU_REG_RB_COLOR_CLEAR_LO] = UINT32_MAX;
-    render.Resolve(resolve, memory);
+    resolve[uint32_t(Register::RB_COPY_CONTROL)] = control.value;
+    resolve[uint32_t(Register::RB_COPY_DEST_BASE)] = physical + 0x60000;
+    resolve[uint32_t(Register::RB_COLOR_CLEAR)] = resolve[uint32_t(Register::RB_COLOR_CLEAR_LO)] = UINT32_MAX;
+    render.Resolve(resolve, physical_memory);
     control.color_clear_enable = 0;
-    resolve[XE_GPU_REG_RB_COPY_CONTROL] = control.value;
-    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = source;
-    render.Resolve(resolve, memory);
-    xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+    resolve[uint32_t(Register::RB_COPY_CONTROL)] = control.value;
+    resolve[uint32_t(Register::RB_COPY_DEST_BASE)] = source;
+    render.Resolve(resolve, physical_memory);
+    TextureFetch fetch{}; fetch.type = FetchConstantType::kTexture;
     fetch.dimension = DataDimension::k2DOrStacked;
     fetch.format = cpu_conversion ? TextureFormat::k_4_4_4_4 : TextureFormat::k_8_8_8_8;
     fetch.base_address = source >> 12; fetch.pitch = 1; fetch.tiled = true;
     fetch.size_2d.width = fetch.size_2d.height = 31; fetch.swizzle = 0x688;
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch));
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)], &fetch, sizeof(fetch));
     const auto before = NativeVulkanPerformance();
-    render.Draw(draw, memory, vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    render.Draw(draw, physical_memory, vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
     const auto submitted = NativeVulkanPerformance().submissions - before.submissions;
     const auto published = NativeVulkanPerformance().readbacks - before.readbacks;
     render.CompleteGuestWrites(kGuestSyncPacket, 0);
-    const std::array<float, 4> white{1, 1, 1, 1};
+    const float component=cpu_conversion ? 255.0f/256.0f : 1.0f;
+    const std::array<float, 4> white{component,component,component,component};
+    if(std::memcmp(memory.TranslatePhysical(destination),white.data(),sizeof(white))) {
+      const auto* actual=memory.TranslatePhysical<const uint32_t*>(destination);
+      const auto* resolved=memory.TranslatePhysical<const uint32_t*>(source);
+      std::cerr<<"texture dependency cpu_conversion="<<cpu_conversion<<" output="<<std::hex
+          <<actual[0]<<','<<actual[1]<<','<<actual[2]<<','<<actual[3]
+          <<" source="<<resolved[0]<<','<<resolved[1]<<std::dec<<'\n';
+    }
     Require(!std::memcmp(memory.TranslatePhysical(destination), white.data(), sizeof(white)),
         "resolve texture fetch/MEMEXPORT bytes");
     const bool cpu_read = cpu_conversion || GetNativeQualitySettings().scale_x > 1;
@@ -213,11 +235,14 @@ void CheckTextureResolveDependency(VulkanRender& render, const RegisterFile& dra
 // indices selects the CPU-normalized reference; the aligned copy must render
 // identical pixels from the resident mirror, or keep the documented fallback.
 void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile resolve,
-    rex::memory::Memory& memory, uint32_t output, const rex::ui::vulkan::VulkanDevice& device) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output, const rex::gpu::vulkan::VulkanDevice& device) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   auto& perf = NativeVulkanPerformance();
   Require(perf.enabled, "resident index contracts require native_vulkan_perf");
-  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(vertices && index_storage, "resident index allocations");
   auto load = [&](bool vertex, std::vector<uint32_t> words) {
     for (auto& word : words) word = rex::byte_swap(word);
@@ -226,36 +251,36 @@ void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile 
   auto* vs = load(true, RasterShader(true));
   auto* ps = load(false, RasterShader(false));
   const float triangle[]{-1, -1, .5f, 1, -1, 3, .5f, 1, 3, -1, .5f, 1};
-  xe_gpu_vertex_fetch_t fetch{};
+  VertexFetch fetch{};
   fetch.type = FetchConstantType::kVertex; fetch.address = memory.GetPhysicalAddress(vertices) >> 2; fetch.size = 16;
-  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0] = fetch.dword_0;
-  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1] = fetch.dword_1;
-  draw[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kColorDepth);
-  draw[XE_GPU_REG_RB_SURFACE_INFO] = 80;
-  draw[XE_GPU_REG_RB_COLOR_MASK] = 15;
-  draw[XE_GPU_REG_RB_COLOR_INFO] = 0; // RGBA8 at EDRAM base 0.
+  draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)] = fetch.dword_0;
+  draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_1)] = fetch.dword_1;
+  draw[uint32_t(Register::RB_MODECONTROL)] = uint32_t(EDRAMMode::kColorDepth);
+  draw[uint32_t(Register::RB_SURFACE_INFO)] = 80;
+  draw[uint32_t(Register::RB_COLOR_MASK)] = 15;
+  draw[uint32_t(Register::RB_COLOR_INFO)] = 0; // RGBA8 at EDRAM base 0.
   reg::RB_BLENDCONTROL blend{};
   blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
-  draw[XE_GPU_REG_RB_BLENDCONTROL0] = blend.value;
-  draw[XE_GPU_REG_PA_CL_VTE_CNTL] = 0x3F;
+  draw[uint32_t(Register::RB_BLENDCONTROL0)] = blend.value;
+  draw[uint32_t(Register::PA_CL_VTE_CNTL)] = 0x3F;
   auto fp = [&](unsigned reg, float value) { draw[reg] = std::bit_cast<uint32_t>(value); };
-  fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 16);
-  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 16);
-  fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0);
-  draw[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR] = 32 | (32 << 16);
-  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL] = 0x80000000;
-  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR] = 32 | (32 << 16);
-  draw[XE_GPU_REG_PA_SU_VTX_CNTL] = 1;
+  fp(uint32_t(Register::PA_CL_VPORT_XSCALE), 16); fp(uint32_t(Register::PA_CL_VPORT_XOFFSET), 16);
+  fp(uint32_t(Register::PA_CL_VPORT_YSCALE), -16); fp(uint32_t(Register::PA_CL_VPORT_YOFFSET), 16);
+  fp(uint32_t(Register::PA_CL_VPORT_ZSCALE), 1); fp(uint32_t(Register::PA_CL_VPORT_ZOFFSET), 0);
+  draw[uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR)] = 32 | (32 << 16);
+  draw[uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL)] = 0x80000000;
+  draw[uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)] = 32 | (32 << 16);
+  draw[uint32_t(Register::PA_SU_VTX_CNTL)] = 1;
   const std::array<float, 4> color{.25f, .5f, .75f, 1};
-  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4], color.data(), sizeof(color));
+  std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 256 * 4], color.data(), sizeof(color));
   reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1); copy.color_clear_enable = 1;
-  resolve[XE_GPU_REG_RB_COPY_CONTROL] = copy.value;
-  resolve[XE_GPU_REG_RB_COLOR_CLEAR] = resolve[XE_GPU_REG_RB_COLOR_CLEAR_LO] = 0;
-  resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = memory.GetPhysicalAddress(output) + 4096;
+  resolve[uint32_t(Register::RB_COPY_CONTROL)] = copy.value;
+  resolve[uint32_t(Register::RB_COLOR_CLEAR)] = resolve[uint32_t(Register::RB_COLOR_CLEAR_LO)] = 0;
+  resolve[uint32_t(Register::RB_COPY_DEST_BASE)] = memory.GetPhysicalAddress(output) + 4096;
   auto capture = [&] {
-    render.Resolve(resolve, memory); render.Flush(true);
+    render.Resolve(resolve, physical_memory); render.Flush(true);
     render.CompleteGuestWrites(kGuestSyncPacket, 0);
-    const auto* bytes = memory.TranslatePhysical<const uint8_t*>(resolve[XE_GPU_REG_RB_COPY_DEST_BASE]);
+    const auto* bytes = memory.TranslatePhysical<const uint8_t*>(resolve[uint32_t(Register::RB_COPY_DEST_BASE)]);
     return std::vector<uint8_t>(bytes, bytes + 4096);
   };
   capture(); // Clear EDRAM before the first comparison.
@@ -277,26 +302,26 @@ void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile 
                      PrimitiveType primitive, bool restart, int32_t offset, uint32_t minimum, uint32_t maximum) {
     std::memset(memory.TranslateVirtual(vertices), 0, 4096);
     std::memcpy(memory.TranslateVirtual<uint8_t*>(vertices) + minimum * 16, triangle, sizeof(triangle));
-    draw[XE_GPU_REG_VGT_INDX_OFFSET] = uint32_t(offset);
-    draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = minimum; draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = maximum;
+    draw[uint32_t(Register::VGT_INDX_OFFSET)] = uint32_t(offset);
+    draw[uint32_t(Register::VGT_MIN_VTX_INDX)] = minimum; draw[uint32_t(Register::VGT_MAX_VTX_INDX)] = maximum;
     reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = primitive;
-    draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+    draw[uint32_t(Register::VGT_DRAW_INITIATOR)] = initiator.value;
     reg::PA_SU_SC_MODE_CNTL mode{}; mode.multi_prim_ib_ena = restart;
-    draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = mode.value;
-    draw[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = 0xFFFFFF;
+    draw[uint32_t(Register::PA_SU_SC_MODE_CNTL)] = mode.value;
+    draw[uint32_t(Register::VGT_MULTI_PRIM_IB_RESET_INDX)] = 0xFFFFFF;
     auto cpu = encode(indices, format, endian, true);
-    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &cpu);
+    render.Draw(draw, physical_memory, vs, ps, primitive, uint32_t(indices.size()), &cpu);
     const auto expected = capture();
     Require(std::any_of(expected.begin(), expected.end(), [](uint8_t b) { return b != 0; }),
         "reference indexed triangle did not render");
     auto gpu = encode(indices, format, endian, false);
     const auto before = perf;
-    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &gpu);
+    render.Draw(draw, physical_memory, vs, ps, primitive, uint32_t(indices.size()), &gpu);
     const auto after = perf;
     const auto actual = capture();
     Require(actual == expected, "resident and normalized index pixels differ");
     const bool direct = !restart && !NeedsPrimitiveConversion(primitive) &&
-        (format == IndexFormat::kInt16 || device.properties().fullDrawIndexUint32) &&
+        (format == IndexFormat::kInt16 || device.GetProperties().fullDrawIndexUint32) &&
         (format == IndexFormat::kInt32 || endian == Endian::kNone || endian == Endian::k8in16);
     Require(after.gpu_index_draws - before.gpu_index_draws == unsigned(direct),
         "resident index path/fallback selection changed");
@@ -324,30 +349,30 @@ void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile 
 
   // A GPU producer updates the index bytes in the resident mirror. The draw
   // must consume them without waiting for their guest readback publication.
-  draw[XE_GPU_REG_VGT_INDX_OFFSET] = draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = 0;
-  draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF; draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = 0;
+  draw[uint32_t(Register::VGT_INDX_OFFSET)] = draw[uint32_t(Register::VGT_MIN_VTX_INDX)] = 0;
+  draw[uint32_t(Register::VGT_MAX_VTX_INDX)] = 0xFFFFFF; draw[uint32_t(Register::PA_SU_SC_MODE_CNTL)] = 0;
   reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = PrimitiveType::kTriangleList;
-  draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+  draw[uint32_t(Register::VGT_DRAW_INITIATOR)] = initiator.value;
   std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
   std::memset(memory.TranslateVirtual(index_storage), 0xCC, 16);
   RegisterFile producer;
-  producer[XE_GPU_REG_SQ_PROGRAM_CNTL] = draw[XE_GPU_REG_SQ_PROGRAM_CNTL];
-  producer[XE_GPU_REG_SQ_VS_CONST] = 0x000FF000;
-  producer[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF;
-  producer[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kNoOperation);
-  xe_gpu_memexport_stream_t stream{}; stream.base_address = indices_physical >> 2; stream.const_0x1 = 1;
+  producer[uint32_t(Register::SQ_PROGRAM_CNTL)] = draw[uint32_t(Register::SQ_PROGRAM_CNTL)];
+  producer[uint32_t(Register::SQ_VS_CONST)] = 0x000FF000;
+  producer[uint32_t(Register::VGT_MAX_VTX_INDX)] = 0xFFFFFF;
+  producer[uint32_t(Register::RB_MODECONTROL)] = uint32_t(EDRAMMode::kNoOperation);
+  MemExportStream stream{}; stream.base_address = indices_physical >> 2; stream.const_0x1 = 1;
   stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_16_16_16_16;
   stream.num_format = SurfaceNumberFormat::kUnsignedInteger; stream.const_0x4b0 = 0x4B0;
   stream.index_count = 1; stream.const_0x96 = 0x96;
-  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
-  producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 5] = std::bit_cast<uint32_t>(1.f);
+  std::memcpy(&producer[uint32_t(Register::SHADER_CONSTANT_000_X)], &stream, sizeof(stream));
+  producer[uint32_t(Register::SHADER_CONSTANT_000_X) + 5] = std::bit_cast<uint32_t>(1.f);
   const std::array<float, 4> produced{0, 1, 2, 0};
-  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], produced.data(), sizeof(produced));
+  std::memcpy(&producer[uint32_t(Register::SHADER_CONSTANT_000_X) + 8], produced.data(), sizeof(produced));
   auto* exporter = load(true, ExportShader());
-  render.Draw(producer, memory, exporter, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+  render.Draw(producer, physical_memory, exporter, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
   const auto before = perf;
   DrawIndices produced_indices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 8};
-  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &produced_indices);
+  render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &produced_indices);
   Require(perf.submissions == before.submissions && perf.readbacks == before.readbacks,
       "GPU index consumer waited for CPU readback");
   Require(perf.gpu_index_draws == before.gpu_index_draws + 1, "GPU-produced indices left the resident path");
@@ -355,13 +380,13 @@ void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile 
   const std::array<uint16_t, 4> expected_indices{0, 1, 2, 0};
   Require(!std::memcmp(memory.TranslatePhysical(indices_physical), expected_indices.data(), 8), "GPU index producer bytes");
   const auto cpu = encode(strip, IndexFormat::kInt16, Endian::kNone, true);
-  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &cpu);
+  render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &cpu);
   Require(capture() == produced_pixels, "GPU-produced resident indices differ from CPU-normalized pixels");
   for (const auto invalid : {DrawIndices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 5},
                             DrawIndices{IndexFormat::kInt32, Endian::kNone, 3, 0x1FFFFFF8, 12},
                             DrawIndices{IndexFormat::kInt32, Endian::kNone, 2, indices_physical, 12}}) {
     bool rejected = false;
-    try { render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &invalid); }
+    try { render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &invalid); }
     catch (const std::runtime_error&) { rejected = true; }
     Require(rejected, "resident indices bypassed extent validation");
   }
@@ -398,7 +423,7 @@ void CheckStorageRangeSelection() {
 // advertised limit and checks every descriptor passed to the real driver;
 // it does not claim validation on hardware with a native 128 MiB limit.
 struct StorageLimitFixture {
-  using Device = rex::ui::vulkan::VulkanDevice;
+  using Device = rex::gpu::vulkan::VulkanDevice;
   Device::Properties& properties;
   Device::Functions& functions;
   uint32_t original_limit;
@@ -414,8 +439,8 @@ struct StorageLimitFixture {
   bool invalid_range = false;
   inline static StorageLimitFixture* active = nullptr;
   explicit StorageLimitFixture(const Device& device)
-      : properties(const_cast<Device::Properties&>(device.properties())),
-        functions(const_cast<Device::Functions&>(device.functions())),
+      : properties(const_cast<Device::Properties&>(device.GetProperties())),
+        functions(const_cast<Device::Functions&>(device.GetFunctions())),
         original_limit(properties.maxStorageBufferRange), create(functions.vkCreateBuffer),
         destroy(functions.vkDestroyBuffer), update(functions.vkUpdateDescriptorSets),
         allocate_sets(functions.vkAllocateDescriptorSets), reset_pool(functions.vkResetDescriptorPool) {
@@ -486,18 +511,21 @@ struct StorageLimitFixture {
     fixture.update(device, count, writes, copy_count, copies);
   }
 };
-void CheckTextureStorageLimit(rex::ui::vulkan::VulkanProvider& provider, const RegisterFile& draw_template,
-    rex::memory::Memory& memory, uint32_t output) {
+void CheckTextureStorageLimit(rex::gpu::vulkan::VulkanProvider& provider, const RegisterFile& draw_template,
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   CheckStorageRangeSelection();
-  StorageLimitFixture fixture(*provider.vulkan_device());
+  StorageLimitFixture fixture(*provider.GetVulkanDevice());
   struct Allocations {
-    rex::memory::Memory& memory;
+    rex::kernel::GuestAddressSpace& memory;
     std::vector<uint32_t> addresses;
     void Add(uint32_t physical, uint32_t size) {
       const uint32_t address = 0xA0000000u | physical;
       Require(memory.LookupHeap(address)->AllocFixed(address, size, 65536,
-          rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-          rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite), "storage-limit fixture physical allocation");
+          rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+          rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite), "storage-limit fixture physical allocation");
       addresses.push_back(address);
     }
     ~Allocations() { for (auto address : addresses) memory.LookupHeap(address)->Release(address); }
@@ -507,36 +535,36 @@ void CheckTextureStorageLimit(rex::ui::vulkan::VulkanProvider& provider, const R
   // Nine 16 MiB array layers force a real scratch buffer larger than the
   // emulated limit, while each indivisible shader dispatch still fits.
   allocations.Add(0x08040000, 144u << 20);
-  VulkanRender render(provider);
+  VulkanRender render(provider,settings,watch);
   RegisterFile draw(draw_template);
   reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3;
-  draw[XE_GPU_REG_SQ_PROGRAM_CNTL] = program.value;
+  draw[uint32_t(Register::SQ_PROGRAM_CNTL)] = program.value;
   auto shader2d = TextureExportShader(), shader3d = TextureExportShader(FetchOpDimension::k3DOrStacked);
   for (auto* words : {&shader2d, &shader3d}) for (auto& word : *words) word = rex::byte_swap(word);
   auto* vs2d = render.LoadShader(ShaderType::kVertex, shader2d.data(), uint32_t(shader2d.size()));
   auto* vs3d = render.LoadShader(ShaderType::kVertex, shader3d.data(), uint32_t(shader3d.size()));
   std::vector<std::array<float, 4>> expected;
   const uint32_t destination = memory.GetPhysicalAddress(output) + 0x70000;
-  auto sample = [&](const xe_gpu_texture_fetch_t& fetch, bool use_3d, std::array<float, 4> uv,
+  auto sample = [&](const TextureFetch& fetch, bool use_3d, std::array<float, 4> uv,
                     std::array<float, 4> color) {
-    xe_gpu_memexport_stream_t stream{};
+    MemExportStream stream{};
     stream.base_address = (destination + uint32_t(expected.size()) * 16) >> 2; stream.const_0x1 = 1;
     stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
     stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
     stream.index_count = 1; stream.const_0x96 = 0x96;
     const std::array<float, 4> stride{0, 1, 0, 0};
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 4], stride.data(), sizeof(stride));
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], uv.data(), sizeof(uv));
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch));
-    render.Draw(draw, memory, use_3d ? vs3d : vs2d, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)], &stream, sizeof(stream));
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 4], stride.data(), sizeof(stride));
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 8], uv.data(), sizeof(uv));
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)], &fetch, sizeof(fetch));
+    render.Draw(draw, physical_memory, use_3d ? vs3d : vs2d, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
     expected.push_back(color);
   };
   auto fill = [&](uint32_t physical, size_t size, uint32_t rgba) {
     auto* begin = memory.TranslateVirtual<uint32_t*>(0xA0000000u | physical);
     std::fill_n(begin, size / 4, rgba);
   };
-  xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+  TextureFetch fetch{}; fetch.type = FetchConstantType::kTexture;
   fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_8_8_8_8; fetch.swizzle = 0x688;
   fetch.size_2d.width = 64; fetch.size_2d.height = 31; fetch.pitch = 3;
   fetch.base_address = 0x07FFF000 >> 12;
@@ -593,16 +621,19 @@ void CheckTextureStorageLimit(rex::ui::vulkan::VulkanProvider& provider, const R
       << " pool_rollovers=" << fixture.pool_rollovers << " (emulated 8 sets/pool)\n";
 }
 void CheckPendingContracts(VulkanRender& render, RegisterFile& regs,
-    rex::memory::Memory& memory, rex::graphics::Shader* vs, uint32_t output,
-    const rex::ui::vulkan::VulkanDevice& device) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, rex::gpu::Shader* vs, uint32_t output,
+    const rex::gpu::vulkan::VulkanDevice& device) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical=memory.GetPhysicalAddress(output);
   VkEventCreateInfo info{VK_STRUCTURE_TYPE_EVENT_CREATE_INFO};
   VkEvent event;
   CheckVulkan(LoadNativeVulkanFunction<PFN_vkCreateEvent>(device,"vkCreateEvent")(
-      device.device(),&info,nullptr,&event),"test gate event");
+      device.GetDevice(),&info,nullptr,&event),"test gate event");
   struct EventOwner {
-    const rex::ui::vulkan::VulkanDevice& device; VkEvent event;
-    ~EventOwner() { LoadNativeVulkanFunction<PFN_vkDestroyEvent>(device,"vkDestroyEvent")(device.device(),event,nullptr); }
+    const rex::gpu::vulkan::VulkanDevice& device; VkEvent event;
+    ~EventOwner() { LoadNativeVulkanFunction<PFN_vkDestroyEvent>(device,"vkDestroyEvent")(device.GetDevice(),event,nullptr); }
   } owner{device,event};
   VulkanSubmissionRing gate(device);
   auto commands=gate.Begin();
@@ -615,12 +646,12 @@ void CheckPendingContracts(VulkanRender& render, RegisterFile& regs,
   std::jthread watchdog([&] {
     std::unique_lock lock(mutex);
     timed_out=!cv.wait_for(lock,std::chrono::seconds(2),[&]{return release;});
-    CheckVulkan(LoadNativeVulkanFunction<PFN_vkSetEvent>(device,"vkSetEvent")(device.device(),event),"release test gate");
+    CheckVulkan(LoadNativeVulkanFunction<PFN_vkSetEvent>(device,"vkSetEvent")(device.GetDevice(),event),"release test gate");
   });
   auto draw=[&](uint32_t address,float value) {
-    regs[XE_GPU_REG_SHADER_CONSTANT_000_X]=(address>>2)|(1u<<30);
-    for(unsigned c=0;c<4;++c) regs[XE_GPU_REG_SHADER_CONSTANT_000_X+8+c]=std::bit_cast<uint32_t>(value);
-    render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+    regs[uint32_t(Register::SHADER_CONSTANT_000_X)]=(address>>2)|(1u<<30);
+    for(unsigned c=0;c<4;++c) regs[uint32_t(Register::SHADER_CONSTANT_000_X)+8+c]=std::bit_cast<uint32_t>(value);
+    render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
     render.Flush(false);
   };
   draw(physical,0.75f);
@@ -646,24 +677,27 @@ void CheckPendingContracts(VulkanRender& render, RegisterFile& regs,
   std::cout<<"PASS gated in-flight writebacks: disjoint read, ring reuse, CPU epochs, overlap order, counters, events\n";
 }
 void CheckStagingGrowth(VulkanRender& render, RegisterFile& regs,
-    rex::memory::Memory& memory, rex::graphics::Shader* vs) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, rex::gpu::Shader* vs) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   constexpr uint32_t bytes=17u<<20;
-  const auto allocation=memory.SystemHeapAlloc(bytes,4096,rex::memory::kSystemHeapPhysical);
+  const auto allocation=memory.SystemHeapAlloc(bytes,4096,rex::kernel::kSystemHeapPhysical);
   Require(allocation!=0,"large staging allocation");
   std::memset(memory.TranslateVirtual(allocation),0xCD,bytes);
-  xe_gpu_memexport_stream_t stream;
-  std::memcpy(&stream,&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],16);
+  MemExportStream stream;
+  std::memcpy(&stream,&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],16);
   stream.base_address=memory.GetPhysicalAddress(allocation)>>2;
   stream.index_count=bytes/16;
-  std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-  render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+  std::memcpy(&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+  render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
   render.Flush(false);
   // Change the extent again before the first large staging buffer retires.
   stream.index_count=1;
-  std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-  render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+  std::memcpy(&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+  render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
   render.CompleteGuestWrites(kGuestSyncPacket,0);
-  Require(!std::memcmp(memory.TranslateVirtual(allocation),&regs[XE_GPU_REG_SHADER_CONSTANT_000_X+8],16),"grown staging data");
+  Require(!std::memcmp(memory.TranslateVirtual(allocation),&regs[uint32_t(Register::SHADER_CONSTANT_000_X)+8],16),"grown staging data");
   const auto* result=memory.TranslateVirtual<const uint8_t*>(allocation);
   for(uint32_t i=16;i<bytes;++i) Require(result[i]==0xCD,"grown staging padding or offsets");
   memory.SystemHeapFree(allocation);
@@ -691,21 +725,24 @@ struct ComputeGate {
     return gate.original(device, cache, count, info, allocator, pipelines);
   }
 };
-void CheckCacheMerge(rex::ui::vulkan::VulkanProvider& provider, RegisterFile& regs,
-    rex::memory::Memory& memory, const std::filesystem::path& output) {
+void CheckCacheMerge(rex::gpu::vulkan::VulkanProvider& provider, RegisterFile& regs,
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, const std::filesystem::path& output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const auto cache = output / "late-cache";
-  { VulkanRender seed(provider); seed.SetPipelineDirectory(cache); }
+  { VulkanRender seed(provider,settings,watch); seed.SetPipelineDirectory(cache); }
   Require(std::filesystem::file_size(cache / "pipelines.bin") >= 32, "seed driver cache");
-  auto& functions = const_cast<rex::ui::vulkan::VulkanDevice::Functions&>(provider.vulkan_device()->functions());
+  auto& functions = const_cast<rex::gpu::vulkan::VulkanDevice::Functions&>(provider.GetVulkanDevice()->GetFunctions());
   ComputeGate gate{functions.vkCreateComputePipelines};
   ComputeGate::active = &gate;
   functions.vkCreateComputePipelines = ComputeGate::Create;
   struct Restore {
-    rex::ui::vulkan::VulkanDevice::Functions& functions; ComputeGate& gate;
+    rex::gpu::vulkan::VulkanDevice::Functions& functions; ComputeGate& gate;
     ~Restore() { functions.vkCreateComputePipelines = gate.original; ComputeGate::active = nullptr; }
   } restore{functions, gate};
-  VulkanRender render(provider);
-  render.Resolve(regs, memory);
+  VulkanRender render(provider,settings,watch);
+  render.Resolve(regs, physical_memory);
   {
     std::unique_lock lock(gate.mutex);
     Require(gate.cv.wait_for(lock, std::chrono::seconds(2), [&] { return gate.entered; }), "compute worker entered");
@@ -731,70 +768,85 @@ int main(int argc, char** argv) {
     const bool measured=argc<=5 || std::stoi(argv[5])!=0;
     Require(iterations>0,"positive iteration count");
     Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
-    rex::InitLogging((out/"runtime.log").string().c_str());
-    if (argc > 7) rex::cvar::SetFlagByName("native_pipeline_threads", argv[7]);
-    rex::cvar::SetFlagByName("native_vulkan_perf", measured?"true":"false");
-    if (scale>1) {
-      rex::chrono::FrameTiming::ActivateNative();
-      rex::cvar::SetFlagByName("native_enhanced", "true");
-      rex::cvar::SetFlagByName("native_scale_x", std::to_string(scale));
-      rex::cvar::SetFlagByName("native_scale_y", std::to_string(scale));
+    std::vector<std::string> options{
+        "--app.user_root="+rex::string::PathToUTF8(out/"user"),
+        "--app.config_file=",
+        "--log.file_name="+rex::string::PathToUTF8(std::filesystem::absolute(out/"runtime.log")),
+        "--gpu.native.vulkan_perf="+(measured?std::string("true"):std::string("false"))};
+    if(argc>7)options.emplace_back("--gpu.native.pipeline_threads="+std::string(argv[7]));
+    if(scale>1) {
+      options.emplace_back("--gpu.native.enhanced=true");
+      options.emplace_back("--gpu.native.scale_x="+std::to_string(scale));
+      options.emplace_back("--gpu.native.scale_y="+std::to_string(scale));
     }
-    rex::Runtime runtime(out, out/"user");
-    rex::RuntimeConfig config; config.tool_mode=true; config.kernel_init=rex::kernel::InitializeKernel;
-    Require(runtime.Setup(std::move(config))==0,"runtime setup");
+    auto* module=static_cast<rex::IModule*>(ReXCreateInterface(rex::IModule::kInterface.name,rex::IModule::kInterface.version));
+    Require(module!=nullptr,"linked Native module");
+    x360n::GPUProbeApp app(out,"rexgpu-native","native-vulkan",module);
+    const auto initialized=app.Init(rex::CLIArgList::Parse(options));
+    if(!initialized)throw std::runtime_error(initialized.error().GetDescription());
+    auto& driver=static_cast<rex::gpu::XenosGraphicsDriverBase&>(app.GetProbeDriver());
+    const auto surface=driver.SetSurface({});
+    if(!surface)throw std::runtime_error(surface.error().GetDescription());
+    const auto& settings=static_cast<const XenosSettings&>(driver);
+    if(scale>1)rex::chrono::FrameTiming::ActivateNative();
     Require(GetNativeQualitySettings().scale_x==scale,"requested Enhanced scale is inactive");
-    auto& memory=*runtime.memory();
-    auto provider=rex::ui::vulkan::VulkanProvider::Create(true,true);
-    Require(bool(provider),"Vulkan provider");
-    std::cout<<"device="<<provider->vulkan_device()->properties().deviceName<<"\n";
-    const auto output=memory.SystemHeapAlloc(1<<20,4096,rex::memory::kSystemHeapPhysical);
-    const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::memory::kSystemHeapPhysical);
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    Require(bool(runtime.GetTitlePaths().game_root.Set(out)),"benchmark game path");
+    Require(bool(runtime.GetTitlePaths().entry.Set(std::string{})),"benchmark entry path");
+    const auto loaded=runtime.Load();
+    if(!loaded)throw std::runtime_error(loaded.error().GetDescription());
+    auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+    auto& physical_memory=runtime.GetPhysicalMemory();
+    auto& watch=runtime.GetPhysicalWriteWatch();
+    auto* provider=static_cast<rex::gpu::vulkan::VulkanProvider*>(driver.GetProvider());
+    Require(provider!=nullptr,"requested graphics provider");
+    const auto output=memory.SystemHeapAlloc(1<<20,4096,rex::kernel::kSystemHeapPhysical);
+    const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::kernel::kSystemHeapPhysical);
     Require(output&&vertices,"physical allocations");
     const uint32_t physical=memory.GetPhysicalAddress(output);
     std::memset(memory.TranslateVirtual(output),0xCD,1<<20);
     {
-      VulkanRender render(*provider);
+      VulkanRender render(*provider,settings,watch);
       RegisterFile draw, resolve;
       reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg=2; program.ps_num_reg=1;
-      draw[XE_GPU_REG_SQ_PROGRAM_CNTL]=program.value;
-      draw[XE_GPU_REG_VGT_MAX_VTX_INDX]=0xFFFFFF;
-      draw[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kNoOperation);
-      draw[XE_GPU_REG_SQ_VS_CONST]=0x000FF000; draw[XE_GPU_REG_SQ_PS_CONST]=0x000FF100;
-      xe_gpu_memexport_stream_t stream{}; stream.base_address=physical>>2; stream.const_0x1=1;
+      draw[uint32_t(Register::SQ_PROGRAM_CNTL)]=program.value;
+      draw[uint32_t(Register::VGT_MAX_VTX_INDX)]=0xFFFFFF;
+      draw[uint32_t(Register::RB_MODECONTROL)]=uint32_t(EDRAMMode::kNoOperation);
+      draw[uint32_t(Register::SQ_VS_CONST)]=0x000FF000; draw[uint32_t(Register::SQ_PS_CONST)]=0x000FF100;
+      MemExportStream stream{}; stream.base_address=physical>>2; stream.const_0x1=1;
       stream.const_0x4b000000=0x4B000000; stream.format=ColorFormat::k_32_32_32_32_FLOAT;
       stream.num_format=SurfaceNumberFormat::kFloat; stream.const_0x4b0=0x4B0;
       stream.index_count=1; stream.const_0x96=0x96;
       const std::array<float,4> data{.25f,.5f,.75f,1.f};
-      std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-      draw[XE_GPU_REG_SHADER_CONSTANT_000_X+5]=std::bit_cast<uint32_t>(1.f);
-      std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X+8],data.data(),16);
+      std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+      draw[uint32_t(Register::SHADER_CONSTANT_000_X)+5]=std::bit_cast<uint32_t>(1.f);
+      std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)+8],data.data(),16);
       auto shader=ExportShader();
       for(auto& word:shader) word=rex::byte_swap(word);
       auto* vs=render.LoadShader(ShaderType::kVertex,shader.data(),uint32_t(shader.size()));
       const float xy[]{0,0,32,0,0,32}; std::memcpy(memory.TranslateVirtual(vertices),xy,sizeof(xy));
-      xe_gpu_vertex_fetch_t fetch{}; fetch.type=FetchConstantType::kVertex;
+      VertexFetch fetch{}; fetch.type=FetchConstantType::kVertex;
       fetch.address=memory.GetPhysicalAddress(vertices)>>2; fetch.size=6;
-      resolve[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]=fetch.dword_0;
-      resolve[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1]=fetch.dword_1;
-      resolve[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kCopy);
-      resolve[XE_GPU_REG_RB_SURFACE_INFO]=80;
-      resolve[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL]=0x80000000;
-      resolve[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]=32|(32<<16);
-      resolve[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR]=32|(32<<16);
-      resolve[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+4096;
-      resolve[XE_GPU_REG_RB_COPY_DEST_PITCH]=32|(32<<16);
-      resolve[XE_GPU_REG_RB_COPY_DEST_INFO]=uint32_t(TextureFormat::k_8_8_8_8)<<7;
+      resolve[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)]=fetch.dword_0;
+      resolve[uint32_t(Register::SHADER_CONSTANT_FETCH_00_1)]=fetch.dword_1;
+      resolve[uint32_t(Register::RB_MODECONTROL)]=uint32_t(EDRAMMode::kCopy);
+      resolve[uint32_t(Register::RB_SURFACE_INFO)]=80;
+      resolve[uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL)]=0x80000000;
+      resolve[uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)]=32|(32<<16);
+      resolve[uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR)]=32|(32<<16);
+      resolve[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+4096;
+      resolve[uint32_t(Register::RB_COPY_DEST_PITCH)]=32|(32<<16);
+      resolve[uint32_t(Register::RB_COPY_DEST_INFO)]=uint32_t(TextureFormat::k_8_8_8_8)<<7;
       reg::RB_COPY_CONTROL control{}; control.copy_command=CopyCommand(1);
-      resolve[XE_GPU_REG_RB_COPY_CONTROL]=control.value;
+      resolve[uint32_t(Register::RB_COPY_CONTROL)]=control.value;
       auto workload=[&](unsigned i) {
         if(mode=="resolve") {
-          resolve[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+4096+(i%8)*4096;
-          render.Resolve(resolve,memory);
+          resolve[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+4096+(i%8)*4096;
+          render.Resolve(resolve, physical_memory);
         } else if(mode!="none") {
           // Adjacent and overlapping writes, within and across submissions.
-          draw[XE_GPU_REG_SHADER_CONSTANT_000_X]=((physical+(i%8)*16)>>2)|(1u<<30);
-          render.Draw(draw,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+          draw[uint32_t(Register::SHADER_CONSTANT_000_X)]=((physical+(i%8)*16)>>2)|(1u<<30);
+          render.Draw(draw, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
         } else render.SetSampleCounts({},false);
         if(mode!="batch") render.Flush(false);
         if(mode=="sync") render.SyncGuestRead(physical,128,0xFF);
@@ -814,7 +866,7 @@ int main(int argc, char** argv) {
       render.Flush(true);
       const auto wall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
       const auto cpu_ns=CpuNs()-cpu;
-      const auto video=VideoMemory(*provider->vulkan_device());
+      const auto video=VideoMemory(*provider->GetVulkanDevice());
       if(mode=="export"||mode=="sync"||mode=="batch") for(unsigned i=0;i<8;++i)
         Require(!std::memcmp(memory.TranslatePhysical(physical+i*16),data.data(),16),"MEMEXPORT byte equality");
       if(mode=="resolve") for(unsigned i=0;i<8*4096;++i)
@@ -842,24 +894,24 @@ int main(int argc, char** argv) {
           <<",\"vram_usage_bytes\":"<<video.CurrentUsage<<",\"vram_budget_bytes\":"<<video.Budget<<"}\n";
       std::cout<<"PASS "<<mode<<" iterations="<<iterations<<" wall_ms="<<wall<<" waits="<<counters.waits-before.waits<<"\n";
       if(argc>6 && std::string(argv[6])=="contracts") {
-        CheckPendingContracts(render,draw,memory,vs,output,*provider->vulkan_device());
-        CheckStagingGrowth(render,draw,memory,vs);
-        CheckResolveContracts(render,resolve,memory,output);
-        CheckTextureResolveDependency(render,draw,resolve,memory,output);
-        if (argc <= 7 || std::stoi(argv[7]) != 0) CheckCacheMerge(*provider, resolve, memory, out);
+        CheckPendingContracts(render,draw,runtime, settings,vs,output,*provider->GetVulkanDevice());
+        CheckStagingGrowth(render,draw,runtime, settings,vs);
+        CheckResolveContracts(render,resolve,runtime, settings,output);
+        CheckTextureResolveDependency(render,draw,resolve,runtime, settings,output);
+        if (argc <= 7 || std::stoi(argv[7]) != 0) CheckCacheMerge(*provider, resolve, runtime, settings, out);
       }
       if(argc>6 && std::string(argv[6])=="storage-contracts")
-        CheckTextureStorageLimit(*provider, draw, memory, output);
+        CheckTextureStorageLimit(*provider, draw, runtime, settings, output);
       if(argc>6 && std::string(argv[6])=="index-contracts")
-        CheckResidentIndices(render, draw, resolve, memory, output, *provider->vulkan_device());
+        CheckResidentIndices(render, draw, resolve, runtime, settings, output, *provider->GetVulkanDevice());
     }
     Require(!measured||NativeVulkanPerformance().live_bytes==0,"Native buffers survived renderer destruction");
     if(argc>6) for(unsigned i=0;i<3;++i) {
-      VulkanRender recreated(*provider); recreated.SetSampleCounts({},false); recreated.Flush(false);
+      VulkanRender recreated(*provider,settings,watch); recreated.SetSampleCounts({},false); recreated.Flush(false);
     }
     Require(!measured||NativeVulkanPerformance().live_bytes==0,"Native buffers survived renderer recreation");
     memory.SystemHeapFree(output); memory.SystemHeapFree(vertices);
-    runtime.Shutdown(); rex::FlushLogging();
+    runtime.Unload(); app.Shutdown();
     return 0;
   } catch(const std::exception& error) {std::cerr<<"FAIL "<<error.what()<<"\n";return 1;}
 }

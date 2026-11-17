@@ -1,36 +1,8 @@
-diff --git a/include/rex/system/kernel_state.h b/include/rex/system/kernel_state.h
---- a/include/rex/system/kernel_state.h
-+++ b/include/rex/system/kernel_state.h
-@@ -27,6 +27,7 @@
- #include <rex/filesystem/vfs.h>
- #include <rex/logging.h>
- #include <rex/system/achievement_manager.h>
-+#include <rex/system/offline_achievement_store.h>
- #include <rex/system/thread_state.h>
- #include <rex/thread/fiber.h>
- #include <rex/system/util/native_list.h>
-@@ -369,6 +370,8 @@ class KernelState {
-   std::vector<AchievementInfo> loaded_achievements() const;
-   AchievementManager& achievements() { return achievement_manager_; }
-   const AchievementManager& achievements() const { return achievement_manager_; }
-+  OfflineAchievementStore& offline_achievements() { return offline_achievement_store_; }
-+  void ConfigureOfflineAchievements(const std::filesystem::path& user_root);
- 
-   using AchievementUnlockCallback = std::function<void(const AchievementInfo&)>;
-   AchievementListenerHandle RegisterAchievementUnlockCallback(AchievementUnlockCallback cb);
-@@ -430,6 +433,7 @@ class KernelState {
-   uint32_t kernel_guest_globals_ = 0;
- 
-   AchievementManager achievement_manager_;
-+  OfflineAchievementStore offline_achievement_store_;
- 
-   std::atomic<bool> dispatch_thread_running_;
-   std::atomic<bool> terminating_title_{false};
-diff --git a/include/rex/system/offline_achievement_store.h b/include/rex/system/offline_achievement_store.h
+diff --git a/include/rex/xam/offline_achievement_store.h b/include/rex/xam/offline_achievement_store.h
 new file mode 100644
 --- /dev/null
-+++ b/include/rex/system/offline_achievement_store.h
-@@ -0,0 +1,69 @@
++++ b/include/rex/xam/offline_achievement_store.h
+@@ -0,0 +1,73 @@
 +// Offline XAM achievements. Original XDBF metadata and per-XUID unlocks are
 +// separate from the optional host achievement facade. BSD-3-Clause.
 +#pragma once
@@ -43,9 +15,11 @@ new file mode 100644
 +#include <unordered_map>
 +#include <vector>
 +
-+#include <rex/system/achievement_store.h>
++#include <rex/title.h>
++#include <rex/platform.h>
++#include <rex/filesystem/file_system_factory.h>
 +
-+namespace rex::system {
++namespace rex::xam {
 +
 +enum class OfflineAchievementResult {
 +  kSuccess,
@@ -57,7 +31,7 @@ new file mode 100644
 +};
 +
 +struct OfflineAchievementRecord {
-+  AchievementInfo info;
++  Achievement info;
 +  uint64_t unlock_filetime = 0;
 +};
 +
@@ -66,8 +40,9 @@ new file mode 100644
 +  uint32_t unlocked_count = 0;
 +};
 +
-+class OfflineAchievementStore {
++class REX_XAM_API OfflineAchievementStore {
 + public:
++  explicit OfflineAchievementStore(filesystem::IFileSystemFactory& factory) : factory_(factory) {}
 +  // Call whenever the local account root changes (including session handoff).
 +  // Empty roots disable persistence; no unlock may silently become volatile.
 +  void Configure(const std::filesystem::path& user_root, uint32_t language = 0);
@@ -92,6 +67,7 @@ new file mode 100644
 +  OfflineAchievementResult TitleName(uint32_t title_id, std::string& name);
 +
 + private:
++  filesystem::IFileSystemFactory& factory_;
 +  std::mutex mutex_;
 +  std::filesystem::path root_;
 +  uint32_t language_ = 0;
@@ -99,62 +75,14 @@ new file mode 100644
 +  std::unordered_map<uint32_t, OfflineAchievementResult> rejected_titles_;
 +};
 +
-+}  // namespace rex::system
-diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
---- a/src/system/CMakeLists.txt
-+++ b/src/system/CMakeLists.txt
-@@ -2,6 +2,7 @@ set(REXSYSTEM_SOURCES
-     runtime.cpp
-     embedded_metadata.cpp
-     achievement_manager.cpp
-+    offline_achievement_store.cpp
-     achievements.cpp
-     kernel_state.cpp
-     xmemory.cpp
-diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
---- a/src/system/kernel_state.cpp
-+++ b/src/system/kernel_state.cpp
-@@ -305,17 +305,24 @@ void KernelState::LoadAchievementsData() {
-   }
- 
-   SetLoadedAchievements(std::move(achievements));
--  if (auto metadata_path = emulator_->FindMetadataPath("achievements.toml")) {
--    achievement_manager_.LoadMetadataFile(*metadata_path);
-+  // The guest uses only original title resources. Editable host metadata and
-+  // legacy title-global unlock files cannot establish per-account progress.
-+  uint32_t data = 0, size = 0;
-+  if (XSUCCEEDED(executable_module_->GetSection(
-+          fmt::format("{:08X}", title_id()).c_str(), &data, &size))) {
-+    const auto result = offline_achievement_store_.ImportTitle(
-+        title_id(), std::span<const uint8_t>(memory()->TranslateVirtual(data), size));
-+    if (result != OfflineAchievementResult::kSuccess)
-+      REXSYS_ERROR("Original achievement metadata {:08X} unavailable: {}",
-+                   title_id(), static_cast<int>(result));
-   }
-+}
- 
--  // Set up the unlock save path and restore persisted state.
--  const auto user_root = emulator_->user_data_root();
--  if (!user_root.empty()) {
--    achievement_manager_.SetUnlockSavePath(user_root / "achievements" /
--                                           fmt::format("{:08X}.toml", title_id()));
--    achievement_manager_.LoadUnlockState();
--  }
-+void KernelState::ConfigureOfflineAchievements(const std::filesystem::path& user_root) {
-+  offline_achievement_store_.Configure(user_root, uint32_t(REXCVAR_GET(user_language)));
-+  // Session handoff may select the shared dashboard account root after loading
-+  // the game. Republish the same original resource into that root immediately.
-+  if (executable_module_) LoadAchievementsData();
- }
- 
- uint32_t KernelState::process_type() const {
-diff --git a/src/system/offline_achievement_store.cpp b/src/system/offline_achievement_store.cpp
++}  // namespace rex::xam
+diff --git a/src/xam/offline_achievement_store.cpp b/src/xam/offline_achievement_store.cpp
 new file mode 100644
 --- /dev/null
-+++ b/src/system/offline_achievement_store.cpp
-@@ -0,0 +1,415 @@
++++ b/src/xam/offline_achievement_store.cpp
+@@ -0,0 +1,433 @@
 +// Durable offline XAM achievement storage. BSD-3-Clause.
-+#include <rex/system/offline_achievement_store.h>
++#include <rex/xam/offline_achievement_store.h>
 +
 +#include <algorithm>
 +#include <array>
@@ -168,11 +96,11 @@ new file mode 100644
 +#include <thread>
 +#include <utility>
 +
-+#include <fmt/format.h>
-+#include <rex/filesystem.h>
++#include <format>
++#include <rex/platform/file.h>
 +#include <rex/hash.h>
 +#include <rex/platform.h>
-+#include <rex/system/util/xdbf_utils.h>
++#include <rex/filesystem/xdbf.h>
 +
 +#if REX_PLATFORM_WIN32
 +#include <windows.h>
@@ -183,7 +111,7 @@ new file mode 100644
 +#include <unistd.h>
 +#endif
 +
-+namespace rex::system {
++namespace rex::xam {
 +namespace {
 +using Result = OfflineAchievementResult;
 +constexpr size_t kMaxXdbfSize = 64 * 1024 * 1024;
@@ -268,7 +196,7 @@ new file mode 100644
 +  const auto length = std::filesystem::file_size(path, ec);
 +  if (ec) return ec == std::errc::no_such_file_or_directory ? Result::kNotFound : Result::kStorageError;
 +  if (length > maximum) return Result::kCorruptData;
-+  auto* file = rex::filesystem::OpenFile(path, "rb");
++  auto* file = rex::platform::OpenFile(path, "rb");
 +  if (!file) return Result::kStorageError;
 +  bytes.resize(size_t(length));
 +  const bool ok = fread(bytes.data(), 1, bytes.size(), file) == bytes.size() &&
@@ -283,7 +211,7 @@ new file mode 100644
 +  if (ec) return Result::kStorageError;
 +  auto temporary = path;
 +  temporary += ".tmp";
-+  auto* file = rex::filesystem::OpenFile(temporary, "wb");
++  auto* file = rex::platform::OpenFile(temporary, "wb");
 +  if (!file) return Result::kStorageError;
 +  bool ok = fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size() && fflush(file) == 0;
 +#if REX_PLATFORM_WIN32
@@ -312,21 +240,22 @@ new file mode 100644
 +}
 +
 +std::filesystem::path MetadataPath(const std::filesystem::path& root, uint32_t title) {
-+  return root / "metadata" / fmt::format("{:08X}.xdbf", title);
++  return root / "metadata" / std::format("{:08X}.xdbf", title);
 +}
 +std::filesystem::path UnlockPath(const std::filesystem::path& root, uint64_t xuid) {
-+  return root / "profiles" / fmt::format("{:016X}.dat", xuid);
++  return root / "profiles" / std::format("{:016X}.dat", xuid);
 +}
-+Result ReadMetadata(const std::filesystem::path& root, uint32_t title, std::vector<uint8_t>& raw) {
++Result ReadMetadata(filesystem::IFileSystemFactory& factory, const std::filesystem::path& root, uint32_t title, std::vector<uint8_t>& raw) {
 +  std::vector<uint8_t> data;
 +  auto result = ReadFile(MetadataPath(root, title), kMaxXdbfSize + 24, data);
 +  if (result != Result::kSuccess) return result;
 +  if (data.size() < 24 || std::memcmp(data.data(), "X360AM01", 8) ||
 +      Read32(data.data() + 8) != title || Read32(data.data() + 12) != data.size() - 24 ||
-+      Read64(data.data() + 16) != XXH3_64bits(data.data() + 24, data.size() - 24))
++      Read64(data.data() + 16) != HashXXH3(std::span<const uint8_t>(data.data() + 24, data.size() - 24)))
 +    return Result::kCorruptData;
 +  raw.assign(data.begin() + 24, data.end());
-+  return util::XdbfGameData(raw.data(), raw.size()).is_valid() ? Result::kSuccess : Result::kCorruptData;
++  const auto reader = factory.OpenXDBF(raw.data(), raw.size());
++  return reader && reader->IsValid() ? Result::kSuccess : Result::kCorruptData;
 +}
 +
 +Result ReadUnlocks(const std::filesystem::path& root, uint64_t xuid, Unlocks& unlocks) {
@@ -338,7 +267,7 @@ new file mode 100644
 +  if (data.size() < 28 || std::memcmp(data.data(), "X360AU01", 8) ||
 +      Read64(data.data() + 8) != xuid || Read32(data.data() + 16) > kMaxUnlocks ||
 +      data.size() != 28 + size_t(Read32(data.data() + 16)) * 16 ||
-+      Read64(data.data() + data.size() - 8) != XXH3_64bits(data.data(), data.size() - 8))
++      Read64(data.data() + data.size() - 8) != HashXXH3(std::span<const uint8_t>(data.data(), data.size() - 8)))
 +    return Result::kCorruptData;
 +  Key previous{};
 +  for (size_t offset = 20; offset + 8 < data.size(); offset += 16) {
@@ -356,14 +285,14 @@ new file mode 100644
 +  for (const auto& [key, time] : unlocks) {
 +    Append32(data, key.first); Append32(data, key.second); Append64(data, time);
 +  }
-+  Append64(data, XXH3_64bits(data.data(), data.size()));
++  Append64(data, HashXXH3(std::span<const uint8_t>(data.data(), data.size())));
 +  return WriteFile(UnlockPath(root, xuid), data);
 +}
-+std::vector<AchievementInfo> Catalog(const util::XdbfGameData& db, uint32_t language) {
-+  std::vector<AchievementInfo> catalog;
-+  const auto selected = language ? db.GetExistingLanguage(static_cast<XLanguage>(language)) : db.default_language();
++std::vector<Achievement> Catalog(const filesystem::IXDBFTitleData& db, uint32_t language) {
++  std::vector<Achievement> catalog;
++  const auto selected = language ? db.GetSupportedLanguage(static_cast<kernel::XLanguage>(language)) : db.GetDefaultLanguage();
 +  for (const auto& entry : db.GetAchievements()) {
-+    AchievementInfo info;
++    Achievement info;
 +    info.id = entry.id; info.image_id = entry.image_id; info.gamerscore = entry.gamerscore;
 +    // State bits are never accepted as evidence of unlocks from metadata.
 +    info.flags = uint32_t(entry.flags) & ~0x30000u;
@@ -374,7 +303,7 @@ new file mode 100644
 +  }
 +  return catalog;
 +}
-+bool ValidCatalog(const util::XdbfGameData& db) {
++bool ValidCatalog(const filesystem::IXDBFTitleData& db) {
 +  std::set<uint32_t> ids;
 +  for (const auto& entry : db.GetAchievements()) {
 +    if (!ids.insert(entry.id).second) return false;
@@ -385,7 +314,7 @@ new file mode 100644
 +
 +void OfflineAchievementStore::Configure(const std::filesystem::path& user_root, uint32_t language) {
 +  std::lock_guard lock(mutex_);
-+  root_ = user_root.empty() ? std::filesystem::path{} : user_root / "offline-achievements-v1";
++  root_ = user_root.empty() ? std::filesystem::path{} : platform::HostPath(user_root) / "offline-achievements-v1";
 +  language_ = language;
 +  rejected_titles_.clear();
 +}
@@ -399,18 +328,22 @@ new file mode 100644
 +    return result;
 +  };
 +  if (raw.empty() || raw.size() > kMaxXdbfSize) return finish(Result::kInvalidArgument);
-+  const util::XdbfGameData db(raw.data(), raw.size());
-+  if (!db.is_valid() || !ValidCatalog(db)) return finish(Result::kCorruptData);
++  const auto reader = factory_.OpenXDBF(raw.data(), raw.size());
++  if (!reader) return Result::kCorruptData;
++  const auto& db = *reader;
++  if (!db.IsValid() || !ValidCatalog(db)) return finish(Result::kCorruptData);
 +  StoreLock store_lock(root_);
 +  if (!store_lock) return finish(Result::kStorageError);
 +  std::vector<uint8_t> previous;
-+  auto result = ReadMetadata(root_, title_id, previous);
++  auto result = ReadMetadata(factory_, root_, title_id, previous);
 +  if (result == Result::kSuccess) {
 +    if (previous.size() == raw.size() && std::equal(previous.begin(), previous.end(), raw.begin()))
 +      return finish(Result::kSuccess);
 +    // A legitimate update may add achievements or localization/images, but
 +    // must preserve the IDs and scores already used to account for unlocks.
-+    const util::XdbfGameData old_db(previous.data(), previous.size());
++    const auto old_reader = factory_.OpenXDBF(previous.data(), previous.size());
++    if (!old_reader) return finish(Result::kCorruptData);
++    const auto& old_db = *old_reader;
 +    const auto current = db.GetAchievements();
 +    for (const auto& old : old_db.GetAchievements()) {
 +      const auto found = std::find_if(current.begin(), current.end(),
@@ -421,7 +354,7 @@ new file mode 100644
 +  } else if (result != Result::kNotFound) return finish(result);
 +  std::vector<uint8_t> data{'X','3','6','0','A','M','0','1'};
 +  Append32(data, title_id); Append32(data, uint32_t(raw.size()));
-+  Append64(data, XXH3_64bits(raw.data(), raw.size()));
++  Append64(data, HashXXH3(std::span<const uint8_t>(raw.data(), raw.size())));
 +  data.insert(data.end(), raw.begin(), raw.end());
 +  return finish(WriteFile(MetadataPath(root_, title_id), data));
 +}
@@ -436,16 +369,20 @@ new file mode 100644
 +  StoreLock store_lock(root_);
 +  if (!store_lock) return Result::kStorageError;
 +  std::vector<uint8_t> raw;
-+  auto result = ReadMetadata(root_, title_id, raw);
++  auto result = ReadMetadata(factory_, root_, title_id, raw);
 +  if (result != Result::kSuccess) return result;
 +  Unlocks unlocks;
 +  result = ReadUnlocks(root_, xuid, unlocks);
 +  if (result != Result::kSuccess) return result;
-+  const util::XdbfGameData db(raw.data(), raw.size());
++  const auto reader = factory_.OpenXDBF(raw.data(), raw.size());
++  if (!reader) return Result::kCorruptData;
++  const auto& db = *reader;
 +  auto catalog = Catalog(db, language_);
 +  for (auto& info : catalog) {
 +    auto found = unlocks.find({title_id, info.id});
-+    records.push_back({std::move(info), found != unlocks.end() ? found->second : 0});
++    const auto time = found != unlocks.end() ? found->second : 0;
++    info.unlocked = time != 0; info.unlock_time = time;
++    records.push_back({std::move(info), time});
 +  }
 +  return Result::kSuccess;
 +}
@@ -461,9 +398,11 @@ new file mode 100644
 +  StoreLock store_lock(root_);
 +  if (!store_lock) return Result::kStorageError;
 +  std::vector<uint8_t> raw;
-+  auto result = ReadMetadata(root_, title_id, raw);
++  auto result = ReadMetadata(factory_, root_, title_id, raw);
 +  if (result != Result::kSuccess) return result;
-+  const util::XdbfGameData db(raw.data(), raw.size());
++  const auto reader = factory_.OpenXDBF(raw.data(), raw.size());
++  if (!reader) return Result::kCorruptData;
++  const auto& db = *reader;
 +  const auto catalog = Catalog(db, language_);
 +  Unlocks unlocks;
 +  result = ReadUnlocks(root_, xuid, unlocks);
@@ -474,7 +413,10 @@ new file mode 100644
 +    const auto info = std::find_if(catalog.begin(), catalog.end(),
 +        [&](const auto& value) { return value.id == id; });
 +    if (info == catalog.end()) return Result::kNotFound;
-+    if (unlocks.emplace(Key{title_id, id}, time).second) pending.push_back({*info, time});
++    if (unlocks.emplace(Key{title_id, id}, time).second) {
++      auto unlocked = *info; unlocked.unlocked = true; unlocked.unlock_time = time;
++      pending.push_back({std::move(unlocked), time});
++    }
 +  }
 +  if (unlocks.size() > kMaxUnlocks) return Result::kStorageError;
 +  if (pending.empty()) return Result::kSuccess;
@@ -502,13 +444,13 @@ new file mode 100644
 +  uint64_t title_score = 0;
 +  uint32_t title_count = 0;
 +  uint32_t current_title = 0;
-+  std::vector<AchievementInfo> catalog;
++  std::vector<Achievement> catalog;
 +  for (const auto& [key, time] : unlocks) {
 +    if (key.first != current_title) {
 +      std::vector<uint8_t> raw;
-+      result = ReadMetadata(root_, key.first, raw);
++      result = ReadMetadata(factory_, root_, key.first, raw);
 +      if (result != Result::kSuccess) return result;
-+      catalog = Catalog(util::XdbfGameData(raw.data(), raw.size()), language_);
++      catalog = Catalog(*factory_.OpenXDBF(raw.data(), raw.size()), language_);
 +      current_title = key.first;
 +    }
 +    auto info = std::find_if(catalog.begin(), catalog.end(), [&](const auto& value) { return value.id == key.second; });
@@ -525,7 +467,7 @@ new file mode 100644
 +  // explicit failure; missing metadata cannot supply names or unlocks.
 +  if (title_totals && !title_count) {
 +    std::vector<uint8_t> raw;
-+    result = ReadMetadata(root_, title_id, raw);
++    result = ReadMetadata(factory_, root_, title_id, raw);
 +    if (result != Result::kSuccess && result != Result::kNotFound) return result;
 +  }
 +  totals = {uint32_t(score), uint32_t(unlocks.size())};
@@ -543,10 +485,12 @@ new file mode 100644
 +  StoreLock store_lock(root_);
 +  if (!store_lock) return Result::kStorageError;
 +  std::vector<uint8_t> raw;
-+  const auto result = ReadMetadata(root_, title_id, raw);
++  const auto result = ReadMetadata(factory_, root_, title_id, raw);
 +  if (result != Result::kSuccess) return result;
-+  const util::XdbfGameData db(raw.data(), raw.size());
-+  const auto block = db.GetEntry(util::XdbfSection::kImage, image_id);
++  const auto reader = factory_.OpenXDBF(raw.data(), raw.size());
++  if (!reader) return Result::kCorruptData;
++  const auto& db = *reader;
++  const auto block = db.GetEntry(filesystem::XDBFSection::kImage, image_id);
 +  if (!block || !block.size) return Result::kNotFound;
 +  image.assign(block.buffer, block.buffer + block.size);
 +  return Result::kSuccess;
@@ -561,21 +505,164 @@ new file mode 100644
 +  StoreLock store_lock(root_);
 +  if (!store_lock) return Result::kStorageError;
 +  std::vector<uint8_t> raw;
-+  const auto result = ReadMetadata(root_, title_id, raw);
++  const auto result = ReadMetadata(factory_, root_, title_id, raw);
 +  if (result != Result::kSuccess) return result;
-+  const util::XdbfGameData db(raw.data(), raw.size());
-+  name = language_ ? db.title(db.GetExistingLanguage(static_cast<XLanguage>(language_))) : db.title();
++  const auto reader = factory_.OpenXDBF(raw.data(), raw.size());
++  if (!reader) return Result::kCorruptData;
++  const auto& db = *reader;
++  name = language_ ? db.GetTitle(db.GetSupportedLanguage(static_cast<kernel::XLanguage>(language_))) : db.GetTitle();
 +  return name.empty() ? Result::kNotFound : Result::kSuccess;
 +}
-+}  // namespace rex::system
-diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
---- a/src/system/xam/user_profile.cpp
-+++ b/src/system/xam/user_profile.cpp
-@@ -127,6 +127,7 @@ UserProfile::Identity UserProfile::FindLocal(uint64_t xuid) const {
++}  // namespace rex::xam
+diff --git a/src/xam/CMakeLists.txt b/src/xam/CMakeLists.txt
+--- a/src/xam/CMakeLists.txt
++++ b/src/xam/CMakeLists.txt
+@@ -4,6 +4,7 @@
+     xam_bodies.cpp
+     language.cpp
+     achievement_manager.cpp
++    offline_achievement_store.cpp
+     app_manager.cpp
+     enumerator_object.cpp
+     socket_object.cpp
+diff --git a/src/xam/xam_state.h b/src/xam/xam_state.h
+--- a/src/xam/xam_state.h
++++ b/src/xam/xam_state.h
+@@ -35,6 +35,7 @@
+ #include <rex/utility.h>
+ 
+ #include "xam/achievement_manager.h"
++#include <rex/xam/offline_achievement_store.h>
+ #include "xam/content_manager.h"
+ 
+ namespace rex::ui {
+@@ -74,6 +75,8 @@
+   ContentManager& GetContentManager() { return *content_manager_; }
+ 
+   AchievementManager& GetAchievementManager() { return *achievement_manager_; }
++  OfflineAchievementStore& GetOfflineAchievements() { return offline_achievement_store_; }
++  Result<void> ImportOriginalAchievements();
+ 
+   rex::xam::UserProfile& GetUserProfile() { return *user_profile_; }
+ 
+@@ -138,7 +141,10 @@
+ 
+   const VideoMode& GetVideoMode() const { return video_mode_; }
+ 
+-  void SetUserLanguage(rex::kernel::XLanguage language) { user_language_ = language; }
++  void SetUserLanguage(rex::kernel::XLanguage language) {
++    user_language_ = language;
++    offline_achievement_store_.Configure(title_.user_data_root, static_cast<u32>(language));
++  }
+ 
+   rex::kernel::XLanguage GetUserLanguage() const { return user_language_; }
+ 
+@@ -174,6 +180,7 @@
+ 
+  private:
+   XAMTitle title_;
++  OfflineAchievementStore offline_achievement_store_;
+   std::unique_ptr<rex::xam::AppManager> app_manager_;
+   std::unique_ptr<rex::xam::UserProfile> user_profile_;
+   std::unique_ptr<ContentManager> content_manager_;
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -2,6 +2,8 @@
+ #include <rex/ui/ui_system.h>
+ 
+ #include <atomic>
++#include <format>
++#include <rex/kernel/object/module_object.h>
+ #include <rex/memory/endian.h>
+ 
+ #include <rex/assert.h>
+@@ -51,7 +53,7 @@
+       notifier(Require<kernel::INotificationBroadcaster>()),
+       overlapped_dispatcher(Require<kernel::IOverlappedDispatcher>()) {}
+ 
+-XAMState::XAMState(const XAMKernelInterfaces& title) : title_(title) {
++XAMState::XAMState(const XAMKernelInterfaces& title) : title_(title), offline_achievement_store_(title.file_system_factory) {
+   app_manager_ = std::make_unique<rex::xam::AppManager>();
+   user_profile_ = std::make_unique<rex::xam::UserProfile>();
+   content_manager_ = std::make_unique<ContentManager>(title_, *user_profile_);
+@@ -93,6 +95,20 @@
+ 
+ void XAMState::ReleaseApps() {
+   app_manager_.reset();
++}
++
++Result<void> XAMState::ImportOriginalAchievements() {
++  const auto module = title_.objects.Get<kernel::ILoadedModule>(title_.modules.GetExecutable().value_or(0));
++  if (!module) return Ok();
++  u32 data = 0, size = 0;
++  if (kernel::XFAILED(module->GetSection(std::format("{:08X}", GetTitleID()), &data, &size))) return Ok();
++  if (!title_.heap.IsGuestRangeAccessible(data, size, kernel::kMemoryProtectRead))
++    return Err(ErrorCategory::kFormat, "original achievement resource is not readable");
++  const auto result = offline_achievement_store_.ImportTitle(GetTitleID(),
++      std::span<const u8>(title_.membase.TranslateVirtual(data), size));
++  if (result != OfflineAchievementResult::kSuccess)
++    return Err(ErrorCategory::kFormat, std::format("original achievement metadata rejected ({})", static_cast<int>(result)));
++  return Ok();
  }
  
- bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
-+  if (kernel_state_) kernel_state_->ConfigureOfflineAchievements(root);
-   std::lock_guard lock(identity_mutex_);
-   identity_ = {};
-   profiles_.clear();
+ u32 XAMState::GetLanguageLocaleFallback(u32 language) {
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -98,7 +98,7 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 4)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 5)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+@@ -115,6 +115,8 @@
+    * @return The manager, valid between AttachTitle and DetachTitle.
+    */
+   [[nodiscard]] virtual IAchievementManager& GetAchievementManager() = 0;
++  /** Imports only the original executable resource into the per-XUID ledger catalog. */
++  [[nodiscard]] virtual Result<void> ImportOriginalAchievements() = 0;
+ 
+   /** Returns the title ID of the executable, 0 when the executable has no execution info. */
+   [[nodiscard]] virtual u32 GetTitleID() const = 0;
+diff --git a/src/xam/xam_title_lifecycle.h b/src/xam/xam_title_lifecycle.h
+--- a/src/xam/xam_title_lifecycle.h
++++ b/src/xam/xam_title_lifecycle.h
+@@ -37,6 +37,7 @@
+   [[nodiscard]] UserProfile& GetUserProfile() override;
+   [[nodiscard]] XAMLoaderState& GetLoaderState() override;
+   [[nodiscard]] IAchievementManager& GetAchievementManager() override;
++  [[nodiscard]] Result<void> ImportOriginalAchievements() override;
+   [[nodiscard]] u32 GetTitleID() const override;
+   [[nodiscard]] std::unique_ptr<filesystem::IXDBFTitleData> GetTitleXDBF() const override;
+ 
+diff --git a/src/xam/xam_title_lifecycle.cpp b/src/xam/xam_title_lifecycle.cpp
+--- a/src/xam/xam_title_lifecycle.cpp
++++ b/src/xam/xam_title_lifecycle.cpp
+@@ -64,6 +64,8 @@
+   return state_->GetAchievementManager();
+ }
+ 
++Result<void> XAMTitleLifecycle::ImportOriginalAchievements() { return state_->ImportOriginalAchievements(); }
++
+ u32 XAMTitleLifecycle::GetTitleID() const {
+   return state_->GetTitleID();
+ }
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -788,6 +788,11 @@
+   }
+ 
+   xam_managers_->GetAchievementManager().ReplaceAchievements(std::move(achievements));
++  // Tool defaults may point user data at original input; never publish metadata there.
++  if (!(tool_mode_ && user_data_root_ == game_data_root_)) {
++    if (auto imported = xam_managers_->ImportOriginalAchievements(); !imported)
++      REXSYS_WARN("{}", imported.error().message);
++  }
+   if (auto metadata_path = FindMetadataPath("achievements.toml")) {
+     if (auto loaded = xam_managers_->GetAchievementManager().LoadMetadataFile(*metadata_path);
+         !loaded) {

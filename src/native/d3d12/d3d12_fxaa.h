@@ -7,8 +7,8 @@
 #include <stdexcept>
 namespace x360n::native {
 namespace fxaa_bytecode {
-#include "src/graphics/shaders/bytecode/d3d12_5_1/fxaa_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/fxaa_extreme_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/fxaa_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/fxaa_extreme_cs.h"
 }
 class D3D12Fxaa {
   template<class T> using Ptr=Microsoft::WRL::ComPtr<T>;
@@ -38,7 +38,7 @@ class D3D12Fxaa {
     Check(device_->CreateRootSignature(0,code->GetBufferPointer(),code->GetBufferSize(),IID_PPV_ARGS(&root_)));
     for(unsigned i=0;i<2;++i) {
       D3D12_COMPUTE_PIPELINE_STATE_DESC pd{};pd.pRootSignature=root_.Get();
-      pd.CS=i?D3D12_SHADER_BYTECODE{fxaa_bytecode::fxaa_extreme_cs,sizeof(fxaa_bytecode::fxaa_extreme_cs)}:D3D12_SHADER_BYTECODE{fxaa_bytecode::fxaa_cs,sizeof(fxaa_bytecode::fxaa_cs)};
+      pd.CS=i?D3D12_SHADER_BYTECODE{fxaa_bytecode::kFXAAExtremeCS,sizeof(fxaa_bytecode::kFXAAExtremeCS)}:D3D12_SHADER_BYTECODE{fxaa_bytecode::kFXAACS,sizeof(fxaa_bytecode::kFXAACS)};
       Check(device_->CreateComputePipelineState(&pd,IID_PPV_ARGS(&pipelines_[i])));
     }
     D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,6,D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,0};

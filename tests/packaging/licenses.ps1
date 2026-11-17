@@ -29,7 +29,7 @@ $cases=@(
  @{name='missing-sdk-license'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/dxc-headers.txt')}},
  @{name='removed-sdk-license-record'; expected='Missing supplemental SDK license'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq 'dxc-headers').license_file=$null; $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='missing-license'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/nlohmann-json.txt')}},
- @{name='changed-license'; expected='Missing or changed original license'; mutate={param($p) Add-Content (Join-Path $p 'licenses/fmt.txt') 'tamper'}},
+ @{name='changed-license'; expected='Missing or changed original license'; mutate={param($p) Add-Content (Join-Path $p 'licenses/spdlog.txt') 'tamper'}},
  @{name='missing-attribution'; expected='SDK file attribution missing'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { Set-Content (Join-Path $base 'licenses/rexglue-attributions.txt') 'empty'; $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; $i.attributions_sha256=(Get-FileHash (Join-Path $base 'licenses/rexglue-attributions.txt')).Hash.ToLowerInvariant(); $i | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='foreign-dll'; expected='Unidentified distributed file'; mutate={param($p) [IO.File]::WriteAllBytes((Join-Path $p 'foreign.dll'),[byte[]](77,90,0,0))}},
  @{name='extra-exe'; expected='Unidentified distributed file'; mutate={param($p) Copy-Item (Join-Path $p 'app/x360n.exe') (Join-Path $p 'surprise.exe')}},
@@ -40,8 +40,8 @@ $cases=@(
  @{name='header-scope'; expected='Unreviewed transitive header'; mutate={param($p) '["thirdparty/disasm/ppc.h"]' | Set-Content (Join-Path $p 'app/dependency-inputs.json')}},
  @{name='static-link-scope'; expected='Unreviewed static link dependency'; mutate={param($p) '["unidentified.lib"]' | Set-Content (Join-Path $p 'app/link-inputs.json')}},
  @{name='compiler-scope'; expected='Unreviewed third-party translation'; mutate={param($p) $c=Get-Content (Join-Path $p 'app/compile-commands.json') -Raw | ConvertFrom-Json; $c[0].file='<source>/external/rexglue-sdk/thirdparty/disasm/ppc-dis.c'; $c | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $p 'app/compile-commands.json')}},
- @{name='inventory-revision'; expected='Dependency revision differs'; mutate={param($p) $m=Get-Content (Join-Path $p 'package.json') -Raw | ConvertFrom-Json; $m.dependencies.fmt='incorrect'; $m | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $p 'package.json')}},
- @{name='unknown-component'; expected='Unidentified desktop component'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq fmt).spdx='NOASSERTION'; $i | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $base 'licenses/inventory.json') }}}
+ @{name='inventory-revision'; expected='Dependency revision differs'; mutate={param($p) $m=Get-Content (Join-Path $p 'package.json') -Raw | ConvertFrom-Json; $m.dependencies.spdlog='incorrect'; $m | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $p 'package.json')}},
+ @{name='unknown-component'; expected='Unidentified desktop component'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq spdlog).spdx='NOASSERTION'; $i | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $base 'licenses/inventory.json') }}}
 )
 foreach($case in $cases) {
     $p=Join-Path $temp $case.name

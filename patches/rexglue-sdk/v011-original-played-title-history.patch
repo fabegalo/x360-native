@@ -1,0 +1,252 @@
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -280,6 +280,8 @@
+ 
+   // Local account collection; one active account in slot zero. Commit before publication.
+   REX_XAM_API bool InitializeLocal(const std::filesystem::path& root);
++  REX_XAM_API bool RecordTitlePlayed(u32 title_id);
++  REX_XAM_API std::vector<u32> TitlesPlayed(u64 xuid) const;
+   REX_XAM_API u32 CreateLocal(const std::string& name, u64* created_xuid = nullptr);
+   REX_XAM_API std::vector<Identity> local_profiles() const;
+   REX_XAM_API Identity FindLocal(u64 xuid) const;
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -347,6 +347,96 @@
+   return ok;
+ }
+ 
++namespace {
++constexpr size_t kMaxTitlesPlayed = 4096;
++std::filesystem::path TitlesPlayedPath(const std::filesystem::path& store, uint64_t xuid) {
++  return store.parent_path() / std::format("{:016X}", xuid) / "titles-played.dat";
++}
++}
++
++namespace {
++std::optional<std::vector<uint32_t>> ReadTitlesPlayed(const std::filesystem::path& store, uint64_t xuid) {
++  // "X360TP01", big-endian count, then sorted unique big-endian title IDs.
++  std::vector<uint32_t> titles;
++  auto* file = rex::platform::OpenFile(TitlesPlayedPath(store, xuid), "rb");
++  if (!file) {
++    std::error_code error;
++    if (!std::filesystem::exists(TitlesPlayedPath(store, xuid), error) && !error) return titles;
++    return std::nullopt;
++  }
++  std::array<uint8_t, 12> header{};
++  bool ok = fread(header.data(), 1, header.size(), file) == header.size() &&
++            !std::memcmp(header.data(), "X360TP01", 8);
++  const uint32_t count = ok ? (uint32_t(header[8]) << 24) | (uint32_t(header[9]) << 16) |
++                                  (uint32_t(header[10]) << 8) | header[11] : 0;
++  ok = ok && count <= kMaxTitlesPlayed;
++  for (uint32_t i = 0; ok && i < count; ++i) {
++    std::array<uint8_t, 4> id{};
++    ok = fread(id.data(), 1, id.size(), file) == id.size();
++    const uint32_t title = (uint32_t(id[0]) << 24) | (uint32_t(id[1]) << 16) |
++                           (uint32_t(id[2]) << 8) | id[3];
++    ok = ok && title && (title >> 16) != 0xFFFE && (titles.empty() || title > titles.back());
++    if (ok) titles.push_back(title);
++  }
++  ok = ok && fgetc(file) == EOF && !ferror(file);
++  fclose(file);
++  if (!ok) {
++    REXSYS_ERROR("Local profile {:016X}: invalid titles played record", xuid);
++    return std::nullopt;
++  }
++  return titles;
++}
++
++}  // namespace
++
++std::vector<uint32_t> UserProfile::TitlesPlayed(uint64_t xuid) const {
++  std::filesystem::path store;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!storage_ready_ || !ValidLocalXuid(xuid)) return {};
++    store = profile_path_;
++  }
++  return ReadTitlesPlayed(store, xuid).value_or(std::vector<uint32_t>{});
++}
++
++bool UserProfile::RecordTitlePlayed(uint32_t title_id) {
++  auto settings_lock = LockSettings();
++  const auto account = identity();
++  if (!account.signin_state || !title_id || (title_id >> 16) == 0xFFFE) return false;
++  std::filesystem::path store;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!storage_ready_) return false;
++    store = profile_path_;
++  }
++  auto loaded = ReadTitlesPlayed(store, account.xuid);
++  if (!loaded) return false;  // Preserve an unreadable or corrupt committed history.
++  auto titles = std::move(*loaded);
++  const auto position = std::lower_bound(titles.begin(), titles.end(), title_id);
++  if (position != titles.end() && *position == title_id) return true;
++  if (titles.size() >= kMaxTitlesPlayed) return false;
++  titles.insert(position, title_id);
++  std::filesystem::path destination;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!storage_ready_) return false;
++    destination = TitlesPlayedPath(profile_path_, account.xuid);
++  }
++  std::error_code error;
++  std::filesystem::create_directories(destination.parent_path(), error);
++  if (error) return false;
++  std::vector<uint8_t> record(12 + titles.size() * 4);
++  std::memcpy(record.data(), "X360TP01", 8);
++  auto put32 = [&](size_t offset, uint32_t value) {
++    for (unsigned i = 0; i < 4; ++i) record[offset + i] = uint8_t(value >> (24 - i * 8));
++  };
++  put32(8, uint32_t(titles.size()));
++  for (size_t i = 0; i < titles.size(); ++i) put32(12 + i * 4, titles[i]);
++  const bool ok = rex::platform::WriteHostFile(destination, record, true).has_value();
++  if (ok) REXSYS_INFO("Local profile {:016X}: title {:08X} played", account.xuid, title_id);
++  return ok;
++}
++
+ u32 UserProfile::CreateLocal(const std::string& name, u64* created_xuid) {
+   std::lock_guard lock(identity_mutex_);
+   if (created_xuid) *created_xuid = 0;
+@@ -542,6 +632,15 @@
+   const auto title = setting->IsTitleSpecific() && title_id_ ? title_id_() : 0;
+   if (setting->loaded_xuid != GetXUID() || (setting->IsTitleSpecific() && setting->loaded_title_id != title))
+     LoadSetting(setting);
++  if (setting_id == 0x10040012 && setting->type == Setting::Type::kInt32) {
++    const auto account = identity();
++    std::filesystem::path store;
++    { std::lock_guard lock(identity_mutex_); store = profile_path_; }
++    const auto titles = account.signin_state && !store.empty()
++        ? ReadTitlesPlayed(store, account.xuid) : std::optional<std::vector<uint32_t>>(std::vector<uint32_t>{});
++    setting->load_failed = !titles;
++    if (titles) static_cast<Int32Setting*>(setting)->value = static_cast<int32_t>(titles->size());
++  }
+ 
+   return setting;
+ }
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -1057,6 +1057,10 @@
+   return kernel::X_ERROR_SUCCESS;
+ }
+ 
++// Local accounts are full offline accounts, without guest or cached Live flags.
++u32 XamUserIsGuest_entry([[maybe_unused]] u32 user_index) { return 0; }
++u32 XamUserGetCachedUserFlags_entry([[maybe_unused]] u32 user_index) { return 0; }
++
+ u32 XamWriteGamerTile_entry([[maybe_unused]] u32 arg1, [[maybe_unused]] u32 arg2,
+                             [[maybe_unused]] u32 arg3, [[maybe_unused]] u32 arg4,
+                             [[maybe_unused]] u32 arg5, u32 overlapped_ptr) {
+@@ -1182,3 +1186,7 @@
+ REX_XAM_BODY(__imp__XamGetCachedTitleName, rex::xam::XamGetCachedTitleName_entry)
+ 
+ REX_XAM_BODY(__imp__XamGetCachedTitleNameEx, rex::xam::XamGetCachedTitleNameEx_entry)
++
++REX_XAM_BODY(__imp__XamUserIsGuest, rex::xam::XamUserIsGuest_entry)
++
++REX_XAM_BODY(__imp__XamUserGetCachedUserFlags, rex::xam::XamUserGetCachedUserFlags_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1467,7 +1467,6 @@
+ 
+ REX_EXPORT_STUB(__imp__XamUserGetAge);
+ REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+-REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
+ 
+ 
+ REX_EXPORT_STUB(__imp__XamUserGetMembershipTierFromXUID);
+@@ -1484,7 +1483,6 @@
+ REX_EXPORT_STUB(__imp__XamUserGetUsersMissingAvatars);
+ REX_EXPORT_STUB(__imp__XamUserGetXUIDForTFA);
+ REX_EXPORT_STUB(__imp__XamUserInvalidateProfileSetting);
+-REX_EXPORT_STUB(__imp__XamUserIsGuest);
+ REX_EXPORT_STUB(__imp__XamUserIsLogonPreviewModeEnabled);
+ REX_EXPORT_STUB(__imp__XamUserIsParentalControlled);
+ REX_EXPORT_STUB(__imp__XamUserIsPartial);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -414,3 +414,7 @@
+ REX_XAM_FORWARD(__imp__XamGetCachedTitleName)
+ 
+ REX_XAM_FORWARD(__imp__XamGetCachedTitleNameEx)
++
++REX_XAM_FORWARD(__imp__XamUserIsGuest)
++
++REX_XAM_FORWARD(__imp__XamUserGetCachedUserFlags)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -2083,3 +2083,68 @@
+     CHECK(c.Load32(size) == kHeaderSize + kEntrySize);
+   });
+ }
++
++
++REX_TEST_CASE("played titles remain durable and isolated by full account XUID", "[kernel][xam][titles-played]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  const auto root = rex::xam::CurrentTitle().user_data_root;
++  u64 first = 0, second = 0;
++  REQUIRE(profile.CreateLocal("First", &first) == 0);
++  REQUIRE(profile.CreateLocal("Second", &second) == 0);
++  REQUIRE(profile.SetLocalSession(first) == 0);
++  CHECK_FALSE(profile.RecordTitlePlayed(0));
++  CHECK_FALSE(profile.RecordTitlePlayed(0xFFFE07D1));
++  REQUIRE(profile.RecordTitlePlayed(0x58410A5D));
++  REQUIRE(profile.RecordTitlePlayed(0x4D5309C9));
++  REQUIRE(profile.RecordTitlePlayed(0x58410A5D));
++  CHECK(profile.TitlesPlayed(first) == std::vector<u32>{0x4D5309C9, 0x58410A5D});
++  CHECK(profile.TitlesPlayed(second).empty());
++  auto* setting = profile.GetSetting(0x10040012);
++  REQUIRE(setting); CHECK_FALSE(setting->load_failed);
++  CHECK(static_cast<rex::xam::UserProfile::Int32Setting*>(setting)->value == 2);
++  REQUIRE(profile.SetLocalSession(second) == 0);
++  setting = profile.GetSetting(0x10040012);
++  REQUIRE(setting); CHECK_FALSE(setting->load_failed);
++  CHECK(static_cast<rex::xam::UserProfile::Int32Setting*>(setting)->value == 0);
++  REQUIRE(profile.RecordTitlePlayed(0x12345678));
++  rex::xam::UserProfile reopened;
++  REQUIRE(reopened.InitializeLocal(root));
++  CHECK(reopened.TitlesPlayed(first) == std::vector<u32>{0x4D5309C9, 0x58410A5D});
++  CHECK(reopened.TitlesPlayed(second) == std::vector<u32>{0x12345678});
++  REQUIRE(profile.SetLocalSession(0) == 0);
++  CHECK_FALSE(profile.RecordTitlePlayed(0x12345678));
++  fixture.RunOnGuestThread([&](Caller& c) {
++    for (const auto user : {0u, 1u, 0xFEu, 0xFFu}) {
++      CHECK(c.XAM("XamUserIsGuest", {user}) == 0);
++      CHECK(c.XAM("XamUserGetCachedUserFlags", {user}) == 0);
++    }
++  });
++}
++
++REX_TEST_CASE("corrupt played-title histories cannot be overwritten or reported as a valid zero", "[kernel][xam][titles-played]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  REQUIRE(profile.CreateLocal("Keep") == 0);
++  const auto xuid = profile.identity().xuid;
++  REQUIRE(profile.SetLocalSession(xuid) == 0);
++  REQUIRE(profile.RecordTitlePlayed(0x12345678));
++  const auto path = rex::xam::CurrentTitle().user_data_root / "profiles" / std::format("{:016X}", xuid) / "titles-played.dat";
++  auto valid = rex::platform::ReadHostFile(path);
++  REQUIRE(valid); REQUIRE(valid->size() == 16);
++  CHECK(std::string(valid->begin(), valid->begin() + 8) == "X360TP01");
++  for (const auto& damaged : {std::vector<u8>{'b', 'a', 'd'}, [&] { auto v = *valid; v.push_back(0); return v; }(),
++                            [&] { auto v = *valid; v[8] = 0xFF; return v; }()}) {
++    REQUIRE(rex::platform::WriteHostFile(path, damaged, true));
++    CHECK_FALSE(profile.RecordTitlePlayed(0x87654321));
++    const auto after = rex::platform::ReadHostFile(path);
++    REQUIRE(after); CHECK(*after == damaged);
++    const auto* setting = profile.GetSetting(0x10040012);
++    REQUIRE(setting); CHECK(setting->load_failed);
++  }
++  REQUIRE(rex::platform::WriteHostFile(path, *valid, true));
++  REQUIRE(profile.RecordTitlePlayed(0x87654321));
++  CHECK(profile.TitlesPlayed(xuid) == std::vector<u32>{0x12345678, 0x87654321});
++  const auto* setting = profile.GetSetting(0x10040012);
++  REQUIRE(setting); CHECK_FALSE(setting->load_failed);
++}

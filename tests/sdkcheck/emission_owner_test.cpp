@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
-#include <rex/codegen/codegen_context.h>
-#include <rex/codegen/phases.h>
+#include "codegen/pipeline.h"
+#include "codegen/codegen_context.h"
 #include "synthetic_xex.h"
 #include <fstream>
 #include <iterator>
@@ -23,6 +22,28 @@ std::string Emitted(const Workdir& work) {
 }
 }
 
+TEST_CASE("A generated module exports its dispatch capability exactly once",
+          "[sdk][codegen][module-registration]") {
+  Workdir work("x360n_emission", "module_registration");
+  work.write("test.xex", BuildXex({}, nullptr, 0, Entry::kReturnZero));
+  std::ofstream(work.dir / "test.toml")
+      << "project_name='module_registration'\nfile_path='test.xex'\nout_directory_path='out'\n";
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
+  REQUIRE(pipeline);
+  REQUIRE(pipeline->RunAnalyze());
+  pipeline->GetContext().SetDLLModule(true);
+  REQUIRE(pipeline->RunWrite());
+  std::ifstream file(work.dir / "out/module_registration_register.cpp", std::ios::binary);
+  REQUIRE(file.good());
+  const std::string emitted(std::istreambuf_iterator<char>(file), {});
+  const std::string capability = "bool ReXModule_UsesHostFunctionTable()";
+  const auto definition = emitted.find(capability);
+  REQUIRE(definition != std::string::npos);
+  CHECK(emitted.find(capability, definition + capability.size()) == std::string::npos);
+  CHECK(emitted.find("ReXRegisterModule(rex::kernel::IFunctionRegistrar*") != std::string::npos);
+  CHECK(emitted.find("const rex::ppc::PPCImage* ReXGetModuleImage()") != std::string::npos);
+}
+
 TEST_CASE("Emission uses the owning function for out of line conditional labels",
           "[sdk][codegen][emission-owner]") {
   auto bytes = BuildXex({}, nullptr, 0, Entry::kReturnZero);
@@ -38,21 +59,21 @@ TEST_CASE("Emission uses the owning function for out of line conditional labels"
   Workdir work("x360n_emission", "out_of_line_owner");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='owner'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  auto& graph = pipeline->context().graph;
-  const auto* owner = graph.getFunction(kXexText);
+  auto& graph = pipeline->GetContext().graph;
+  const auto* owner = graph.GetFunction(kXexText);
   REQUIRE(owner);
-  REQUIRE(owner->containsAddress(kXexText + 68));
-  REQUIRE(owner->containsAddress(kXexText + 80));
+  REQUIRE(owner->ContainsAddress(kXexText + 68));
+  REQUIRE(owner->ContainsAddress(kXexText + 80));
   // A separate entry in the address gap shadows the owner's discontiguous
   // blocks in the nearest-base lookup. Emission already has the exact owner.
-  auto* between = graph.addFunction(kXexText + 32, 4, rex::codegen::FunctionAuthority::DISCOVERED);
+  auto* between = graph.AddFunction(kXexText + 32, 4, rex::codegen::FunctionAuthority::kDiscovered);
   REQUIRE(between);
-  between->discover({{kXexText + 32, 4}}, {}, {});
-  between->seal();
-  REQUIRE(graph.getFunctionContaining(kXexText + 68) == nullptr);
+  between->Discover({{kXexText + 32, 4}}, {}, {});
+  between->Seal();
+  REQUIRE(graph.GetFunctionContaining(kXexText + 68) == nullptr);
   REQUIRE(pipeline->RunWrite().has_value());
   const auto emitted = Emitted(work);
   CHECK(emitted.find("loc_82010050:") != std::string::npos);
@@ -69,21 +90,21 @@ TEST_CASE("Merge records a tail edge when an internal label becomes a callable e
   Workdir work("x360n_emission", "late_callable_label");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='late_entry'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  auto& graph = pipeline->context().graph;
-  auto* caller = graph.getFunction(kXexText + 32);
+  auto& graph = pipeline->GetContext().graph;
+  auto* caller = graph.GetFunction(kXexText + 32);
   REQUIRE(caller);
-  REQUIRE(caller->containsAddress(kXexText + 96));
-  REQUIRE_FALSE(graph.isEntryPoint(kXexText + 96));
+  REQUIRE(caller->ContainsAddress(kXexText + 96));
+  REQUIRE_FALSE(graph.IsEntryPoint(kXexText + 96));
   // Model an entry found after this caller's blocks were discovered. Its
   // original branch was a label, so it has no unresolved jump to resolve.
-  auto* target = graph.addFunction(kXexText + 96, 8, rex::codegen::FunctionAuthority::DISCOVERED, true);
+  auto* target = graph.AddFunction(kXexText + 96, 8, rex::codegen::FunctionAuthority::kDiscovered, true);
   REQUIRE(target);
-  target->discover({{kXexText + 96, 8}}, {}, {});
-  target->seal();
-  REQUIRE(rex::codegen::phases::Merge(pipeline->context()).has_value());
+  target->Discover({{kXexText + 96, 8}}, {}, {});
+  target->Seal();
+  REQUIRE(rex::codegen::detail::MergeFunctions(pipeline->GetContext()).has_value());
   REQUIRE(pipeline->RunWrite().has_value());
   const auto emitted = Emitted(work);
   CHECK(emitted.find("Unresolved call") == std::string::npos);

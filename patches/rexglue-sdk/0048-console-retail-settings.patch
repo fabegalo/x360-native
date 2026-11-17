@@ -1,14 +1,14 @@
 diff --git a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
-index f4ad126..c702936 100644
 --- a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
 +++ b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
-@@ -21,9 +21,74 @@
- #include <rex/system/kernel_state.h>
- #include <rex/system/user_module.h>
- #include <rex/system/xtypes.h>
-+#include <rex/runtime.h>
-+#include <rex/filesystem.h>
+@@ -20,8 +20,76 @@
+ #include "kernel/stub_log.h"
+ #include "kernel/kernel.h"
+ #include "kernel/settings_access.h"
++#include <rex/path_settings.h>
++#include <rex/platform/file.h>
 +#include <array>
++#include <cstring>
 +#include <mutex>
 +#if REX_PLATFORM_WIN32
 +#include <windows.h>
@@ -18,11 +18,11 @@ index f4ad126..c702936 100644
 +#endif
  
  namespace rex::kernel::xboxkrnl {
- 
++
 +namespace {
 +std::mutex retail_flags_mutex;
 +std::filesystem::path RetailFlagsPath() {
-+  return Runtime::instance()->user_data_root() / "console" / "retail-flags-v1.dat";
++  return REX_PATHS().user_root.Get() / "console" / "retail-flags-v1.dat";
 +}
 +bool ReadRetailFlags(uint32_t& flags) {
 +  const auto path = RetailFlagsPath();
@@ -31,7 +31,7 @@ index f4ad126..c702936 100644
 +  if (error) return false;
 +  if (!exists) { flags = 0x40; return true; } // Existing console default; no consent bit.
 +  std::array<uint8_t, 12> record{};
-+  auto* file = filesystem::OpenFile(path, "rb");
++  auto* file = platform::OpenFile(path, "rb");
 +  if (!file) return false;
 +  const auto count = fread(record.data(), 1, record.size(), file);
 +  const auto extra = fgetc(file);
@@ -51,7 +51,7 @@ index f4ad126..c702936 100644
 +  memory::store_and_swap<uint32_t>(record.data() + 8, flags);
 +  auto temporary = path;
 +  temporary += ".tmp";
-+  auto* file = filesystem::OpenFile(temporary, "wb");
++  auto* file = platform::OpenFile(temporary, "wb");
 +  if (!file) return false;
 +  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
 +#if REX_PLATFORM_WIN32
@@ -74,27 +74,31 @@ index f4ad126..c702936 100644
 +}
 +}
 +
- X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer,
-                                uint16_t buffer_size, uint16_t* required_size) {
-   uint16_t setting_size = 0;
-@@ -72,9 +137,14 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
-           memory::store_and_swap<uint32_t>(value, 0x00010001);
-           break;
-         case 0x000C:  // XCONFIG_USER_RETAIL_FLAGS
-+        {
-+          std::lock_guard lock(retail_flags_mutex);
-+          uint32_t flags;
-+          if (!ReadRetailFlags(flags)) return X_STATUS_UNSUCCESSFUL;
++
+ 
+ /**
+  * Reads a console configuration setting.
+@@ -84,10 +152,14 @@
            setting_size = 4;
--          memory::store_and_swap<uint32_t>(value, 0x40);
-+          memory::store_and_swap<uint32_t>(value, flags);
+           memory::store<be_u32>(value, 0x00010001);
            break;
+-        case 0x000C:
+-          setting_size = 4;
+-          memory::store<be_u32>(value, 0x40);
+-          break;
++        case 0x000C: {
++          std::lock_guard lock(retail_flags_mutex);
++          u32 flags;
++          if (!ReadRetailFlags(flags)) return X_STATUS_UNSUCCESSFUL;
++          setting_size = 4;
++          memory::store<be_u32>(value, flags);
++          break;
 +        }
-         case 0x000E:  // XCONFIG_USER_COUNTRY
+         case 0x000E:
            setting_size = 1;
-           value[0] = static_cast<uint8_t>(REXCVAR_GET(user_country));
-@@ -125,7 +195,21 @@ u32 ExGetXConfigSetting_entry(u16 category, u16 setting, mapped_void buffer_ptr,
-   return result;
+           value[0] =
+@@ -142,7 +214,21 @@
+   return X_STATUS_NOT_IMPLEMENTED;
  }
  
 +u32 ExReadModifyWriteXConfigSettingUlong_entry(u16 category, u16 setting, u32 mask, u32 value) {
@@ -105,25 +109,72 @@ index f4ad126..c702936 100644
 +  if (!ReadRetailFlags(flags)) return X_STATUS_UNSUCCESSFUL;
 +  const uint32_t next = (flags & uint32_t(mask)) | uint32_t(value);
 +  if (next != flags && !WriteRetailFlags(next)) return X_STATUS_UNSUCCESSFUL;
-+  REXKRNL_INFO("Console retail flags {:08X} -> {:08X}", flags, next);
++  REXSYS_INFO("Console retail flags {:08X} -> {:08X}", flags, next);
 +  return X_STATUS_SUCCESS;
 +}
 +
  }  // namespace rex::kernel::xboxkrnl
  
  REX_EXPORT(__imp__ExGetXConfigSetting, rex::kernel::xboxkrnl::ExGetXConfigSetting_entry)
-+REX_EXPORT(__imp__ExReadModifyWriteXConfigSettingUlong,
-+           rex::kernel::xboxkrnl::ExReadModifyWriteXConfigSettingUlong_entry)
- REX_EXPORT_STUB(__imp__ExSetXConfigSetting);
-diff --git a/src/kernel/xboxkrnl/xboxkrnl_misc.cpp b/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
-index 58b6000..372e5a9 100644
---- a/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
-+++ b/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
-@@ -64,7 +64,6 @@ REX_EXPORT_STUB(__imp__EmaExecute);
+ REX_EXPORT(__imp__ExSetXConfigSetting, rex::kernel::xboxkrnl::ExSetXConfigSetting_entry)
++
++REX_EXPORT(__imp__ExReadModifyWriteXConfigSettingUlong, rex::kernel::xboxkrnl::ExReadModifyWriteXConfigSettingUlong_entry)
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_stub.cpp b/src/kernel/xboxkrnl/xboxkrnl_stub.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_stub.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_stub.cpp
+@@ -48,7 +48,7 @@
  REX_EXPORT_STUB(__imp__ExRegisterThreadNotification);
  REX_EXPORT_STUB(__imp__ExTerminateTitleProcess);
  REX_EXPORT_STUB(__imp__ExFreeDebugPool);
 -REX_EXPORT_STUB(__imp__ExReadModifyWriteXConfigSettingUlong);
++
  REX_EXPORT_STUB(__imp__ExRegisterXConfigNotification);
  REX_EXPORT_STUB(__imp__ExCancelAlarm);
  REX_EXPORT_STUB(__imp__ExInitializeAlarm);
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -714,3 +714,43 @@
+     CHECK(rex::xam::CurrentXAM().GetUserProfile().GetSigninState() == 0);
+   });
+ }
++
++
++REX_TEST_CASE("console retail flags persist atomically without replacing corrupt originals", "[kernel][xam][console-store]") {
++  KernelFixture fixture;
++  const auto root = fixture.GetRoot();
++  REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++  REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto output = caller.Alloc(4), size = caller.Alloc(4);
++    const auto read = [&] { return caller.Kernel("ExGetXConfigSetting", {3, 0xC, output, 4, size}); };
++    REQUIRE(read() == 0);
++    CHECK(caller.Load32(output) == 0x40);
++    CHECK(caller.Load32(size) >> 16 == 4);
++    CHECK(caller.Kernel("ExReadModifyWriteXConfigSettingUlong", {4, 0xC, 0, 0}) == rex::kernel::X_STATUS_INVALID_PARAMETER_1);
++    CHECK(caller.Kernel("ExReadModifyWriteXConfigSettingUlong", {3, 0xD, 0, 0}) == rex::kernel::X_STATUS_INVALID_PARAMETER_2);
++    REQUIRE(caller.Kernel("ExReadModifyWriteXConfigSettingUlong", {3, 0xC, 0xFFFFFFBF, 0x80}) == 0);
++    REQUIRE(read() == 0);
++    CHECK(caller.Load32(output) == 0x80);
++    const auto path = root / "console" / "retail-flags-v1.dat";
++    std::ifstream saved(path, std::ios::binary);
++    const std::string record(std::istreambuf_iterator<char>(saved), {});
++    REQUIRE(record.size() == 12);
++    CHECK(record.substr(0, 8) == "X360XC01");
++    CHECK(static_cast<unsigned char>(record[11]) == 0x80);
++    saved.close();
++    auto staging = path; staging += ".tmp";
++    std::filesystem::create_directory(staging);
++    CHECK(caller.Kernel("ExReadModifyWriteXConfigSettingUlong", {3, 0xC, 0, 0x40}) == rex::kernel::X_STATUS_UNSUCCESSFUL);
++    REQUIRE(read() == 0);
++    CHECK(caller.Load32(output) == 0x80);
++    std::filesystem::remove(staging);
++    std::ofstream(path, std::ios::binary | std::ios::trunc) << "corrupt";
++    caller.Store32(output, 0xCDCDCDCD);
++    CHECK(read() == rex::kernel::X_STATUS_UNSUCCESSFUL);
++    CHECK(caller.Load32(output) == 0xCDCDCDCD);
++    CHECK(caller.Kernel("ExReadModifyWriteXConfigSettingUlong", {3, 0xC, 0, 0x40}) == rex::kernel::X_STATUS_UNSUCCESSFUL);
++    std::ifstream preserved(path, std::ios::binary);
++    CHECK(std::string(std::istreambuf_iterator<char>(preserved), {}) == "corrupt");
++  });
++}

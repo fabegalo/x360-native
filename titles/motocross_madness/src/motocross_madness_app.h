@@ -1,38 +1,28 @@
-// motocross_madness - ReXGlue Recompiled Project
-//
-// Customize your app by overriding virtual hooks from rex::ReXApp.
-
 #pragma once
+#include "../../common/session_title_app.h"
 
-#include <rex/rex_app.h>
-#include "../../common/launch_handoff.h"
+namespace motocross {
+rex::Result<void> RegisterXamAotProbeSettings(rex::SettingsRegistry& registry);
+void UnregisterXamAotProbeSettings(rex::SettingsRegistry& registry);
+}
 
-class MotocrossMadnessApp : public rex::ReXApp {
+class MotocrossMadnessApp : public x360n::SessionTitleApp {
  public:
-  using rex::ReXApp::ReXApp;
+  MotocrossMadnessApp() : SessionTitleApp("motocross_madness", kPPCImageConfig) {}
+  ~MotocrossMadnessApp() override { Shutdown(); }
 
-  void OnPreLaunchModule() override { x360n::ImportLaunchData(*runtime()); }
-  void OnGuestThreadExit(rex::system::XThread*) override {
-    x360n::ExportLaunchRequest(*runtime());
+ protected:
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(SessionTitleApp::OnConfigure(settings));
+    REX_TRY_VOID(motocross::RegisterXamAotProbeSettings(settings));
+    probe_settings_ = rex::ScopeGuard([&settings] { motocross::UnregisterXamAotProbeSettings(settings); });
+    return rex::Ok();
   }
-  bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
-
-  static std::unique_ptr<rex::ui::WindowedApp> Create(
-      rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<MotocrossMadnessApp>(new MotocrossMadnessApp(ctx, "motocross_madness",
-        PPCImageConfig));
+  void OnRelease() override {
+    SessionTitleApp::OnRelease();
+    probe_settings_.Reset();
   }
 
-  // Override virtual hooks for customization:
-  // void OnPostInitLogging() override {}
-  // void OnPreSetup(rex::RuntimeConfig& config) override {}
-  // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostLoadXexImage() override {}
-  // void OnPostSetup() override {}
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
-  // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
-  // std::unique_ptr<rex::ui::AchievementNotificationDialog>
-  // CreateAchievementNotificationDialog() override;
-  // void OnShutdown() override {}
-  // void OnConfigurePaths(rex::PathConfig& paths) override {}
+ private:
+  rex::ScopeGuard probe_settings_;
 };

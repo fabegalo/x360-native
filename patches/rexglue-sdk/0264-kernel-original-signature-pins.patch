@@ -1,18 +1,7 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
 --- a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
 +++ b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
-@@ -18,9 +18,11 @@
- #include <cstdlib>
- #include <cstring>
- #include <filesystem>
-+#include <initializer_list>
- #include <fstream>
- #include <set>
- #include <sstream>
-+#include <utility>
- 
- #include <fmt/format.h>
- #include <rex/cvar.h>
-@@ -725,6 +727,35 @@ bool LoadLocalKey(const std::string& wanted, std::array<uint8_t, 0x110>& key, bo
+@@ -742,6 +742,39 @@
    return found;
  }
  
@@ -35,9 +24,13 @@
 +};
 +
 +bool IsOriginalSignature(std::initializer_list<std::pair<const void*, size_t>> parts) {
-+  sha256::SHA256 sha;
-+  for (const auto& [data, size] : parts) sha.add(data, size);
-+  const auto hash = sha.getHash();
++  EXCRYPT_SHA256_STATE sha{};
++  ExCryptSha256Init(&sha);
++  for (const auto& [data, size] : parts) ExCryptSha256Update(&sha, static_cast<const u8*>(data), size);
++  std::array<u8, 32> digest{};
++  ExCryptSha256Final(&sha, digest.data(), digest.size());
++  std::string hash;
++  for (const u8 byte : digest) hash += std::format("{:02x}", byte);
 +  const bool pinned = std::find(std::begin(kOriginalSignatures), std::end(kOriginalSignatures), hash) !=
 +                      std::end(kOriginalSignatures);
 +  // The hash names the signature to pin once a local key confirms it.
@@ -48,46 +41,24 @@
  bool IsRsaPub2048(const uint8_t* key) { return !key[0] && !key[1] && !key[2] && key[3] == 0x20; }
  
  bool LoadRsaPublicKey(uint32_t index, std::array<uint8_t, 0x110>& key) {
-@@ -786,17 +817,22 @@ bool VerifyRsaSignature(const uint8_t* key, const uint8_t* digest, const uint8_t
- }
- 
- u32 XeKeysVerifyRSASignature_entry(u32 key, mapped_void digest, mapped_void signature) {
-+  if (!digest || !signature) return 0;
+@@ -850,6 +883,11 @@
+  */
+ u32 XeCryptBnQwBeSigVerify_entry(MappedVoid sig, MappedVoid hash, MappedVoid salt,
+                                  GuestPtrT<XECRYPT_RSA> rsa) {
++  auto& memory = GetCurrent().GetGuestMemory();
++  if (!sig || !hash || !salt || !rsa || !memory.GetReadOnlySpan(sig.GetGuestAddress(), 256) ||
++      !memory.GetReadOnlySpan(hash.GetGuestAddress(), 20) || !memory.GetReadOnlySpan(salt.GetGuestAddress(), 10) ||
++      !memory.GetReadOnlySpan(rsa.GetGuestAddress(), 0x110)) return 0;
++  if (IsOriginalSignature({{hash.As<const u8*>(), 20}, {salt.As<const u8*>(), 10}, {sig.As<const u8*>(), 0x100}})) return 1;
+   const u32 exponent = rsa->public_exponent;
+   if (rsa->size != kSigDigits || (exponent != 3 && exponent != 0x10001)) {
+     return 0;
+@@ -869,6 +907,8 @@
+ u32 XeKeysVerifyRSASignature_entry(u32 key, MappedVoid digest, MappedVoid signature) {
+   auto& memory = GetCurrent().GetGuestMemory();
+   if (!digest || !signature || !memory.GetReadOnlySpan(digest.GetGuestAddress(), 20) || !memory.GetReadOnlySpan(signature.GetGuestAddress(), 256)) return 0;
 +  const uint8_t index[4] = {uint8_t(key >> 24), uint8_t(key >> 16), uint8_t(key >> 8), uint8_t(key)};
-+  if (IsOriginalSignature({{index, 4}, {digest.as<uint8_t*>(), 20}, {signature.as<uint8_t*>(), 0x100}})) {
-+    REXKRNL_DEBUG("XeKeysVerifyRSASignature(key {}) -> true (original signature)", key);
-+    return 1;
-+  }
++  if (IsOriginalSignature({{index, 4}, {digest.As<const u8*>(), 20}, {signature.As<const u8*>(), 0x100}})) return 1;
    std::array<uint8_t, 0x110> public_key{};
--  if (!digest || !signature || !LoadRsaPublicKey(key, public_key)) return 0;
-+  if (!LoadRsaPublicKey(key, public_key)) return 0;
-   const bool valid = VerifyRsaSignature(public_key.data(), digest.as<uint8_t*>(), signature.as<uint8_t*>());
--  REXKRNL_DEBUG("XeKeysVerifyRSASignature(key {}) -> {}", key, valid);
-+  REXKRNL_INFO("XeKeysVerifyRSASignature(key {}) -> {}", key, valid);
-   return valid ? 1 : 0;
- }
- 
- // XeCryptBnQwBeSigFormat as published by console homebrew RE: zero pad, 0x01,
- // 10-byte salt, H' = SHA1(8 zero bytes, hash, salt), 0xBC; the first 0xEB bytes
- // are RC4-masked with H' and the top bit cleared so the block stays below n.
--// Not yet confirmed on an original signature (XTT needs the user's xekey-0x39).
- std::array<uint8_t, 0x100> BeSigFormat(const uint8_t* hash, const uint8_t* salt) {
-   std::array<uint8_t, 0x100> block{};
-   block[0xE0] = 1;
-@@ -871,9 +907,15 @@ bool VerifyBeSignature(const uint8_t* key, const uint8_t* hash, const uint8_t* s
- 
- u32 XeCryptBnQwBeSigVerify_entry(mapped_void signature, mapped_void hash, mapped_void salt, mapped_void key) {
-   if (!signature || !hash || !salt || !key) return 0;
-+  // The original fonts verify without XeKeysGetKey(0x39), which leaves the key
-+  // buffer untouched when no local key exists.
-+  if (IsOriginalSignature({{hash.as<uint8_t*>(), 20}, {salt.as<uint8_t*>(), 10}, {signature.as<uint8_t*>(), 0x100}})) {
-+    REXKRNL_DEBUG("XeCryptBnQwBeSigVerify -> true (original signature)");
-+    return 1;
-+  }
-   const bool valid =
-       VerifyBeSignature(key.as<uint8_t*>(), hash.as<uint8_t*>(), salt.as<uint8_t*>(), signature.as<uint8_t*>());
--  REXKRNL_DEBUG("XeCryptBnQwBeSigVerify -> {}", valid);
-+  REXKRNL_INFO("XeCryptBnQwBeSigVerify -> {}", valid);
-   return valid ? 1 : 0;
- }
- 
+   if (!LoadRsaPublicKey(key, public_key)) return 0;
+   const bool valid = VerifyRsaSignature(public_key.data(), digest.As<uint8_t*>(), signature.As<uint8_t*>());

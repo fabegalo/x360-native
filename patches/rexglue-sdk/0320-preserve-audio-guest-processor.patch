@@ -1,0 +1,13 @@
+diff --git a/src/kernel/apu.cpp b/src/kernel/apu.cpp
+--- a/src/kernel/apu.cpp
++++ b/src/kernel/apu.cpp
+@@ -54,7 +54,8 @@
+     return Err(StatusError(status));
+   }
+   worker_running_ = true;
+-  auto thread = std::make_unique<KernelThread>(runtime_, 128 * 1024, 0, [this]() {
++  // Original XAudio mixers own their callback buffers on guest processor 4.
++  auto thread = std::make_unique<KernelThread>(runtime_, 128 * 1024, 0x10000000, [this]() {
+     WorkerMain();
+     return 0;
+   });

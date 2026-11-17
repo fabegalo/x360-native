@@ -4,16 +4,16 @@
 #include <chrono>
 #include <future>
 #include <thread>
-#include <rex/system/xmemory.h>
+#include <rex/kernel/heap.h>
 
-using namespace rex::memory;
+using namespace rex::kernel;
 
 TEST_CASE("Physical allocations serialize parent and alias metadata", "[sdk][physical-transaction]") {
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   for (uint32_t page : {0x1000u, 0x10000u, 0x1000000u}) {
     auto* heap = memory.LookupHeapByType(true, page);
-    auto guard = rex::thread::global_critical_region::AcquireDirect();
+    auto guard = memory.LockWatches();
     std::promise<void> entered;
     uint32_t address = 0;
     auto allocation = std::async(std::launch::async, [&] {
@@ -33,7 +33,7 @@ TEST_CASE("Physical allocations serialize parent and alias metadata", "[sdk][phy
 
 TEST_CASE("Concurrent physical reuse preserves allocation metadata and page counts",
           "[sdk][physical-transaction]") {
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   auto* heap = memory.LookupHeapByType(true, 0x1000);
   const auto free_before = heap->GetUnreservedPageCount();
@@ -49,9 +49,9 @@ TEST_CASE("Concurrent physical reuse preserves allocation metadata and page coun
         ++failures;
         continue;
       }
-      uint32_t allocation_base = address, size = 0;
-      if (!heap->QueryBaseAndSize(&allocation_base, &size) ||
-          allocation_base + heap->heap_base() != address || size != 0x3000) ++failures;
+      HeapAllocation allocation{};
+      if (!heap->QueryRegionInfo(address, &allocation) ||
+          allocation.allocation_base != address || allocation.allocation_size != 0x3000) ++failures;
       if (!heap->Release(address)) ++failures;
     }
   };

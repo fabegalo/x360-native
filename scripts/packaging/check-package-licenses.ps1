@@ -106,7 +106,7 @@ $compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json'
 Assert-ReleaseCompileCommands $compileCommands
 foreach($command in $compileCommands) {
     $f=$command.file.Replace('\','/')
-    if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
+    if($f -match '^<source>/external/rexglue-sdk/(src/.+|cmake/rexglue_host_alloc_stub\.cpp)$') { $units += $Matches[1] }
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
         if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $scope.thirdparty_translation_units) {
             $thirdpartyUnits += $f.Substring('<source>/external/rexglue-sdk/'.Length)

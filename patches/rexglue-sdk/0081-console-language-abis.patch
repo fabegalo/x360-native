@@ -1,167 +1,210 @@
-diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
-index 625ac3d..d1d8228 100644
---- a/src/kernel/xam/xam_info.cpp
-+++ b/src/kernel/xam/xam_info.cpp
-@@ -177,21 +177,7 @@ u32 XGetGameRegion_entry() {
-   return xeXGetGameRegion();
+diff --git a/include/rex/kernel/kernel_settings.h b/include/rex/kernel/kernel_settings.h
+--- a/include/rex/kernel/kernel_settings.h
++++ b/include/rex/kernel/kernel_settings.h
+@@ -18,6 +18,11 @@
+ 
+ namespace rex::kernel {
+ 
++// Console country IDs 17 and 94 are reserved; invalid values fall back to USA.
++constexpr u32 NormalizeConsoleCountry(u32 country) {
++  return country > 0 && country <= 110 && country != 17 && country != 94 ? country : 103;
++}
++
+ class REX_KERNEL_API KernelSettings final : public SettingOwner {
+  public:
+   REX_SETTING(bool, headless, false, "System dialogs answer at once without showing");
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -74,7 +74,8 @@
+                                                 : rex::kernel::XLanguage::kEnglish;
+   }
+   const rex::kernel::XLanguage language = rex::kernel::ToXLanguage(value);
+-  if (language == rex::kernel::XLanguage::kInvalid) {
++  if (language == rex::kernel::XLanguage::kInvalid ||
++      language == rex::kernel::XLanguage::kSChineseDeprecated) {
+     REXSYS_WARN("kernel.user_language {} is not a title language, using English", value);
+     return rex::kernel::XLanguage::kEnglish;
+   }
+diff --git a/src/xam/xam_locale.cpp b/src/xam/xam_locale.cpp
+--- a/src/xam/xam_locale.cpp
++++ b/src/xam/xam_locale.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include <rex/memory/mapped_ptr.h>
+ #include <rex/kernel/title_runtime.h>
++#include <rex/kernel/kernel_settings.h>
+ #include "xam/xam_ui.h"
+ #include <rex/logging/log_category.h>
+ #include <rex/memory/endian.h>
+@@ -169,10 +170,10 @@
  }
  
--u32 XGetLanguage_entry() {
--  auto desired_language = XLanguage::kEnglish;
--
--  // Switch the language based on game region.
--  // TODO(benvanik): pull from xex header.
--  uint32_t game_region = XEX_REGION_NTSCU;
--  if (game_region & XEX_REGION_NTSCU) {
--    desired_language = XLanguage::kEnglish;
--  } else if (game_region & XEX_REGION_NTSCJ) {
--    desired_language = XLanguage::kJapanese;
--  }
--  // Add more overrides?
--
--  return uint32_t(desired_language);
--}
-+u32 XGetLanguage_entry();  // xam_locale.cpp, legacy language ABI
- 
- u32 XamGetCurrentTitleId_entry() {
-   // NOTE(tomc): Switched this up to get title ID from executable module instead of runtime
-diff --git a/src/kernel/xam/xam_locale.cpp b/src/kernel/xam/xam_locale.cpp
-index 0aa755a..b329bb6 100644
---- a/src/kernel/xam/xam_locale.cpp
-+++ b/src/kernel/xam/xam_locale.cpp
-@@ -189,12 +189,12 @@ uint8_t xeXamGetLocaleFromCountry(uint8_t id) {
- 
- uint8_t xeXamGetLocaleEx(uint8_t max_country_id, uint8_t max_locale_id) {
-   // TODO(gibbed): rework when XConfig is cleanly implemented.
--  uint8_t country_id = static_cast<uint8_t>(REXCVAR_GET(user_country));
-+  uint32_t country_id = REXCVAR_GET(user_country);
-   /*if (XSUCCEEDED(xboxkrnl::xeExGetXConfigSetting(
-           3, 14, &country_id, sizeof(country_id), nullptr))) {*/
+ u8 XamGetLocaleEx(u8 max_country_id, u8 max_locale_id) {
+-  u8 country_id = static_cast<u8>(GetXAMSettings().user_country->Get());
 -  if (country_id <= max_country_id) {
++  const u32 country_id = GetXAMSettings().user_country->Get();
 +  if (country_id > 0 && country_id <= max_country_id) {
-     uint8_t locale_id = xeXamGetLocaleFromCountry(country_id);
+     u8 locale_id = XAMGetLocaleFromCountry(country_id);
 -    if (locale_id <= max_locale_id) {
 +    if (locale_id > 0 && locale_id <= max_locale_id) {
        return locale_id;
      }
    }
-@@ -387,16 +387,30 @@ u32 XamGetCountryFromOnlineCountry_entry(u32 id) {
-   return xeXamGetCountryFromOnlineCountry(static_cast<uint8_t>(id));
- }
+@@ -364,8 +365,23 @@
  
--// Xenia Canary 2372a54105d9: XamGetLanguage uses the configured system
--// language with extended IDs (1..17). ReXGlue's XConfig USER_LANGUAGE
--// already reads user_language. Invalid settings fall back to English;
--// this does not implement font resources or change XGetLanguage.
--u32 XamGetLanguage_entry() {
-+// Xbox language ABI generations: XGetLanguage supports 1..9, V2 adds
-+// Polish/Russian, XAM supports the extended set through Simplified Chinese 17.
-+// ID 10 is reserved in the console setting (not the older XDBF enumeration).
-+// Reference: Xenia Canary xam_locale.cc xeGetLanguage / XTLGetLanguageV2.
-+uint32_t xeXamConfiguredLanguage() {
-   const uint32_t language = REXCVAR_GET(user_language);
--  if (language > 0 && language < 18) return language;
--  REXKRNL_WARN("XamGetLanguage: invalid user_language {}; using English (1)", language);
+ u32 XamGetLanguage_entry() {
+   const u32 language = static_cast<u32>(CurrentXAM().GetUserLanguage());
+-  return language > 0 && language < 18 ? language : 1;
+-}
 +  return language > 0 && language < 18 && language != 10 ? language : 1;
 +}
-+uint32_t xeXamConfiguredCountry() {
-+  const auto country = REXCVAR_GET(user_country);
-+  return country > 0 && country <= 110 && country != 17 && country != 94 ? country : 103;
-+}
-+u32 XamGetCountry_entry() { return xeXamConfiguredCountry(); }
-+uint32_t LanguageForAbi(uint32_t limit) {
-+  const auto language = xeXamConfiguredLanguage();
++
++// Xenia Canary: language ABI generations expose different subsets of console IDs.
++u32 LanguageForAbi(u32 limit) {
++  const u32 language = XamGetLanguage_entry();
 +  if (language < limit) return language;
-+  const auto country = REXCVAR_GET(user_country);
-+  if (country == 53) return 2;  // Japan
-+  if (country == 56) return 7;  // Korea
-   return 1;
- }
++  const u32 country = GetXAMSettings().user_country->Get();
++  return country == 53 ? 2 : country == 56 ? 7 : 1;
++}
++
 +u32 XGetLanguage_entry() { return LanguageForAbi(10); }
 +u32 XTLGetLanguageV2_entry() { return LanguageForAbi(13); }
-+u32 XamGetLanguage_entry() { return xeXamConfiguredLanguage(); }
++u32 XamGetCountry_entry() {
++  return kernel::NormalizeConsoleCountry(GetXAMSettings().user_country->Get());
++}
++u32 XamSetCountry_entry(u32) { return 50; /* ERROR_NOT_SUPPORTED */ }
  
  u32 XamGetLanguageLocaleFallbackString_entry(u32 language) {
-   auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
-@@ -434,8 +448,9 @@ REX_EXPORT(__imp__XamGetLocaleEx, rex::kernel::xam::XamGetLocaleEx_entry)
- REX_EXPORT_STUB(__imp__XamFormatCurrency);
- REX_EXPORT_STUB(__imp__XamFormatMessage);
- REX_EXPORT_STUB(__imp__XamFormatSystemDateString);
--REX_EXPORT_STUB(__imp__XamGetCountry);
-+REX_EXPORT(__imp__XamGetCountry, rex::kernel::xam::XamGetCountry_entry)
- REX_EXPORT_STUB(__imp__XamGetCurrencyFormat);
-+REX_EXPORT(__imp__XTLGetLanguageV2, rex::kernel::xam::XTLGetLanguageV2_entry)
- REX_EXPORT(__imp__XamGetLanguage, rex::kernel::xam::XamGetLanguage_entry)
- REX_EXPORT(__imp__XamGetLanguageLocaleFallbackString,
-            rex::kernel::xam::XamGetLanguageLocaleFallbackString_entry)
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 763c467..df694b6 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -270,7 +270,7 @@ REX_EXPORT_STUB(__imp__XOnlinepFriendsRejectRequest);
- REX_EXPORT_STUB(__imp__XOnlinepFriendsRemove);
- REX_EXPORT_STUB(__imp__XOnlinepFriendsRequest);
- REX_EXPORT_STUB(__imp__XRegisterThreadNotifyRoutine);
--REX_EXPORT_STUB(__imp__XTLGetLanguageV2);
-+// XTLGetLanguageV2 is implemented in xam_locale.cpp.
- REX_EXPORT_STUB(__imp__XTLGetLocaleV1);
- REX_EXPORT_STUB(__imp__XTestOnlineIsConnectedToLive);
- REX_EXPORT_STUB(__imp__XUIElementPropVal_Clear);
-@@ -778,7 +778,8 @@ REX_EXPORT_STUB(__imp__XamSetActiveDashAppInfo);
- REX_EXPORT_STUB(__imp__XamSetAutomation);
- REX_EXPORT_STUB(__imp__XamSetClosedCaptioningState);
- REX_EXPORT_STUB(__imp__XamSetConsoleFriendlyName);
--REX_EXPORT_STUB(__imp__XamSetCountry);
-+// Country changes are persisted by the desktop for the next session.
-+extern "C" REX_FUNC(__imp__XamSetCountry) { ctx.r3.u64 = 50; }  // ERROR_NOT_SUPPORTED
- REX_EXPORT_STUB(__imp__XamSetCurrentTitleDash);
- REX_EXPORT_STUB(__imp__XamSetDashBackstackData);
- REX_EXPORT_STUB(__imp__XamSetDashContext);
-diff --git a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
-index c702936..2087d86 100644
---- a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
-+++ b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
-@@ -32,6 +32,8 @@
- #include <unistd.h>
- #endif
- 
-+namespace rex::kernel::xam { uint32_t xeXamConfiguredLanguage(); uint32_t xeXamConfiguredCountry(); }
+   return CurrentXAM().GetLanguageLocaleFallback(language);
+@@ -397,3 +413,7 @@
+ REX_XAM_BODY(__imp__XamGetLanguage, rex::xam::XamGetLanguage_entry)
+ REX_XAM_BODY(__imp__XamGetLanguageLocaleFallbackString,
+              rex::xam::XamGetLanguageLocaleFallbackString_entry)
 +
- namespace rex::kernel::xboxkrnl {
- 
- namespace {
-@@ -126,7 +128,7 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
-           break;
-         case 0x0009:  // XCONFIG_USER_LANGUAGE
-           setting_size = 4;
--          memory::store_and_swap<uint32_t>(value, REXCVAR_GET(user_language));
-+          memory::store_and_swap<uint32_t>(value, xam::xeXamConfiguredLanguage());
-           break;
-         case 0x000A:  // XCONFIG_USER_VIDEO_FLAGS
-           setting_size = 4;
-@@ -147,7 +149,7 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
-         }
-         case 0x000E:  // XCONFIG_USER_COUNTRY
-           setting_size = 1;
--          value[0] = static_cast<uint8_t>(REXCVAR_GET(user_country));
-+          value[0] = static_cast<uint8_t>(xam::xeXamConfiguredCountry());
-           break;
-         case 0x0019:  // XCONFIG_USER_PC_FLAGS
-           setting_size = 1;
-@@ -207,9 +209,15 @@ u32 ExReadModifyWriteXConfigSettingUlong_entry(u16 category, u16 setting, u32 ma
-   return X_STATUS_SUCCESS;
++REX_XAM_BODY(__imp__XamGetCountry, rex::xam::XamGetCountry_entry)
++REX_XAM_BODY(__imp__XamSetCountry, rex::xam::XamSetCountry_entry)
++REX_XAM_BODY(__imp__XTLGetLanguageV2, rex::xam::XTLGetLanguageV2_entry)
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -202,9 +202,7 @@
+   return GetGameRegion();
  }
  
-+// The desktop owns the persistent session snapshot. Guest writes are not
-+// implemented; do not return the incoming category register as success.
-+u32 ExSetXConfigSetting_entry(u16, u16, mapped_void, u16) {
+-u32 XGetLanguage_entry() {
+-  return static_cast<u32>(CurrentXAM().GetUserLanguage());
+-}
++u32 XGetLanguage_entry();  // Console ABI subsets are implemented in xam_locale.cpp.
+ 
+ u32 XamGetCurrentTitleId_entry() {
+   auto module = CurrentTitle().objects.Get<kernel::ILoadedModule>(
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
+@@ -91,7 +91,7 @@
+         case 0x000E:
+           setting_size = 1;
+           value[0] =
+-              static_cast<u8>(kernel::GetCurrentState().GetKernelSettings().user_country.Get());
++              static_cast<u8>(NormalizeConsoleCountry(kernel::GetCurrentState().GetKernelSettings().user_country.Get()));
+           break;
+         case 0x0019:
+           setting_size = 1;
+@@ -137,7 +137,12 @@
+   return result;
+ }
+ 
++// The desktop persists the next session's settings; guest writes are unsupported.
++u32 ExSetXConfigSetting_entry(u16, u16, MappedVoid, u16) {
 +  return X_STATUS_NOT_IMPLEMENTED;
 +}
 +
  }  // namespace rex::kernel::xboxkrnl
  
  REX_EXPORT(__imp__ExGetXConfigSetting, rex::kernel::xboxkrnl::ExGetXConfigSetting_entry)
- REX_EXPORT(__imp__ExReadModifyWriteXConfigSettingUlong,
-            rex::kernel::xboxkrnl::ExReadModifyWriteXConfigSettingUlong_entry)
 -REX_EXPORT_STUB(__imp__ExSetXConfigSetting);
 +REX_EXPORT(__imp__ExSetXConfigSetting, rex::kernel::xboxkrnl::ExSetXConfigSetting_entry)
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -243,3 +243,9 @@
+ REX_XAM_FORWARD(__imp__XamGetLanguage)
+ 
+ REX_XAM_FORWARD(__imp__XamGetLanguageLocaleFallbackString)
++
++REX_XAM_FORWARD(__imp__XamGetCountry)
++
++REX_XAM_FORWARD(__imp__XamSetCountry)
++
++REX_XAM_FORWARD(__imp__XTLGetLanguageV2)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -255,7 +255,6 @@
+ REX_EXPORT_STUB(__imp__XOnlinepFriendsRejectRequest);
+ REX_EXPORT_STUB(__imp__XOnlinepFriendsRemove);
+ REX_EXPORT_STUB(__imp__XOnlinepFriendsRequest);
+-REX_EXPORT_STUB(__imp__XTLGetLanguageV2);
+ REX_EXPORT_STUB(__imp__XTLGetLocaleV1);
+ REX_EXPORT_STUB(__imp__XTestOnlineIsConnectedToLive);
+ REX_EXPORT_STUB(__imp__XUIElementPropVal_Clear);
+@@ -702,7 +701,6 @@
+ REX_EXPORT_STUB(__imp__XamSetAutomation);
+ REX_EXPORT_STUB(__imp__XamSetClosedCaptioningState);
+ REX_EXPORT_STUB(__imp__XamSetConsoleFriendlyName);
+-REX_EXPORT_STUB(__imp__XamSetCountry);
+ REX_EXPORT_STUB(__imp__XamSetCurrentTitleDash);
+ REX_EXPORT_STUB(__imp__XamSetDashBackstackData);
+ REX_EXPORT_STUB(__imp__XamSetDashContext);
+@@ -1118,7 +1116,6 @@
+ REX_EXPORT_STUB(__imp__XamFormatCurrency);
+ REX_EXPORT_STUB(__imp__XamFormatMessage);
+ REX_EXPORT_STUB(__imp__XamFormatSystemDateString);
+-REX_EXPORT_STUB(__imp__XamGetCountry);
+ REX_EXPORT_STUB(__imp__XamGetCurrencyFormat);
+ REX_EXPORT_STUB(__imp__XamGetLanguageTypeface);
+ REX_EXPORT_STUB(__imp__XamGetLanguageTypefacePatch);
+diff --git a/tests/unit/xam/language_test.cpp b/tests/unit/xam/language_test.cpp
+--- a/tests/unit/xam/language_test.cpp
++++ b/tests/unit/xam/language_test.cpp
+@@ -189,14 +189,16 @@
+ }
+ 
+ REX_TEST_CASE_METHOD(Fixture,
+-                     "Language: Load keeps a configured title language and XGetLanguage returns it",
++                     "Language: console language IDs retain legacy XGetLanguage ABI limits",
+                      "[xam][language]") {
+   for (u32 id = 1; id < static_cast<u32>(rex::kernel::XLanguage::kMaxLanguages); ++id) {
+     INFO(id);
+     { rex::test::ReleaseTestMemory(); }
+     BootedRuntime booted(id);
+-    CHECK(booted.GetRuntime().GetUserLanguage() == static_cast<XLanguage>(id));
+-    CHECK(booted.CallXGetLanguage() == id);
++    // Console setting 10 is reserved; the legacy export only exposes IDs 1..9.
++    const u32 console_id = id == 10 ? 1 : id;
++    CHECK(booted.GetRuntime().GetUserLanguage() == static_cast<XLanguage>(console_id));
++    CHECK(booted.CallXGetLanguage() == (console_id < 10 ? console_id : 1));
+   }
+ }
+ 
+diff --git a/tests/unit/kernel/title_fixture.h b/tests/unit/kernel/title_fixture.h
+--- a/tests/unit/kernel/title_fixture.h
++++ b/tests/unit/kernel/title_fixture.h
+@@ -61,6 +61,8 @@
+       WriteTitle(folder.path / "game");
+       REQUIRE(kernel::GetTitlePaths().game_root.Set(folder.path / "game"));
+     } else {
++      REQUIRE(kernel::GetTitlePaths().game_root.Set(""));
++      REQUIRE(kernel::GetTitlePaths().imports.Set(""));
+       REQUIRE(kernel::GetTitlePaths().entry.Set(""));
+     }
+     if (adjust) {
+@@ -73,6 +75,7 @@
+     CHECK(kernel::GetTitlePaths().game_writable.Reset());
+     CHECK(kernel::GetTitlePaths().metadata_root.Reset());
+     CHECK(kernel::GetTitlePaths().entry.Reset());
++    CHECK(kernel::GetTitlePaths().imports.Reset());
+   }
+ 
+   TempFolder folder;

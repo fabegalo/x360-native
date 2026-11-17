@@ -1,27 +1,25 @@
 // Use the generated mapping table, not a hand-written replacement. This catches
 // ownership regressions which emit a callback's body but omit its entry.
 #include "bounded_byte_init.h"
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/xmemory.h>
+#include "codegen/tool_runtime.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/guest_memory.h>
 #include <cstdio>
 
-using rex::X_STATUS;
 
 int main() {
-  rex::Runtime runtime(X360N_BOUNDED_FIXTURE);
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  if (runtime.Setup(PPCImageConfig, std::move(config), true) != X_STATUS_SUCCESS ||
-      runtime.LoadXexImage("game:\\test.xex") != X_STATUS_SUCCESS) return 1;
-  auto* callback = runtime.function_dispatcher()->GetFunction(0x82010040);
+  rex::codegen::ToolApp app("bounded_byte_native", X360N_BOUNDED_FIXTURE);
+  if (!app.Start()) return 1;
+  rex::kernel::TitleRuntime runtime(kPPCImageConfig, true);
+  if (!runtime.GetTitlePaths().game_root.Set(X360N_BOUNDED_FIXTURE) ||
+      !runtime.GetTitlePaths().entry.Set("test.xex") || !runtime.Load()) return 1;
+  auto callback = runtime.FindFunction(0x82010040);
   if (!callback) { std::puts("FAIL callback missing from generated mappings"); return 2; }
-  auto* base = runtime.memory()->virtual_membase();
+  auto* base = runtime.GetMembase().GetBase();
   // Only this synthetic image is writable, for its index and mutation checks.
-  if (!runtime.memory()->LookupHeap(0x82000000)->Protect(0x82000000, 0x10000,
-      rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite)) return 5;
+  if (!runtime.GetGuestMemory().Protect(0x82000000, 0x10000,
+      rex::kernel::GuestProtect::kReadWrite)) return 5;
   unsigned checks = 0;
   for (unsigned index = 0; index < 16; ++index) {
     REX_STORE_U32(0x82001000, index);
@@ -34,7 +32,7 @@ int main() {
     ++checks;
   }
   PPCContext ctx{};
-  callback(ctx, base);
+  (*callback)(ctx, base);
   if (ctx.r3.u32 != 33) return 4;
   ++checks;
   // Runtime data still selects CTR. A post-AOT change to an external callback

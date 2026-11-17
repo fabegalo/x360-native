@@ -3,14 +3,18 @@
 #include "probe_main.h"
 #include "../sdkcheck/scalar_precision_oracle.h"
 using x360n::test::ScalarExpected;
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/kernel/init.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/system/mmio_handler.h>
-#include <rex/graphics/registers.h>
-#include <rex/graphics/format/ucode.h>
-#include <rex/cvar.h>
+#include "../../src/gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/heap.h>
+#include <rex/ppc/image.h>
+#include <rex/string/text.h>
+#include <rex/gpu/xenos_graphics_driver.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/packet.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/fetch.h>
+#include <rex/memory.h>
 #include "../../src/native/memory/guest_memory_mirror.h"
 #include <algorithm>
 #include <array>
@@ -23,9 +27,8 @@ using x360n::test::ScalarExpected;
 #include <string_view>
 #include <thread>
 #include <vector>
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
-using rex::X_STATUS;
+using namespace rex::xenos;
+namespace xenos=rex::xenos;
 namespace {
 void Require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 uint32_t Packet(uint32_t opcode, uint32_t count) { return 0xC0000000 | ((count - 1) << 16) | (opcode << 8); }
@@ -95,11 +98,11 @@ std::vector<uint32_t> TextureExportShader(FetchOpDimension dimension, bool unnor
   code.back() = (uint32_t(AluVectorOpcode::kMax) << 24) | (3u << 30);
   return code;
 }
-void CheckReadbackEpoch(rex::memory::Memory& memory) {
-  const auto page = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+void CheckReadbackEpoch(rex::kernel::GuestAddressSpace& memory, rex::IPhysicalMemory& physical_memory, rex::IPhysicalWriteWatch& watch) {
+  const auto page = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(page != 0, "epoch probe allocation");
   const auto physical = memory.GetPhysicalAddress(page);
-  x360n::native::GuestMemoryMirror mirror(memory, [](uint32_t, uint32_t) {});
+  x360n::native::GuestMemoryMirror mirror(physical_memory, watch, [](uint32_t, uint32_t) {});
   mirror.RequestRange(physical, 4096);
   std::vector<uint64_t> before_cpu, after_cpu;
   mirror.RangeWrittenByGpu(physical, 4, &before_cpu);
@@ -112,15 +115,16 @@ void CheckReadbackEpoch(rex::memory::Memory& memory) {
   Require(*memory.TranslateVirtual<uint32_t*>(page) == 0x12345678, "old GPU snapshot overwrote newer CPU bytes");
   Require(*memory.TranslateVirtual<uint32_t*>(page + 16) == new_result, "current GPU snapshot was lost");
 }
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+void Run(rex::gpu::IXenosGraphicsDriver& gpu, rex::kernel::GuestAddressSpace& memory,
+         rex::IPhysicalMemory& physical_memory, rex::IPhysicalWriteWatch& watch,
          bool precision, bool mulsc_rtz, bool textures, bool snap, bool legacy_unorm8,
          bool scaled_3d) {
-  CheckReadbackEpoch(memory);
+  CheckReadbackEpoch(memory,physical_memory,watch);
   constexpr uint32_t allocation = 1 << 20;
-  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
-  const auto outputs = memory.SystemHeapAlloc(allocation, 4096, rex::memory::kSystemHeapPhysical);
-  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto outputs = memory.SystemHeapAlloc(allocation, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(ring && outputs && vertices && done, "MEMEXPORT probe allocations");
   std::memset(memory.TranslateVirtual(outputs), 0xCD, allocation);
   std::memset(memory.TranslateVirtual(done), 0, 4);
@@ -134,13 +138,13 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     words.insert(words.end(), shader.begin(), shader.end());
   };
   auto vertex_fetch = [&](uint32_t address, uint32_t dwords) {
-    xe_gpu_vertex_fetch_t fetch{}; fetch.type = FetchConstantType::kVertex; fetch.address = address >> 2; fetch.size = dwords;
-    set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, fetch.dword_0); set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, fetch.dword_1);
+    VertexFetch fetch{}; fetch.type = FetchConstantType::kVertex; fetch.address = address >> 2; fetch.size = dwords;
+    set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0), fetch.dword_0); set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_1), fetch.dword_1);
   };
   reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 2; program.ps_num_reg = 1;
-  set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value); set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
-  set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
-  set(XE_GPU_REG_SQ_VS_CONST, 0x000FF000); set(XE_GPU_REG_SQ_PS_CONST, 0x000FF100);
+  set(uint32_t(Register::SQ_PROGRAM_CNTL), program.value); set(uint32_t(Register::VGT_MAX_VTX_INDX), 0xFFFFFF);
+  set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kNoOperation));
+  set(uint32_t(Register::SQ_VS_CONST), 0x000FF000); set(uint32_t(Register::SQ_PS_CONST), 0x000FF100);
   struct Result {
     std::string name;
     uint32_t address;
@@ -160,10 +164,10 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     result.scalar = scalar; result.input = value[3];
     result.bytes.fill(0xCD); Require(bytes.size() == count * element_bytes && bytes.size() <= result.bytes.size(), "probe expectation extent");
     std::copy(bytes.begin(), bytes.end(), result.bytes.begin());
-    xe_gpu_memexport_stream_t stream{}; stream.base_address = result.address >> 2; stream.const_0x1 = 1;
+    MemExportStream stream{}; stream.base_address = result.address >> 2; stream.const_0x1 = 1;
     stream.const_0x4b000000 = 0x4B000000; stream.format = format; stream.num_format = numeric;
     stream.const_0x4b0 = 0x4B0; stream.index_count = count; stream.const_0x96 = 0x96; stream.endianness = endian;
-    const uint32_t constants = XE_GPU_REG_SHADER_CONSTANT_000_X + (vertex ? 0 : 256 * 4);
+    const uint32_t constants = uint32_t(Register::SHADER_CONSTANT_000_X) + (vertex ? 0 : 256 * 4);
     for (unsigned c = 0; c < 4; ++c) {
       set(constants + c, reinterpret_cast<const uint32_t*>(&stream)[c]);
       fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, mulsc_operand);
@@ -191,8 +195,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   const auto source = issue("VS-only incomplete triangle", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2));
   // A cache-register poll between a GPU store and its vertex-fetch consumer
   // does not publish memory to the CPU. GPU ordering must preserve the alias.
-  set(XE_GPU_REG_COHER_STATUS_HOST, 0);
-  words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 3, XE_GPU_REG_COHER_STATUS_HOST, 0, 0xffffffff, 0x100});
+  set(uint32_t(Register::COHER_STATUS_HOST), 0);
+  words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 3, uint32_t(Register::COHER_STATUS_HOST), 0, 0xffffffff, 0x100});
   vertex_fetch(source, 8);
   issue("GPU vertex alias", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2), true, false, true);
   // The corresponding memory poll must publish the export before the shared
@@ -238,76 +242,76 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   }
   // Pixel side effects remain live without any color writes.
   }
-  set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth)); set(XE_GPU_REG_RB_SURFACE_INFO, 80);
-  set(XE_GPU_REG_RB_COLOR_MASK, 0); set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
-  fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 8); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 8);
-  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -8); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 8);
-  fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0);
-  set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, 16 | (16 << 16));
-  set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, 16 | (16 << 16));
+  set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth)); set(uint32_t(Register::RB_SURFACE_INFO), 80);
+  set(uint32_t(Register::RB_COLOR_MASK), 0); set(uint32_t(Register::RB_DEPTHCONTROL), 0); set(uint32_t(Register::PA_CL_VTE_CNTL), 0x3F);
+  fp(uint32_t(Register::PA_CL_VPORT_XSCALE), 8); fp(uint32_t(Register::PA_CL_VPORT_XOFFSET), 8);
+  fp(uint32_t(Register::PA_CL_VPORT_YSCALE), -8); fp(uint32_t(Register::PA_CL_VPORT_YOFFSET), 8);
+  fp(uint32_t(Register::PA_CL_VPORT_ZSCALE), 1); fp(uint32_t(Register::PA_CL_VPORT_ZOFFSET), 0);
+  set(uint32_t(Register::PA_SC_SCREEN_SCISSOR_TL), 0); set(uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR), 16 | (16 << 16));
+  set(uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL), 0x80000000); set(uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR), 16 | (16 << 16));
   vertex_fetch(memory.GetPhysicalAddress(vertices), 12); load(true, PositionShader());
   if (scaled_3d) {
     texture_sample = false;
     issue("scaled pixel MEMEXPORT control", ColorFormat::k_32_32_32_32_FLOAT,
           SurfaceNumberFormat::kFloat, {1,1,1,1}, 1, 16, raw({1,1,1,1}), false);
     texture_sample = true;
-    const auto render_vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-    const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-    const auto volume = memory.SystemHeapAlloc(16384, 4096, rex::memory::kSystemHeapPhysical);
+    const auto render_vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+    const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+    const auto volume = memory.SystemHeapAlloc(16384, 4096, rex::kernel::kSystemHeapPhysical);
     Require(render_vertices && rect && volume, "scaled 3D fixture allocations");
     const float shifted[]{-.75f,-1,.5f,1, 1.25f,-1,.5f,1, -.75f,1,.5f,1};
     const float rectangle[]{0,0,32,0,0,32};
     std::memcpy(memory.TranslateVirtual(render_vertices), shifted, sizeof(shifted));
     std::memcpy(memory.TranslateVirtual(rect), rectangle, sizeof(rectangle));
     std::memset(memory.TranslateVirtual(volume), 0, 16384);
-    fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 16);
-    fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 16);
-    set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, 32 | (32 << 16));
-    set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, 32 | (32 << 16));
-    set(XE_GPU_REG_PA_SU_VTX_CNTL, 1); set(XE_GPU_REG_RB_COLOR_INFO, 0);
+    fp(uint32_t(Register::PA_CL_VPORT_XSCALE), 16); fp(uint32_t(Register::PA_CL_VPORT_XOFFSET), 16);
+    fp(uint32_t(Register::PA_CL_VPORT_YSCALE), -16); fp(uint32_t(Register::PA_CL_VPORT_YOFFSET), 16);
+    set(uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR), 32 | (32 << 16));
+    set(uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR), 32 | (32 << 16));
+    set(uint32_t(Register::PA_SU_VTX_CNTL), 1); set(uint32_t(Register::RB_COLOR_INFO), 0);
     reg::RB_BLENDCONTROL blend{};
     blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
     blend.color_destblend = blend.alpha_destblend = BlendFactor::kZero;
-    set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
+    set(uint32_t(Register::RB_BLENDCONTROL0), blend.value);
     reg::VGT_DRAW_INITIATOR draw{}; draw.source_select = SourceSelect::kAutoIndex;
     draw.num_indices = 3;
     auto resolve = [&](bool clear) {
       vertex_fetch(memory.GetPhysicalAddress(rect), 6);
-      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
-      set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(volume));
-      set(XE_GPU_REG_RB_COPY_DEST_PITCH, 32 | (32 << 16));
+      set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kCopy));
+      set(uint32_t(Register::RB_COPY_DEST_BASE), memory.GetPhysicalAddress(volume));
+      set(uint32_t(Register::RB_COPY_DEST_PITCH), 32 | (32 << 16));
       reg::RB_COPY_DEST_INFO dest{}; dest.copy_dest_array = 1;
       dest.copy_dest_format = ColorFormat::k_8_8_8_8;
-      set(XE_GPU_REG_RB_COPY_DEST_INFO, dest.value);
+      set(uint32_t(Register::RB_COPY_DEST_INFO), dest.value);
       reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
       copy.color_clear_enable = clear;
-      set(XE_GPU_REG_RB_COLOR_CLEAR, 0); set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
-      set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
+      set(uint32_t(Register::RB_COLOR_CLEAR), 0); set(uint32_t(Register::RB_COLOR_CLEAR_LO), 0);
+      set(uint32_t(Register::RB_COPY_CONTROL), copy.value);
       draw.prim_type = PrimitiveType::kRectangleList;
       words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
     };
     resolve(true);
     vertex_fetch(memory.GetPhysicalAddress(render_vertices), 12);
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
-    set(XE_GPU_REG_RB_COLOR_MASK, 15);
+    set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
+    set(uint32_t(Register::RB_COLOR_MASK), 15);
     using namespace ucode;
     const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) | (uint64_t(ControlFlowOpcode::kAlloc) << 44);
     const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
     load(false, {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
         (1u << 15) | (15u << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24});
     const float color[]{.75f,.25f,.5f,1};
-    for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
+    for (unsigned c = 0; c < 4; ++c) fp(uint32_t(Register::SHADER_CONSTANT_000_X) + 256 * 4 + c, color[c]);
     draw.prim_type = PrimitiveType::kTriangleList;
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
     resolve(false);
-    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
-    set(XE_GPU_REG_RB_COLOR_MASK, 0);
+    set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kColorDepth));
+    set(uint32_t(Register::RB_COLOR_MASK), 0);
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     texture_sample = false;
     issue("scaled pixel MEMEXPORT after resolve", ColorFormat::k_32_32_32_32_FLOAT,
           SurfaceNumberFormat::kFloat, {1,1,1,1}, 1, 16, raw({1,1,1,1}), false);
     texture_sample = true;
-    xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+    TextureFetch fetch{}; fetch.type = FetchConstantType::kTexture;
     fetch.dimension = DataDimension::k3D; fetch.format = TextureFormat::k_8_8_8_8;
     fetch.base_address = memory.GetPhysicalAddress(volume) >> 12; fetch.pitch = 1; fetch.tiled = 1;
     fetch.size_3d.width = fetch.size_3d.height = 31; fetch.size_3d.depth = 3;
@@ -316,7 +320,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     fetch.aniso_filter = AnisoFilter::kDisabled;
     fetch.clamp_x = fetch.clamp_y = fetch.clamp_z = ClampMode::kClampToEdge;
     for (unsigned c = 0; c < 6; ++c)
-      set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, reinterpret_cast<const uint32_t*>(&fetch)[c]);
+      set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + texture_index * 6 + c, reinterpret_cast<const uint32_t*>(&fetch)[c]);
     // Check both sides of the triangle so an empty or incorrectly sized wrapper cannot pass.
     issue("scaled 3D sampled as 2D", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
           {23.5f/32,16.5f/32,0,0}, 1, 16, raw({0,0,0,0}), false);
@@ -374,11 +378,11 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       }
     }
   } else if (textures) {
-    const auto texels = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
+    const auto texels = memory.SystemHeapAlloc(2u << 20, 4096, rex::kernel::kSystemHeapPhysical);
     Require(texels != 0, "texture fixture allocation");
     std::memset(memory.TranslateVirtual(texels), 0, 2u << 20);
     uint32_t cursor = 0;
-    xe_gpu_texture_fetch_t last_texture{};
+    TextureFetch last_texture{};
     auto bind = [&](TextureFormat format, uint32_t width, uint32_t height, bool integer,
                     TextureSign sign, DataDimension dimension, uint32_t swizzle = 0x688,
                     bool no_data = false, uint32_t gpu_source = 0) {
@@ -386,7 +390,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       Require(cursor + uint64_t(width) * height * 16 <= 2u << 20, "texture fixture budget");
       const auto address = texels + cursor;
       cursor += ((width * height * 16 + 4095) & ~4095u);
-      xe_gpu_texture_fetch_t fetch{};
+      TextureFetch fetch{};
       fetch.type = FetchConstantType::kTexture; fetch.dimension = dimension;
       fetch.format = format; fetch.base_address = no_data ? 0 :
           (gpu_source ? gpu_source : memory.GetPhysicalAddress(address)) >> 12;
@@ -399,7 +403,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       fetch.aniso_filter = AnisoFilter::kDisabled;
       fetch.clamp_x = fetch.clamp_y = fetch.clamp_z = ClampMode::kClampToEdge;
       const auto* words_fetch = reinterpret_cast<const uint32_t*>(&fetch);
-      for (unsigned c = 0; c < 6; ++c) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, words_fetch[c]);
+      for (unsigned c = 0; c < 6; ++c) set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + texture_index * 6 + c, words_fetch[c]);
       last_texture = fetch;
       return memory.TranslateVirtual<uint8_t*>(address);
     };
@@ -435,7 +439,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                                     std::nearbyint((63.0f / 255.0f) * 65536.0f)) / 65536.0f;
     for (bool integer : {false, true, false}) {
       last_texture.num_format = integer;
-      set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + 3, last_texture.dword_3);
+      set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + texture_index * 6 + 3, last_texture.dword_3);
       const float value = integer ? 63.0f : normalized;
       issue(integer ? "resident texture changes to integer units" : "resident texture restores normalized units",
             ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
@@ -512,7 +516,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
         last_texture.force_bc_w_to_max = force_w;
         const auto* fetch_words = reinterpret_cast<const uint32_t*>(&last_texture);
         for (unsigned c = 0; c < 6; ++c)
-          set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, fetch_words[c]);
+          set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + texture_index * 6 + c, fetch_words[c]);
         const float rgb = white ? 1.0f : 0.0f;
         issue(white ? "white border alpha" : force_w ? "forced black border alpha" : "black border alpha",
               ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
@@ -543,15 +547,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
           SurfaceNumberFormat::kFloat, {.25f,.25f,0,0}, 1, 16, raw({1234,1234,1234,1234}), false);
   } else {
   issue("pixel MEMEXPORT without color", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), false);
-  set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
+  set(uint32_t(Register::RB_MODECONTROL), uint32_t(EDRAMMode::kNoOperation));
   issue("computed export address", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), true, true);
   }
   words.insert(words.end(), {Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), 1});
   Require(words.size() * 4 < 65536, "probe command capacity");
   for (size_t i = 0; i < words.size(); ++i) rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t(i * 4)), words[i]);
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 13);
-  auto* mmio = memory.LookupVirtualMappedRange(0x7FC80714); Require(mmio != nullptr, "probe GPU doorbell");
-  mmio->write(nullptr, mmio->callback_context, 0x7FC80714, uint32_t(words.size()));
+  gpu.WriteRegister(uint32_t(Register::CP_RB_WPTR), uint32_t(words.size()));
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   while (*marker != 1 && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -628,37 +631,54 @@ X360N_PROBE_MAIN {
     Require(!scaled_3d || (xenos && !textures && !precision && !snap && !legacy_unorm8), "scaled 3D fixture requires only --xenos");
     Require(!(snap || legacy_unorm8) || textures, "texture options require --textures");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
-    rex::InitLogging((output / "runtime.log").string().c_str());
-    rex::Runtime runtime(output, output / "user");
-    rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    if (api == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
     const char* backend = api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan";
-    auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", backend); Require(bool(gpu), "GPU plugin load");
-    const bool rounding_flag = rex::cvar::SetFlagByName("mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
-    Require(rounding_flag || !mulsc_rtz, "mulsc rounding flag");
+    std::vector<std::string> options{
+        "--app.user_root=" + rex::string::PathToUTF8(output / "user"),
+        "--log.file_name=" + rex::string::PathToUTF8(std::filesystem::absolute(output / "runtime.log"))};
+    auto setting=[&](std::string_view name,std::string_view value) {
+      options.emplace_back("--"+std::string(name)+"="+std::string(value));
+    };
+    setting("mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
     if (textures) {
-      Require(rex::cvar::SetFlagByName("texture_point_snap", snap ? "true" : "false") || !snap, "point snap flag");
-      Require(rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", legacy_unorm8 ? "true" : "false") || !legacy_unorm8, "legacy normalization flag");
+      setting("texture_point_snap", snap ? "true" : "false");
+      setting("dxbc_unorm8_fixed16", legacy_unorm8 ? "true" : "false");
       if (!xenos && api == X360N_PROBE_ARG("d3d12"))
-        Require(rex::cvar::SetFlagByName("native_texture_cpu", "false"), "GPU texture load path");
+        setting("native_texture_cpu", "false");
     }
     if (xenos) {
       if (scaled_3d) {
-        Require(rex::cvar::SetFlagByName("resolution_scale", "2"), "scaled 3D resolution");
-        Require(rex::cvar::SetFlagByName("draw_resolution_scale_x", "2"), "scaled 3D X resolution");
-        Require(rex::cvar::SetFlagByName("draw_resolution_scale_y", "2"), "scaled 3D Y resolution");
+        setting("resolution_scale", "2");
+        setting("draw_resolution_scale_x", "2");
+        setting("draw_resolution_scale_y", "2");
       }
-      Require(rex::cvar::SetFlagByName("readback_memexport", "true"), "synchronous MEMEXPORT readback flag");
-      Require(rex::cvar::SetFlagByName("readback_memexport_fast", "false"), "MEMEXPORT readback mode");
-      Require(rex::cvar::SetFlagByName("async_shader_compilation", "false"), "synchronous shader compilation");
-      Require(rex::cvar::SetFlagByName(api == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
-          api == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi"), "interlock shader path");
+      setting("readback_memexport", "true");
+      setting("readback_memexport_fast", "false");
+      setting("async_shader_compilation", "false");
+      setting(api == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
+          api == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi");
     }
-    Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
-    Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
-    struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), precision, mulsc_rtz, textures, snap, legacy_unorm8, scaled_3d); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    x360n::GPUProbeApp app(output, xenos ? "rexgpu-xenos-"+std::string(backend) : "rexgpu-native",
+        xenos ? std::string(backend) : "native-"+std::string(backend));
+    const auto initialized=app.Init(rex::CLIArgList::Parse(options));
+    if(!initialized)throw std::runtime_error(initialized.error().GetDescription());
+    auto& graphics = static_cast<rex::gpu::IGraphicsDriver&>(app.GetProbeDriver());
+    auto* gpu = graphics.AsXenos();
+    Require(gpu != nullptr, "GPU probe requires a Xenos-family driver");
+    const auto surface = graphics.SetSurface({});
+    if (!surface) throw std::runtime_error(surface.error().GetDescription());
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    const auto game = runtime.GetTitlePaths().game_root.Set(output);
+    const auto entry = runtime.GetTitlePaths().entry.Set(std::string{});
+    Require(bool(game) && bool(entry), "GPU probe paths unavailable");
+    const auto loaded = runtime.Load();
+    if (!loaded) throw std::runtime_error(loaded.error().GetDescription());
+    auto* memory = dynamic_cast<rex::kernel::GuestAddressSpace*>(&runtime.GetGuestHeap());
+    Require(memory != nullptr, "GPU probe requires the canonical address space");
+    const auto attached = graphics.AttachTitle(rex::TitleInfo{}, runtime.GetPhysicalMemory(),
+        runtime.GetPhysicalWriteWatch(), runtime.GetGuestInterrupts());
+    if (!attached) throw std::runtime_error(attached.error().GetDescription());
+    rex::ScopeGuard detach([&] { graphics.DetachTitle(); });
+    Run(*gpu, *memory, runtime.GetPhysicalMemory(), runtime.GetPhysicalWriteWatch(), precision, mulsc_rtz, textures, snap, legacy_unorm8, scaled_3d); detach.Reset(); runtime.Unload(); app.Shutdown();
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

@@ -1,24 +1,19 @@
---- a/src/kernel/xam/xam_input.cpp
-+++ b/src/kernel/xam/xam_input.cpp
-@@ -256,15 +256,18 @@
-   auto xam = REX_KERNEL_STATE()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
-   const auto ui = xam->GetSystemUiSession();
-   if (!ui.visible || !ui.input_enabled ||
--      (ui.user != 0xFF && user != ui.user)) {
-+      (ui.user != 0xFF && user != 0xFF && user != ui.user)) {
-     ctx.r3.u64 = X_ERROR_EMPTY;
-     return;
-   }
-   auto* input_backend = kernel::xam::input_system();
-   if (!input_backend) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
-   auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r5.u32);
--  const uint32_t first = user == 0xFF ? 0 : user;
--  const uint32_t end = user == 0xFF ? 4 : user + 1;
-+  // ANY_USER is a query, not a different owner. XUI uses it even when
-+  // Guide opened Sign-in for one controller. Never drain other users here.
-+  const uint32_t selected = user == 0xFF ? ui.user : user;
-+  const uint32_t first = selected == 0xFF ? 0 : selected;
-+  const uint32_t end = selected == 0xFF ? 4 : selected + 1;
-   for (uint32_t index = first; index < end; ++index) {
-     const auto result = input_backend->GetKeystroke(index, 1, stroke);
-     if (result == X_ERROR_SUCCESS) { ctx.r3.u64 = result; return; }
+diff --git a/src/xam/xam_input.cpp b/src/xam/xam_input.cpp
+--- a/src/xam/xam_input.cpp
++++ b/src/xam/xam_input.cpp
+@@ -221,11 +221,12 @@
+                                    GuestPtrT<X_INPUT_KEYSTROKE> stroke) {
+   if (!stroke || (user >= 4 && user != 0xFF)) return kernel::X_ERROR_BAD_ARGUMENTS;
+   const auto ui = CurrentXAM().GetSystemUI().GetSystemUiSession();
+-  if (!ui.visible || !ui.input_enabled || (ui.user != 0xFF && user != ui.user)) return kernel::X_ERROR_EMPTY;
++  if (!ui.visible || !ui.input_enabled || (ui.user != 0xFF && user != 0xFF && user != ui.user)) return kernel::X_ERROR_EMPTY;
+   auto* input = GetInput();
+   if (!input) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+-  const u32 first = user == 0xFF ? 0 : user;
+-  const u32 end = user == 0xFF ? 4 : user + 1;
++  const u32 selected_user = user == 0xFF ? ui.user : user;
++  const u32 first = selected_user == 0xFF ? 0 : selected_user;
++  const u32 end = selected_user == 0xFF ? 4 : selected_user + 1;
+   for (u32 index = first; index < end; ++index) {
+     u32 selected = index;
+     const auto result = TakeInputKeystroke(*input, selected, 1, *stroke);

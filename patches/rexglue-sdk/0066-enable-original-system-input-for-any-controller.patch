@@ -1,13 +1,195 @@
---- a/include/rex/kernel/xam/module.h
-+++ b/include/rex/kernel/xam/module.h
-@@ -66,7 +66,9 @@
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -48,7 +48,7 @@
    }
-   bool EnableSystemUiInput(uint32_t user, bool enable) {
+   bool EnableSystemUiInput(u32 user, bool enable) {
      std::lock_guard lock(system_apps_mutex_);
 -    if (!system_ui_.module || (user != system_ui_.user &&
-+    // XAM 816F24F8 enables all controllers for FF; original Sign-in uses
-+    // this regardless of its requesting user. Ownership remains unchanged.
 +    if (!system_ui_.module || (user != 0xFF && user != system_ui_.user &&
          !(system_ui_.user == 0xFF && user < 4))) return false;
      system_ui_.input_enabled = enable;
      return true;
+diff --git a/tests/unit/kernel/kernel_fixture.h b/tests/unit/kernel/kernel_fixture.h
+--- a/tests/unit/kernel/kernel_fixture.h
++++ b/tests/unit/kernel/kernel_fixture.h
+@@ -26,6 +26,7 @@
+ 
+ namespace rex {
+ class IModule;
++namespace hid { class IInputSystem; }
+ namespace apu {
+ class IAudioSystem;
+ }  // namespace apu
+@@ -133,15 +134,17 @@
+    * @param providers Extra driver providers the app registers.
+    * @param audio_driver The audio driver to select, or empty for none.
+    * @param ui_driver The UI driver to select, or empty for none.
++   * @param input_driver The input driver to select, or empty for none.
+    */
+   explicit KernelFixture(const std::function<void(const std::filesystem::path&)>& populate = {},
+                          std::vector<IModule*> providers = {}, std::string audio_driver = {},
+-                         std::string ui_driver = {});
++                         std::string ui_driver = {}, std::string input_driver = {});
+   ~KernelFixture();
+ 
+   rex::kernel::TitleRuntime& GetRuntime();
+ 
+   rex::apu::IAudioSystem& GetAudio();
++  rex::hid::IInputSystem& GetInput();
+ 
+   rex::ui::IUISystem& GetUI();
+   ui::IUIControl* GetUIControl();
+diff --git a/tests/unit/kernel/kernel_fixture.cpp b/tests/unit/kernel/kernel_fixture.cpp
+--- a/tests/unit/kernel/kernel_fixture.cpp
++++ b/tests/unit/kernel/kernel_fixture.cpp
+@@ -22,6 +22,7 @@
+ 
+ #include <rex/platform/thread.h>
+ #include <rex/apu/audio_system.h>
++#include <rex/hid/input_system.h>
+ #include <rex/ui/ui_system.h>
+ #include <rex/platform/timer.h>
+ #include <rex/kernel/function_dispatcher.h>
+@@ -110,11 +111,11 @@
+ class FixtureApp final : public rex::test::ObjectApp<codegen::ToolApp> {
+  public:
+   FixtureApp(std::string_view app_name, std::filesystem::path app_root,
+-             std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver)
++             std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver, std::string input_driver)
+       : ObjectApp(app_name, std::move(app_root)),
+         providers_(std::move(providers)),
+         audio_driver_(std::move(audio_driver)),
+-        ui_driver_(std::move(ui_driver)) {}
++        ui_driver_(std::move(ui_driver)), input_driver_(std::move(input_driver)) {}
+ 
+   bool Pump() { return RunFrame(); }
+ 
+@@ -128,6 +129,9 @@
+ 
+   Result<void> OnConfigure(SettingsRegistry& settings) override {
+     REX_TRY_VOID(ToolApp::OnConfigure(settings));
++    if (!input_driver_.empty()) {
++      REX_TRY_VOID(GetInput().GetSettings().drivers.SetText(SettingLayer::kTitle, input_driver_));
++    }
+     if (!audio_driver_.empty()) {
+       REX_TRY_VOID(GetAudio().GetSettings().driver.SetText(SettingLayer::kTitle, audio_driver_));
+     }
+@@ -141,6 +145,7 @@
+   std::vector<IModule*> providers_;
+   std::string audio_driver_;
+   std::string ui_driver_;
++  std::string input_driver_;
+ };
+ 
+ u32 Caller::Call(kernel::ExportModule module, std::string_view name,
+@@ -264,9 +269,9 @@
+   };
+ 
+   Impl(const std::function<void(const std::filesystem::path&)>& populate,
+-       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver)
++       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver, std::string input_driver)
+       : app("kernel_fixture", app_root.path, std::move(providers), std::move(audio_driver),
+-            std::move(ui_driver)),
++            std::move(ui_driver), std::move(input_driver)),
+         tool((ReleaseTestMemory(), BuildTool(app, root.path, populate))) {}
+ 
+   ThreadDrain drain;
+@@ -278,9 +283,9 @@
+ 
+ KernelFixture::KernelFixture(const std::function<void(const std::filesystem::path&)>& populate,
+                              std::vector<IModule*> providers, std::string audio_driver,
+-                             std::string ui_driver)
++                             std::string ui_driver, std::string input_driver)
+     : impl_(std::make_unique<Impl>(populate, std::move(providers), std::move(audio_driver),
+-                                   std::move(ui_driver))) {
++                                   std::move(ui_driver), std::move(input_driver))) {
+   auto* dispatcher = &kernel::GetFunctionDispatcher(GetRuntime());
+   REQUIRE(dispatcher->InitializeFunctionTable(kCodeBase, kCodeSize, kCodeBase, kImageSize,
+                                               /*is_entrypoint=*/true));
+@@ -292,6 +297,8 @@
+ rex::kernel::TitleRuntime& KernelFixture::GetRuntime() {
+   return impl_->tool.GetRuntime();
+ }
++
++rex::hid::IInputSystem& KernelFixture::GetInput() { return impl_->app.GetInput(); }
+ 
+ rex::apu::IAudioSystem& KernelFixture::GetAudio() {
+   return impl_->app.GetAudio();
+diff --git a/tests/unit/kernel/xam_input_test.cpp b/tests/unit/kernel/xam_input_test.cpp
+--- a/tests/unit/kernel/xam_input_test.cpp
++++ b/tests/unit/kernel/xam_input_test.cpp
+@@ -16,6 +16,8 @@
+ #include "../hid/input_harness.h"
+ #include "../ui/ui_harness.h"
+ #include "xam/input_convert.h"
++#include "kernel/kernel_fixture.h"
++#include "xam/xam_state.h"
+ 
+ namespace {
+ 
+@@ -150,3 +152,64 @@
+   CHECK(user == 0);
+   app.Shutdown();
+ }
++
++
++REX_TEST_CASE("original system UI owns only its session controller and privileged input", "[kernel][xam][input][system-ui-session]") {
++  using namespace rex::test_input;
++  g_fake = {};
++  g_fake[0].devices = {MakePad(1, 0), MakePad(2, 1)};
++  g_fake[0].states[1] = Buttons(0);
++  g_fake[0].states[2] = Buttons(0);
++  FakeProvider provider;
++  rex::test::KernelFixture fixture({}, {&provider}, {}, {}, "fake_a");
++  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
++    auto& xam = rex::xam::CurrentXAM();
++    auto& input = fixture.GetInput();
++    xam.AttachInput(&input);
++    rex::ScopeGuard detach([&] { xam.DetachInput(); });
++    auto& ui = xam.GetSystemUI();
++    REQUIRE(input.GetState(0).has_value());
++    REQUIRE(input.GetState(1).has_value());
++    REQUIRE(ui.RegisterSystemApp({5, 2, 0x1234, 0}) == 0);
++    CHECK_FALSE(ui.BeginSystemUi(6, 2, 0));
++    CHECK_FALSE(ui.BeginSystemUi(5, 2, 4));
++    REQUIRE(ui.BeginSystemUi(5, 2, 0));
++    CHECK_FALSE(ui.BeginSystemUi(5, 2, 0));
++    CHECK_FALSE(ui.SetSystemUiVisible(6));
++    REQUIRE(ui.SetSystemUiVisible(5));
++    CHECK(caller.XAM("XamIsUIActive") == 1);
++    CHECK(caller.XAM("XamEnableSystemAppInput", {1, 1}) == 1627);
++    CHECK(caller.XAM("XamEnableSystemAppInput", {255, 1}) == 0);
++    const auto state = caller.Alloc(sizeof(rex::xam::X_INPUT_STATE)), stroke = caller.Alloc(sizeof(rex::xam::X_INPUT_KEYSTROKE));
++    g_fake[0].states[1] = Buttons(rex::hid::kPadA);
++    g_fake[0].states[2] = Buttons(rex::hid::kPadB);
++    REQUIRE(caller.XAM("XamInputGetState", {0, 1, state}) == 0);
++    CHECK(caller.Load32(state) == 0);
++    CHECK(caller.Load32(state + 4) == 0);
++    REQUIRE(caller.XAM("XamInputGetState", {0, 0x80000001, state}) == 0);
++    CHECK(caller.Load32(state + 4) >> 16 == rex::hid::kPadA);
++    CHECK(caller.XAM("XamInputGetKeystroke", {0, 1, stroke}) == rex::kernel::X_ERROR_EMPTY);
++    REQUIRE(caller.XAM("XamInputGetKeystrokeHudEx", {255, 1, stroke}) == 0);
++    CHECK(caller.Load8(stroke + 6) == 0);
++    CHECK(caller.XAM("XamInputGetKeystrokeHudEx", {255, 1, stroke}) == rex::kernel::X_ERROR_EMPTY);
++    REQUIRE(caller.XAM("XamInputGetKeystroke", {1, 1, stroke}) == 0);
++    CHECK(caller.Load8(stroke + 6) == 1);
++    CHECK(caller.XAM("XamInputGetKeystrokeHudEx", {4, 1, stroke}) == rex::kernel::X_ERROR_BAD_ARGUMENTS);
++    CHECK(caller.XAM("XamInputGetKeystrokeHud", {0, 0}) == rex::kernel::X_ERROR_BAD_ARGUMENTS);
++    CHECK(caller.XAM("XamAppUnloadStack", {1}) == 87);
++    CHECK_FALSE(ui.GetSystemUiSession().close_requested);
++    CHECK(caller.XAM("XamAppUnloadSelf") == 0);
++    CHECK(ui.GetSystemUiSession().close_requested);
++    CHECK_FALSE(ui.EndSystemUi(6));
++    REQUIRE(ui.EndSystemUi(5));
++    CHECK(caller.XAM("XamIsUIActive") == 0);
++    REQUIRE(ui.BeginSystemUi(5, 2, 255));
++    REQUIRE(ui.SetSystemUiVisible(5));
++    CHECK(caller.XAM("XamEnableSystemAppInput", {1, 1}) == 0);
++    CHECK(caller.XAM("XamEnableSystemAppInput", {4, 1}) == 1627);
++    REQUIRE(ui.EndSystemUi(5));
++    CHECK(caller.XAM("XamAppUnloadSelf") == 1627);
++    const auto tick = caller.XAM("GetTickCount", {0xDEADBEEF});
++    CHECK(static_cast<rex::u32>(caller.XAM("GetTickCount") - tick) < 10000);
++  });
++}

@@ -1,0 +1,99 @@
+diff --git a/src/kernel/process.cpp b/src/kernel/process.cpp
+--- a/src/kernel/process.cpp
++++ b/src/kernel/process.cpp
+@@ -255,30 +255,36 @@
+ }
+ 
+ bool kernel::TitleState::RunTitleTerminateNotifications(std::chrono::milliseconds timeout) {
+-  std::vector<u32> registrations;
+   {
+     std::lock_guard lock(terminate_mutex_);
+-    registrations = std::exchange(terminate_registrations_, {});
+-  }
+-  if (registrations.empty() || !dispatcher_ || !dispatcher_->IsRunning()) {
+-    return false;
++    if (terminate_registrations_.empty() || !dispatcher_ || !dispatcher_->IsRunning()) {
++      return false;
++    }
+   }
+   auto* memory = memory_.get();
+-  std::ranges::stable_sort(registrations, std::greater<>{}, [memory](u32 registration) {
+-    return static_cast<i32>(static_cast<u32>(
+-        memory->TranslateVirtual<X_EX_TITLE_TERMINATE_REGISTRATION*>(registration)->priority));
+-  });
+   struct Progress {
+     std::atomic<u32> routine{0};
+     std::promise<void> done;
+   };
+   auto progress = std::make_shared<Progress>();
+   std::future<void> done = progress->done.get_future();
+-  auto run = [memory, functions = function_dispatcher_.get(), registrations, progress] {
++  auto run = [this, memory, functions = function_dispatcher_.get(), progress] {
+     kernel::ThreadState* state = kernel::ThreadState::Get();
+-    for (const u32 registration : registrations) {
+-      const u32 routine = memory->TranslateVirtual<X_EX_TITLE_TERMINATE_REGISTRATION*>(registration)
+-                              ->notification_routine;
++    for (;;) {
++      u32 registration, routine;
++      {
++        std::lock_guard lock(terminate_mutex_);
++        if (terminate_registrations_.empty()) break;
++        // A callback may unregister another callback; never snapshot pending registrations.
++        const auto next = std::ranges::max_element(terminate_registrations_, {}, [memory](u32 address) {
++          return static_cast<u32>(
++              memory->TranslateVirtual<X_EX_TITLE_TERMINATE_REGISTRATION*>(address)->priority);
++        });
++        registration = *next;
++        routine = memory->TranslateVirtual<X_EX_TITLE_TERMINATE_REGISTRATION*>(registration)
++                      ->notification_routine;
++        terminate_registrations_.erase(next);
++      }
+       progress->routine = routine;
+       REXSYS_INFO("Title terminate notification {:08X} with registration {:08X}", routine,
+                   registration);
+diff --git a/tests/unit/kernel/notify_test.cpp b/tests/unit/kernel/notify_test.cpp
+--- a/tests/unit/kernel/notify_test.cpp
++++ b/tests/unit/kernel/notify_test.cpp
+@@ -41,6 +41,17 @@
+   std::lock_guard lock(g_mutex);
+   g_registrations.push_back(ctx.r3.u32);
+   ctx.r3.u64 = 0;
++}
++
++std::atomic<u32> g_remove_registration{0};
++
++void RemovingTerminateRoutine(PPCContext& ctx, u8* base) {
++  const u32 own = ctx.r3.u32;
++  Caller caller(ctx, base, rex::kernel::GetCurrent());
++  caller.Kernel("ExRegisterTitleTerminateNotification", {g_remove_registration.load(), 0});
++  caller.Kernel("ExRegisterTitleTerminateNotification", {own, 0});
++  ctx.r3.u64 = own;
++  TerminateRoutine(ctx, base);
+ }
+ 
+ std::atomic<bool> g_slow_routine_done{false};
+@@ -370,3 +381,24 @@
+     CHECK(c.Kernel("NtClose", {listener}) == 0);
+   });
+ }
++
++
++REX_TEST_CASE("terminate callbacks can remove pending registrations and preserve unsigned priority", "[kernel][notify]") {
++  Reset();
++  std::vector<u32> expected;
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto* functions = StateOf(c.GetRuntime()).GetFunctionDispatcher();
++    const auto routine = functions->AllocateThunk(&TerminateRoutine, 0);
++    const auto removing = functions->AllocateThunk(&RemovingTerminateRoutine, 0);
++    const auto first = Registration(c, removing, 0xFFFFFFFF);
++    const auto pending = Registration(c, routine, 0x6E800001);
++    const auto last = Registration(c, routine, 0x6E800000);
++    g_remove_registration = pending;
++    c.Kernel("ExRegisterTitleTerminateNotification", {last, 1});
++    expected = {first, last};
++  });
++  StateOf(fixture.GetRuntime()).TerminateTitle();
++  std::lock_guard lock(g_mutex);
++  CHECK(g_registrations == expected);
++}

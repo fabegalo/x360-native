@@ -1,16 +1,16 @@
 #include <rex/chrono/frame_layout.h>
 #include "vulkan_scanout.h"
 #include "vulkan_scanout_source.h"
-#include <rex/ui/vulkan/presenter.h>
-#include <rex/logging.h>
+#include <gpu/xenos/host/vulkan/vulkan_presenter.h>
+#include <rex/logging/log_category.h>
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
 namespace x360n::native {
-using Presenter = rex::ui::vulkan::VulkanPresenter;
-VulkanScanout::VulkanScanout(rex::ui::vulkan::VulkanProvider& provider)
-    : device_(*provider.vulkan_device()), submissions_(device_) {
+using Presenter = rex::gpu::vulkan::VulkanPresenter;
+VulkanScanout::VulkanScanout(rex::gpu::vulkan::VulkanProvider& provider)
+    : device_(*provider.GetVulkanDevice()), submissions_(device_) {
   try { Initialize(); } catch (...) { Destroy(); throw; }
 }
 VulkanScanout::~VulkanScanout() {
@@ -20,8 +20,8 @@ VulkanScanout::~VulkanScanout() {
   Destroy();
 }
 void VulkanScanout::Destroy() {
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   for (auto& slot : slots_) {
     if (slot.framebuffer) fn.vkDestroyFramebuffer(vk, slot.framebuffer, nullptr);
     slot.framebuffer = VK_NULL_HANDLE;
@@ -40,8 +40,8 @@ void VulkanScanout::Destroy() {
   descriptors_layout_ = VK_NULL_HANDLE;
 }
 void VulkanScanout::Initialize() {
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   VkDescriptorSetLayoutBinding bindings[3]{};
   for (uint32_t i = 0; i < 3; ++i)
     bindings[i] = {i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
@@ -151,7 +151,7 @@ void VulkanScanout::Initialize() {
   fn.vkDestroyShaderModule(vk, fragment, nullptr);
 }
 
-void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
+void VulkanScanout::Present(rex::gpu::Presenter& presenter, const ScanoutTexture& texture,
                            const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                            const void* overlay_pixels, ScanoutPostEffect post_effect, uint32_t display_width, uint32_t display_height,
                            VkBuffer scaled) {
@@ -161,17 +161,17 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
       (overlay && (!overlay_pixels || !overlay->surface.bytes ||
                    !overlay->display_width || !overlay->display_height)))
     throw std::invalid_argument("Native Vulkan: invalid scanout input");
-  if (texture.width > device_.properties().maxFramebufferWidth ||
-      texture.height > device_.properties().maxFramebufferHeight ||
-      texture.bytes > device_.properties().maxStorageBufferRange ||
-      (overlay && overlay->surface.bytes > device_.properties().maxStorageBufferRange))
+  if (texture.width > device_.GetProperties().maxFramebufferWidth ||
+      texture.height > device_.GetProperties().maxFramebufferHeight ||
+      texture.bytes > device_.GetProperties().maxStorageBufferRange ||
+      (overlay && overlay->surface.bytes > device_.GetProperties().maxStorageBufferRange))
     throw std::out_of_range("Native Vulkan: scanout exceeds host limits");
   const bool fxaa = post_effect != ScanoutPostEffect::kNone;
   if (fxaa && !fxaa_) fxaa_ = std::make_unique<VulkanFxaa>(device_);
   const auto slot_index = submissions_.current_slot();
   const auto commands = submissions_.Begin();
   auto& slot = slots_[slot_index];
-  const auto align = [alignment = device_.properties().minStorageBufferOffsetAlignment](uint64_t value) {
+  const auto align = [alignment = device_.GetProperties().minStorageBufferOffsetAlignment](uint64_t value) {
     return ((value + alignment - 1) / alignment) * alignment;
   };
   const uint64_t lut_offset = align(texture.bytes);
@@ -198,21 +198,21 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
     writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[i].pBufferInfo = &buffers[i];
   }
-  const auto& fn = device_.functions();
-  fn.vkUpdateDescriptorSets(device_.device(), 3, writes, 0, nullptr);
+  const auto& fn = device_.GetFunctions();
+  fn.vkUpdateDescriptorSets(device_.GetDevice(), 3, writes, 0, nullptr);
   const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
   const uint32_t aspect_x = display_aspect.x ? display_aspect.x : (display_width ? display_width : texture.width);
   const uint32_t aspect_y = display_aspect.y ? display_aspect.y : (display_height ? display_height : texture.height);
   if (!presenter.RefreshGuestOutput(texture.width, texture.height, aspect_x, aspect_y,
-      [&](rex::ui::Presenter::GuestOutputRefreshContext& base_context) {
+      [&](rex::gpu::Presenter::GuestOutputRefreshContext& base_context) {
     auto& context = static_cast<Presenter::VulkanGuestOutputRefreshContext&>(base_context);
     context.SetIs8bpc(!texture.rgb10);
-    const bool recreate = slot.image_version != context.image_version() || slot.fxaa != fxaa ||
+    const bool recreate = slot.image_version != context.GetImageVersion() || slot.fxaa != fxaa ||
         slot.width != texture.width || slot.height != texture.height;
-    if (recreate && slot.framebuffer) { fn.vkDestroyFramebuffer(device_.device(), slot.framebuffer, nullptr); slot.framebuffer = VK_NULL_HANDLE; }
-    const auto gamma_view = fxaa ? fxaa_->Begin(slot_index, texture.width, texture.height, commands) : context.image_view();
+    if (recreate && slot.framebuffer) { fn.vkDestroyFramebuffer(device_.GetDevice(), slot.framebuffer, nullptr); slot.framebuffer = VK_NULL_HANDLE; }
+    const auto gamma_view = fxaa ? fxaa_->Begin(slot_index, texture.width, texture.height, commands) : context.GetImageView();
     if (recreate) {
-      if (slot.framebuffer) fn.vkDestroyFramebuffer(device_.device(), slot.framebuffer, nullptr);
+      if (slot.framebuffer) fn.vkDestroyFramebuffer(device_.GetDevice(), slot.framebuffer, nullptr);
       slot.framebuffer = VK_NULL_HANDLE;
       const auto view = gamma_view;
       VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
@@ -222,19 +222,19 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
       info.width = texture.width;
       info.height = texture.height;
       info.layers = 1;
-      CheckVulkan(fn.vkCreateFramebuffer(device_.device(), &info, nullptr, &slot.framebuffer), "create scanout framebuffer");
-      slot.image_version = context.image_version(); slot.width = texture.width; slot.height = texture.height; slot.fxaa = fxaa;
+      CheckVulkan(fn.vkCreateFramebuffer(device_.GetDevice(), &info, nullptr, &slot.framebuffer), "create scanout framebuffer");
+      slot.image_version = context.GetImageVersion(); slot.width = texture.width; slot.height = texture.height; slot.fxaa = fxaa;
     }
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.srcAccessMask = context.image_ever_written_previously() ? Presenter::kGuestOutputInternalAccessMask : 0;
+    barrier.srcAccessMask = context.HasImageBeenWritten() ? Presenter::kGuestOutputInternalAccessMask : 0;
     barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = context.image();
+    barrier.image = context.GetImage();
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     if (!fxaa) fn.vkCmdPipelineBarrier(commands,
-        context.image_ever_written_previously() ? Presenter::kGuestOutputInternalStageMask : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        context.HasImageBeenWritten() ? Presenter::kGuestOutputInternalStageMask : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     pass.renderPass = render_pass_[fxaa];
@@ -260,8 +260,8 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
     fn.vkCmdPushConstants(commands, pipeline_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), constants);
     fn.vkCmdDraw(commands, 3, 1, 0, 0);
     fn.vkCmdEndRenderPass(commands);
-    if (fxaa) fxaa_->Apply(slot_index, commands, context.image(), context.image_view(),
-        context.image_ever_written_previously(), post_effect == ScanoutPostEffect::kFxaaExtreme);
+    if (fxaa) fxaa_->Apply(slot_index, commands, context.GetImage(), context.GetImageView(),
+        context.HasImageBeenWritten(), post_effect == ScanoutPostEffect::kFxaaExtreme);
     barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.dstAccessMask = Presenter::kGuestOutputInternalAccessMask;
     barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;

@@ -1,63 +1,59 @@
-diff --git a/include/rex/codegen/codegen_context.h b/include/rex/codegen/codegen_context.h
---- a/include/rex/codegen/codegen_context.h
-+++ b/include/rex/codegen/codegen_context.h
-@@ -65,6 +65,10 @@
-   uint32_t saveVmx14Address = 0;
-   uint32_t restVmx64Address = 0;
-   uint32_t saveVmx64Address = 0;
-+
-+  // Exact CRT jump-buffer ABI routines, independent of user hints.
-+  std::unordered_set<uint32_t> setJmpAddresses;
-+  std::unordered_set<uint32_t> longJmpAddresses;
+diff --git a/src/codegen/codegen_context.h b/src/codegen/codegen_context.h
+--- a/src/codegen/codegen_context.h
++++ b/src/codegen/codegen_context.h
+@@ -13,6 +13,7 @@
+ #include <filesystem>
+ #include <memory>
+ #include <unordered_map>
++#include <unordered_set>
+ #include <vector>
  
-   // Merged results (user hints + analysis-detected)
-   std::unordered_map<uint32_t, uint32_t> invalidInstructions;  ///< addr -> size
-diff --git a/include/rex/codegen/function_types.h b/include/rex/codegen/function_types.h
---- a/include/rex/codegen/function_types.h
-+++ b/include/rex/codegen/function_types.h
-@@ -56,6 +56,9 @@
-   /// per-file declaration header, so a missed name is a compile error.
-   std::unordered_set<std::string>* referenced = nullptr;
+ #include "analysis_error_log.h"
+@@ -71,6 +72,9 @@
+   AnalysisState& operator=(AnalysisState&&) noexcept(false) = default;
+   ~AnalysisState() = default;
  
-+  const std::unordered_set<uint32_t>* setJmpAddresses = nullptr;
-+  const std::unordered_set<uint32_t>* longJmpAddresses = nullptr;
++  std::unordered_set<u32> setjmp_addresses;
++  std::unordered_set<u32> longjmp_addresses;
 +
-   void reference(std::string_view name) const {
-     if (referenced)
-       referenced->emplace(name);
+   std::string format; /**< "xex" or "elf" */
+   /** Guest address the image is loaded at, copied from the BinaryView base address. */
+   u64 load_address = 0;
+diff --git a/src/codegen/function_types.h b/src/codegen/function_types.h
+--- a/src/codegen/function_types.h
++++ b/src/codegen/function_types.h
+@@ -59,6 +59,9 @@
+ 
+   /** Every classified MMIO site of the emitted functions, for the codegen report. */
+   std::vector<MMIOReportSite>* mmio_sites = nullptr;
++
++  const std::unordered_set<u32>* setjmp_addresses = nullptr;
++  const std::unordered_set<u32>* longjmp_addresses = nullptr;
+ 
+   /** Adds a function name to the referenced set, or does nothing when referenced is null. */
+   void Reference(std::string_view name) const {
 diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
 --- a/src/codegen/phase_register.cpp
 +++ b/src/codegen/phase_register.cpp
-@@ -16,6 +16,7 @@
- #include "phase_helpers.h"
- 
- #include <fmt/format.h>
-+#include <algorithm>
- 
- #include <rex/codegen/config.h>
- #include <rex/logging.h>
-@@ -413,6 +414,74 @@
-   }
+@@ -587,6 +587,71 @@
+   return 0;
  }
  
-+// Recognize the complete console CRT jump-buffer ABI, not a short prolog.
-+// Every FPR/GPR/VMX slot, CR/LR/SP transfer and terminal instruction must match.
-+// Only linked branch displacements and optional dispatch-global operands vary.
-+void detectNonlocalJumps(CodegenContext& ctx) {
++void DetectNonlocalJumps(CodegenContext& ctx) {
 +  const auto makePattern = [](bool save) {
-+    std::vector<uint32_t> words;
++    std::vector<u32> words;
 +    if (save) words = {0x7C0802A6, 0x7C800026};
 +    else words = {0x7C0802A6, 0x9421FFB0, 0x90010008, 0x7C862378, 0x2C040000,
 +        0x80030138, 0x2C800000, 0x7C671B78, 0x38A00000, 0x40820008, 0x38C00001,
 +        0x408602C0, 0x80670134, 0x80870090, 0x48000001};
-+    const uint32_t base = save ? 3 : 7;
-+    for (uint32_t reg = 14; reg <= 31; ++reg)
++    const u32 base = save ? 3 : 7;
++    for (u32 reg = 14; reg <= 31; ++reg)
 +      words.push_back(((save ? 54u : 50u) << 26) | (reg << 21) |
 +                      (base << 16) | ((reg - 14) * 8));
-+    for (uint32_t reg = 13; reg <= 31; ++reg)
++    for (u32 reg = 13; reg <= 31; ++reg)
 +      words.push_back(((save ? 62u : 58u) << 26) | (reg << 21) |
 +                      (base << 16) | (0x98 + (reg - 13) * 8));
-+    for (uint32_t reg = 64; reg <= 127; ++reg) {
++    for (u32 reg = 64; reg <= 127; ++reg) {
 +      words.push_back((save ? 0x38A00000 : 0x38600000) | (0x140 + (reg - 64) * 16));
 +      words.push_back((save ? 0x10051D0B : 0x100338CB) |
 +                      ((reg & 31) << 21) | ((reg & 32) >> 3));
@@ -72,23 +68,23 @@ diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
 +  };
 +  const auto savePattern = makePattern(true);
 +  const auto restorePattern = makePattern(false);
-+  const auto& binary = ctx.binary();
-+  const uint64_t imageEnd = uint64_t(binary.baseAddress()) + binary.imageSize();
-+  for (const auto& section : binary.sections()) {
-+    if (!section.executable || !section.data || section.baseAddress >= imageEnd) continue;
-+    const uint64_t limit = std::min<uint64_t>(section.size, imageEnd - section.baseAddress);
-+    const auto read = [&](uint64_t offset) { return load_and_swap<uint32_t>(section.data + offset); };
-+    const auto matches = [&](uint64_t offset, const std::vector<uint32_t>& pattern) {
++  const auto& binary = ctx.GetBinary();
++  const u64 imageEnd = u64(binary.GetBaseAddress()) + binary.GetImageSize();
++  for (const auto& section : binary.GetSections()) {
++    if (!section.executable || !section.data || section.base_address >= imageEnd) continue;
++    const u64 limit = std::min<u64>(section.size, imageEnd - section.base_address);
++    const auto read = [&](u64 offset) { return memory::load<be_u32>(section.data + offset); };
++    const auto matches = [&](u64 offset, const std::vector<u32>& pattern) {
 +      if (offset > limit || pattern.size() * 4 > limit - offset) return false;
 +      for (size_t word = 0; word < pattern.size(); ++word) {
-+        const uint32_t actual = read(offset + word * 4);
++        const u32 actual = read(offset + word * 4);
 +        if (pattern[word] == 0x48000001) {
 +          if ((actual & 0xFC000003) != 0x48000001) return false;
 +        } else if (actual != pattern[word]) return false;
 +      }
 +      return true;
 +    };
-+    for (uint64_t offset = (4 - (section.baseAddress & 3)) & 3; offset + 4 <= limit; offset += 4) {
++    for (u64 offset = (4 - (section.base_address & 3)) & 3; offset + 4 <= limit; offset += 4) {
 +      bool prefix = false;
 +      if (offset + 20 <= limit && (read(offset) & 0xFFFF0000) == 0x3C800000 &&
 +          (read(offset + 4) & 0xFFFF0000) == 0x80040000 && read(offset + 8) == 0x2C000000 &&
@@ -97,58 +93,69 @@ diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
 +      const bool save = matches(offset + (prefix ? 20 : 0), savePattern);
 +      const bool restore = !prefix && matches(offset, restorePattern);
 +      if (!save && !restore) continue;
-+      const uint32_t address = uint32_t(section.baseAddress + offset);
-+      const uint32_t size = uint32_t((save ? savePattern.size() : restorePattern.size()) * 4 + (prefix ? 20 : 0));
-+      auto& entries = save ? ctx.analysisState().setJmpAddresses : ctx.analysisState().longJmpAddresses;
++      const u32 address = u32(section.base_address + offset);
++      const u32 size = u32((save ? savePattern.size() : restorePattern.size()) * 4 + (prefix ? 20 : 0));
++      auto& entries = save ? ctx.GetAnalysisState().setjmp_addresses : ctx.GetAnalysisState().longjmp_addresses;
 +      entries.insert(address);
-+      ctx.graph.addFunction(address, size, FunctionAuthority::HELPER, true);
-+      REXCODEGEN_DEBUG("Found CRT {} at 0x{:08X}", save ? "setjmp" : "longjmp", address);
++      ctx.graph.AddFunction(address, size, FunctionAuthority::kHelper, true);
++      REXCG_DEBUG("Found CRT {} at 0x{:08X}", save ? "setjmp" : "longjmp", address);
 +      offset += size - 4;
 +    }
 +  }
 +}
 +
- //=============================================================================
- // Register Phase: imports, helpers, PDATA, config functions
- //=============================================================================
-@@ -445,6 +514,7 @@
+ /**
+  * Registers imports, millicode helpers, config functions and PDATA functions. An __except handler
+  * is inline and becomes a label.
+@@ -614,6 +679,8 @@
    }
  
-   detectSaveRestoreHelpers(binary, state);
-+  detectNonlocalJumps(ctx);
+   DetectMillicodeRuns(binary, state);
++  DetectNonlocalJumps(ctx);
++  for (u32 address : state.longjmp_addresses) graph.DeclareNoReturn(address);
  
-   // Register imports
    {
+     size_t import_count = 0;
 diff --git a/src/codegen/codegen_writer.cpp b/src/codegen/codegen_writer.cpp
 --- a/src/codegen/codegen_writer.cpp
 +++ b/src/codegen/codegen_writer.cpp
-@@ -249,6 +249,8 @@
-                       static_cast<uint32_t>(analysisState().entryPoint), nullptr};
-   if (runtime_)
-     emitCtx.resolver = runtime_->export_resolver();
-+  emitCtx.setJmpAddresses = &analysisState().setJmpAddresses;
-+  emitCtx.longJmpAddresses = &analysisState().longJmpAddresses;
+@@ -333,6 +333,8 @@
  
-   REXCODEGEN_TRACE("Recompiling {} functions...", functions.size());
+   EmitContext emit_ctx{GetBinary(), GetConfig(), GetGraph(), ctx_.GetLimits(),
+                        static_cast<u32>(GetAnalysisState().entry_point)};
++  emit_ctx.setjmp_addresses = &GetAnalysisState().setjmp_addresses;
++  emit_ctx.longjmp_addresses = &GetAnalysisState().longjmp_addresses;
  
-diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
---- a/src/codegen/builders/context.cpp
-+++ b/src/codegen/builders/context.cpp
-@@ -175,13 +175,15 @@
- void BuilderContext::emit_function_call(uint32_t address) {
-   const auto& cfg = config();
+   REXCG_TRACE("Recompiling {} functions...", functions.size());
  
--  if (address == cfg.longJmpAddress) {
-+  if (address == cfg.longJmpAddress ||
-+      (emitCtx.longJmpAddresses && emitCtx.longJmpAddresses->contains(address))) {
-     // Use custom ppc_longjmp that uses guest address as key (not for storage)
-     println("\tppc_longjmp({}.u32, {}.s32);", r(3), r(4));
+diff --git a/src/codegen/builder/context.cpp b/src/codegen/builder/context.cpp
+--- a/src/codegen/builder/context.cpp
++++ b/src/codegen/builder/context.cpp
+@@ -269,7 +269,9 @@
+ 
+ bool BuilderContext::EmitTailCall(u32 address) {
+   const auto& cfg = GetConfig();
+-  if (!CanTailCall() || address == cfg.longjmp_address || address == cfg.setjmp_address) {
++  if (!CanTailCall() || address == cfg.longjmp_address || address == cfg.setjmp_address ||
++      (emit_ctx.longjmp_addresses && emit_ctx.longjmp_addresses->contains(address)) ||
++      (emit_ctx.setjmp_addresses && emit_ctx.setjmp_addresses->contains(address))) {
+     return false;
+   }
+   const auto* target = FindCallTarget(base);
+@@ -288,12 +290,14 @@
+ void BuilderContext::EmitFunctionCall(u32 address) {
+   const auto& cfg = GetConfig();
+ 
+-  if (address == cfg.longjmp_address) {
++  if (address == cfg.longjmp_address ||
++      (emit_ctx.longjmp_addresses && emit_ctx.longjmp_addresses->contains(address))) {
+     Println("\tppc_longjmp({}.u32, {}.s32);", R(3), R(4));
      return;
    }
  
--  if (address == cfg.setJmpAddress) {
-+  if (address == cfg.setJmpAddress ||
-+      (emitCtx.setJmpAddresses && emitCtx.setJmpAddresses->contains(address))) {
-     // Save PPCContext for restoration after longjmp
-     println("\t{} = ctx;", env());
-     // Use custom ppc_setjmp that uses guest address as key
+-  if (address == cfg.setjmp_address) {
++  if (address == cfg.setjmp_address ||
++      (emit_ctx.setjmp_addresses && emit_ctx.setjmp_addresses->contains(address))) {
+     Println("\t{}", kSyncToCtx);
+     Println("\t{} = ctx;", Env());
+     Println("\t{}.s64 = ppc_setjmp({}.u32);", Temp(), R(3));

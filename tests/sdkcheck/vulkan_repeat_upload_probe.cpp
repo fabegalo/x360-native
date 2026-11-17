@@ -1,19 +1,19 @@
 // 0196: execute production barrier batching and deferred Vulkan command replay.
 // The generated include is verbatim SDK code, not a second barrier algorithm.
 // Allocation/texture construction is replaced; no device, driver or game runs.
-#include <rex/ui/vulkan/device.h>
-#include <rex/ui/vulkan/util.h>
-#include <rex/graphics/vulkan/deferred_command_buffer.h>
+#include "gpu/xenos/host/vulkan/vulkan_device.h"
+#include "gpu/xenos/host/vulkan/vulkan_objects.h"
+#include "gpu/xenos/vulkan/deferred_command_buffer.h"
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <iterator>
 #include <vector>
 
-namespace rex::graphics::vulkan {
+namespace rex::gpu::vulkan {
 struct CaptureDevice {
-  ui::vulkan::VulkanDevice::Functions functions_{};
-  const auto& functions() const { return functions_; }
+  gpu::vulkan::VulkanDevice::Functions functions_{};
+  const auto& GetFunctions() const { return functions_; }
 };
 
 // Minimal owned state for the production methods extracted at build time.
@@ -32,6 +32,10 @@ class VulkanCommandProcessor {
   void EndRenderPass();
   void EndActiveForPass(bool use_dynamic_rendering);
   bool submission_open_ = true, in_render_pass_ = false, hoist_render_pass_ = false;
+  struct {bool segment_active=false;} active_segment_;
+  bool active_query_is_fsi_=false;
+  void CloseQuerySegment() {}  // Query allocation is outside this command-stream probe.
+  void RecordVIZPredicateCopies() {}
   VkRenderPass current_render_pass_ = VK_NULL_HANDLE;
   void* current_framebuffer_ = nullptr;
   std::vector<VkBufferMemoryBarrier> pending_barriers_buffer_memory_barriers_;
@@ -52,20 +56,20 @@ class VulkanTextureCache {
     Usage usage = Usage::kUndefined;
     Usage SetUsage(Usage next) { auto previous = usage; usage = next; return previous; }
     void MarkAsUsed() {}  // Resource lifetime accounting is outside this CPU probe.
-    VkImage image() const { return reinterpret_cast<VkImage>(uintptr_t(1)); }
+    VkImage GetImage() const { return reinterpret_cast<VkImage>(uintptr_t(1)); }
   };
   VulkanCommandProcessor& command_processor_;
   VkPipelineStageFlags guest_shader_pipeline_stages_ = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
   void GetTextureUsageMasks(VulkanTexture::Usage, VkPipelineStageFlags&, VkAccessFlags&,
-                            VkImageLayout&);
+                            VkImageLayout&) const;
   void RecordUpload(VulkanTexture&);
 };
-}  // namespace rex::graphics::vulkan
+}  // namespace rex::gpu::vulkan
 
 #include "vulkan_repeat_upload_backend.inc"
 
-using namespace rex::graphics::vulkan;
+using namespace rex::gpu::vulkan;
 namespace {
 struct Event {
   bool copy;
@@ -173,7 +177,7 @@ int main() {
   }
 
   // The general no-op elision remains; only the repeated write opts out.
-  check(!cp.PushImageMemoryBarrier(texture.image(), rex::ui::vulkan::util::InitializeSubresourceRange(),
+  check(!cp.PushImageMemoryBarrier(texture.GetImage(), rex::gpu::vulkan::objects::BuildSubresourceRange(),
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL),
@@ -203,7 +207,7 @@ int main() {
   info.sampleLocationsPerPixel = VK_SAMPLE_COUNT_2_BIT;
   info.sampleLocationGridSize = {1, 1}; info.sampleLocationsCount = 2;
   info.pSampleLocations = locations;
-  cp.PushImageMemoryBarrier(texture.image(), rex::ui::vulkan::util::InitializeSubresourceRange(
+  cp.PushImageMemoryBarrier(texture.GetImage(), rex::gpu::vulkan::objects::BuildSubresourceRange(
       VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT),
       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,

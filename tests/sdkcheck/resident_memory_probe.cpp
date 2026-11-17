@@ -1,7 +1,11 @@
 // Real SharedMemory service without a GPU. Operation costs are not frame rates.
-#include <rex/graphics/shared_memory.h>
-#include <rex/system/xmemory.h>
-#include <rex/thread/mutex.h>
+#include "gpu/xenos/shared_memory.h"
+#include "codegen/tool_runtime.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/heap.h>
+#include <rex/memory/virtual_memory.h>
+#include <filesystem>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -11,24 +15,24 @@
 #include <string_view>
 #include <thread>
 
-using rex::graphics::SharedMemory;
+using rex::gpu::SharedMemory;
 namespace {
 void Require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 class Mirror final : public SharedMemory {
  public:
-  explicit Mirror(rex::memory::Memory& memory) : SharedMemory(memory) { InitializeCommon(); }
+  explicit Mirror(rex::kernel::TitleRuntime& runtime) : SharedMemory(runtime.GetPhysicalMemory(),runtime.GetPhysicalWriteWatch()) { InitializeCommon(); }
   uint64_t uploads = 0;
  private:
   bool UploadRanges(const std::vector<std::pair<uint32_t, uint32_t>>& ranges) override {
     for (auto [page, count] : ranges) {
       ++uploads;
-      MakeRangeValid(page << page_size_log2(), count << page_size_log2(), false);
+      MarkRangeValid(page << GetPageSizeLog2(), count << GetPageSizeLog2(), false);
     }
     return true;
   }
 };
 constexpr uint32_t kBase = 0x01000000;
-const uint32_t kPage = uint32_t(rex::memory::page_size()), kBytes = 512*kPage;
+const uint32_t kPage = uint32_t(rex::memory::GetPageSize()), kBytes = 512*kPage;
 void Contracts(Mirror& mirror) {
   Require(mirror.RequestRange(kBase, kBytes), "initial upload");
   // Cover both edge masks, complete words, disjoint and unsorted ranges.
@@ -43,7 +47,7 @@ void Contracts(Mirror& mirror) {
 
   std::mutex mutex; std::condition_variable cv; bool held=false,release=false,timed_out=false;
   std::jthread holder([&] {
-    auto region = rex::thread::global_critical_region::AcquireDirect();
+    auto region = mirror.AcquireLock();
     std::unique_lock lock(mutex); held=true; cv.notify_all();
     timed_out=!cv.wait_for(lock,std::chrono::seconds(2),[&]{return release;});
   });
@@ -56,20 +60,20 @@ void Contracts(Mirror& mirror) {
   // uploads; writers still serialize validity and watches in the region.
   std::atomic<bool> done=false;
   std::jthread writer([&] {
-    for (unsigned i=0;i<10000;++i) mirror.MemoryInvalidationCallback(kBase+(i%128)*kPage,4,true);
+    for (unsigned i=0;i<10000;++i) mirror.OnPhysicalWrite({kBase+(i%128)*kPage,4},true);
     done.store(true);
   });
   while (!done.load()) Require(mirror.RequestRange(kBase, 128*kPage), "concurrent invalidation request");
   writer.join();
-  mirror.MemoryInvalidationCallback(kBase,4096,true);
+  mirror.OnPhysicalWrite({kBase,4096},true);
   const auto before=mirror.uploads;
   Require(mirror.RequestRange(kBase,4096) && mirror.uploads==before+1, "CPU invalidation lost");
-  mirror.RangeWrittenByGpu(kBase,4096);
+  mirror.RangeWrittenByGPU(kBase,4096);
   const auto gpu_uploads=mirror.uploads;
-  mirror.SetSystemPageBlocksValidWithGpuDataWritten();
+  mirror.SetSystemPageFlagsValidWithGPUDataWritten();
   Require(mirror.RequestRange(kBase,4096) && mirror.uploads==gpu_uploads, "GPU data overwritten");
   Require(mirror.RequestRange(kBase+kPage,4096), "CPU page upload");
-  mirror.SetSystemPageBlocksValidWithGpuDataWritten();
+  mirror.SetSystemPageFlagsValidWithGPUDataWritten();
   const auto refreshed=mirror.uploads;
   Require(mirror.RequestRange(kBase+kPage,4096) && mirror.uploads==refreshed+1, "CPU frame refresh lost");
   mirror.InvalidateAllPages();
@@ -85,7 +89,7 @@ void Benchmark(Mirror& mirror) {
     const auto start=std::chrono::steady_clock::now();
     for (unsigned i=0;i<iterations;++i) {
       const uint32_t bytes=mode==1 ? 1<<20 : 4096;
-      if (mode==3) mirror.MemoryInvalidationCallback(kBase,4096,true);
+      if (mode==3) mirror.OnPhysicalWrite({kBase,4096},true);
       if (mode==2) {
         const std::pair<uint32_t,uint32_t> ranges[]{{kBase+65536,4096},{kBase,4096},{kBase+131072,4096}};
         Require(mirror.RequestRanges(ranges,3), "benchmark batch");
@@ -99,12 +103,17 @@ void Benchmark(Mirror& mirror) {
 }
 int main(int argc,char** argv) {
   try {
-    rex::memory::Memory memory;
-    Require(memory.Initialize(), "memory initialization");
+    const auto root=std::filesystem::temp_directory_path()/
+        ("x360n-resident-memory-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    struct Cleanup {std::filesystem::path root;~Cleanup(){std::error_code ec;std::filesystem::remove_all(root,ec);}} cleanup{root};
+    rex::codegen::ToolApp app("resident_memory_probe",root);
+    auto tool=app.Open(root);Require(bool(tool),"tool runtime");
+    auto& runtime=tool->GetRuntime();auto& memory=rex::kernel::GetAddressSpace(runtime);
     Require(memory.LookupHeap(0xA0000000|kBase)->AllocFixed(0xA0000000|kBase,kBytes,kPage,
-        rex::memory::kMemoryAllocationReserve|rex::memory::kMemoryAllocationCommit,
-        rex::memory::kMemoryProtectRead|rex::memory::kMemoryProtectWrite), "physical allocation");
-    Mirror mirror(memory);
+        rex::kernel::kMemoryAllocationReserve|rex::kernel::kMemoryAllocationCommit,
+        rex::kernel::kMemoryProtectRead|rex::kernel::kMemoryProtectWrite), "physical allocation");
+    Mirror mirror(runtime);
     if (argc>1 && std::string_view(argv[1])=="--benchmark") Benchmark(mirror);
     else Contracts(mirror);
     return 0;

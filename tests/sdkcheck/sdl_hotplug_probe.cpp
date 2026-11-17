@@ -1,24 +1,37 @@
 // Headless SDL event-queue lifetime regression. Window is never opened.
-#include <rex/input/sdl/sdl_input_driver.h>
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "hid/sdl3/sdl3_input_driver.h"
+#include "codegen/tool_runtime.h"
+#include <rex/logging/logger.h>
+#include <rex/settings_registry.h>
+#include <SDL3/SDL.h>
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <thread>
-
-class HeadlessContext final : public rex::ui::WindowedAppContext {
-  void NotifyUILoopOfPendingFunctions() override {}
-  void PlatformQuitFromUIThread() override {}
+class HeadlessContext final : public rex::IDriverContext {
+ public:
+  rex::ISettingsRegistry& GetSettingsRegistry() override {return REX_SETTINGS();}
+  rex::ILogger& GetLogger() override {return REX_LOGGER();}
+  rex::Result<void> RunOnUIThread(rex::MoveOnlyFunction<void()> fn) override {fn();return rex::Ok();}
+  void PostToUIThread(rex::MoveOnlyFunction<void()> fn) override {posted.push_back(std::move(fn));}
+  void RunPosted() {auto run=std::move(posted);posted.clear();for(auto& fn:run)fn();}
+ private:
+  std::vector<rex::MoveOnlyFunction<void()>> posted;
 };
 int main() {
   for (const char* hint : {SDL_HINT_JOYSTICK_HIDAPI, SDL_HINT_JOYSTICK_RAWINPUT,
                           SDL_HINT_JOYSTICK_DIRECTINPUT, SDL_HINT_XINPUT_ENABLED,
                           SDL_HINT_JOYSTICK_WGI}) SDL_SetHint(hint, "0");
-  rex::cvar::SetFlagByName("hid_mappings_file", "");
+  const auto scratch=std::filesystem::temp_directory_path()/
+      ("x360n-sdl-hotplug-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(scratch);
+  struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove_all(path,ec);}} cleanup{scratch};
+  rex::codegen::ToolApp app("sdl_hotplug_probe",scratch);if(!app.Start())return 1;
   HeadlessContext context;
-  auto window = rex::ui::Window::Create(context, "headless fixture", 1, 1);
-  auto driver = std::make_unique<rex::input::sdl::SDLInputDriver>(nullptr, 0);
-  if (driver->Setup()) return 1;
-  driver->OnWindowAvailable(window.get());
+  auto driver=std::make_unique<rex::hid::sdl3::SDL3InputDriver>();
+  const auto initialized=driver->Initialize(context);
+  if(!initialized){std::cerr<<initialized.error().message<<'\n';return 1;}
+  rex::ScopeGuard shutdown([&] {if(driver)driver->Shutdown();context.RunPosted();});
   SDL_VirtualJoystickDesc desc{};
   SDL_INIT_INTERFACE(&desc);
   desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -32,7 +45,7 @@ int main() {
     // Leave ADDED pending, then remove the device before the guest polls.
     if (!SDL_DetachVirtualJoystick(id)) return 3;
     SDL_UpdateJoysticks();
-    std::vector<rex::input::DeviceInfo> devices;
+    std::vector<rex::hid::PadDevice> devices;
     std::cout << "draining stale ADDED/REMOVED cycle=" << cycle << '\n' << std::flush;
     driver->EnumerateDevices(devices);
     if (!devices.empty()) return 4;
@@ -46,26 +59,25 @@ int main() {
     SDL_UpdateJoysticks();
     devices.clear(); driver->EnumerateDevices(devices);
     if (!devices.empty()) return 8;
-    rex::input::X_INPUT_STATE state{};
-    if (driver->GetDeviceState(old, &state) != 1167) return 9;
+    const auto state=driver->GetDeviceState(old);
+    if(state || state.error().category!=rex::ErrorCategory::kNotFound)return 9;
   }
   const auto pending_id = SDL_AttachVirtualJoystick(&desc);
   if (!pending_id) return 11;
   SDL_UpdateJoysticks();
-  std::vector<rex::input::DeviceInfo> pending_devices;
+  std::vector<rex::hid::PadDevice> pending_devices;
   driver->EnumerateDevices(pending_devices);
   if (pending_devices.size() != 1) return 12;
   // Schedule SDL_PumpEvents from a guest thread, then retire the driver before
   // executing that UI callback. The queued work must not retain `this`.
   std::thread guest([&] {
-    rex::input::X_INPUT_STATE state{};
-    driver->GetDeviceState(pending_devices.front().id, &state);
+    (void)driver->GetDeviceState(pending_devices.front().id);
   });
   guest.join();
-  driver.reset();
-  // The driver must detach even when the Window never sends OnClosing, as in
-  // Runtime::Shutdown. No watch, pending lambda or SDL reference may survive.
-  context.ExecutePendingFunctionsFromUIThread();
+  driver->Shutdown();driver.reset();
+  // The canonical owner calls Shutdown before destroying the driver. Pending
+  // UI work must retain no live driver, watch or SDL subsystem afterward.
+  context.RunPosted();
   if (SDL_WasInit(SDL_INIT_GAMEPAD)) {
     std::cout << "FAIL: destroyed input driver retained SDL gamepad subsystem\n";
     return 10;

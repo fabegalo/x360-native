@@ -21,11 +21,12 @@ int main(int argc, char** argv) {
   };
   const auto mode = arg("--mode=");
   const bool self_return = mode == "dashboard-self-return" || mode == "dashboard-self-invalid";
-  if (arg("--gpu_plugin=") != "xenos") return 76;
+  const auto driver = arg("--gpu.driver=");
+  if (!arg("--gpu_plugin=").empty() || !arg("--gpu_backend=").empty()) return 76;
 #ifdef _WIN32
-  if (arg("--gpu_backend=") != "d3d12") return 78;
+  if (driver != "d3d12") return 78;
 #else
-  if (arg("--gpu_backend=") != "vulkan") return 78;
+  if (driver != "vulkan") return 78;
 #endif
   const bool dashboard = arg("--role=") == "dashboard";
   const auto root = PathFromUtf8(arg("--game_data_root="));
@@ -51,12 +52,12 @@ int main(int argc, char** argv) {
     *static_cast<volatile int*>(nullptr) = 1;
   if (mode == "locale") {
     std::ofstream(root / "console-observed.txt", std::ios::app | std::ios::binary)
-        << arg("--user_language=") << ' ' << arg("--user_country=") << '\n';
+        << arg("--kernel.user_language=") << ' ' << arg("--kernel.user_country=") << '\n';
     if (!step) SaveConsoleSettings(ProjectPaths{root.parent_path().parent_path()}, {1, 103});
   }
   if (mode == "graphics") {
     std::ofstream(root / "graphics-observed.txt", std::ios::app | std::ios::binary)
-        << arg("--gpu_backend=") << '\n';
+        << driver << '\n';
     if (!step) SaveRendererSettings(ProjectPaths{root.parent_path().parent_path()},
         {Renderer::Xenos, true, false, GraphicsApi::Vulkan});
   }

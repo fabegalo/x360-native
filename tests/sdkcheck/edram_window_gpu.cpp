@@ -9,14 +9,18 @@
 #include <d3dcompiler.h>
 #include <glslang/Public/ShaderLang.h>
 #include <iostream>
-#include <rex/graphics/util/draw.h>
-#include <rex/ui/vulkan/device.h>
-#include <rex/ui/vulkan/instance.h>
+#include <gpu/xenos/draw_state.h>
+#include <gpu/xenos/host/vulkan/vulkan_device.h>
+#include <gpu/xenos/host/vulkan/vulkan_settings.h>
+#include <gpu/xenos/host/vulkan/vulkan_instance.h>
 #include <stdexcept>
 #include <vector>
 #include <windows.h>
 #include <wrl/client.h>
-using namespace rex::graphics;
+using namespace rex::gpu;
+using namespace rex::xenos;
+namespace xenos=rex::xenos;
+namespace draw_util=rex::gpu::draw_state;
 using Microsoft::WRL::ComPtr;
 constexpr unsigned W = 160, H = 64;
 bool omit_window_transform = false; // Test-only fault injection for readback.
@@ -25,15 +29,15 @@ void Need(bool b, const char *s) {
     throw std::runtime_error(s);
 }
 template <class T> void Set(RegisterFile &r, T v) {
-  r[T::register_index] = v.value;
+  r[T::kRegisterIndex] = v.value;
 }
 void Float(RegisterFile &r, unsigned i, float v) { std::memcpy(&r[i], &v, 4); }
 struct State {
-  draw_util::ViewportInfo vp;
+  draw_util::HostViewport vp;
   draw_util::Scissor sc;
   float offset[2];
 };
-State Transform(xenos::MsaaSamples mode, unsigned row, unsigned height,
+State Transform(xenos::MSAASamples mode, unsigned row, unsigned height,
                 bool carry) {
   if (omit_window_transform)
     carry = false;
@@ -67,24 +71,26 @@ State Transform(xenos::MsaaSamples mode, unsigned row, unsigned height,
   v.vport_x_scale_ena = v.vport_y_scale_ena = v.vport_x_offset_ena =
       v.vport_y_offset_ena = 1;
   Set(r, v);
-  Float(r, XE_GPU_REG_PA_CL_VPORT_XSCALE, W * .5f);
-  Float(r, XE_GPU_REG_PA_CL_VPORT_XOFFSET, W * .5f);
-  Float(r, XE_GPU_REG_PA_CL_VPORT_YSCALE, -float(H) * .5f);
-  Float(r, XE_GPU_REG_PA_CL_VPORT_YOFFSET, H * .5f);
+  Float(r, uint32_t(rex::xenos::Register::PA_CL_VPORT_XSCALE), W * .5f);
+  Float(r, uint32_t(rex::xenos::Register::PA_CL_VPORT_XOFFSET), W * .5f);
+  Float(r, uint32_t(rex::xenos::Register::PA_CL_VPORT_YSCALE), -float(H) * .5f);
+  Float(r, uint32_t(rex::xenos::Register::PA_CL_VPORT_YOFFSET), H * .5f);
   reg::RB_DEPTHCONTROL depth{};
   depth.z_enable = 1;
   bool kept = false;
   auto tiles = draw_util::GetWindowOffsetTiles(r, depth, 15, true, kept);
   if (carry && row) {
     Need(tiles < 0 && !kept, "eligible GPU tile offset");
-    unsigned pitch = W / (mode == xenos::MsaaSamples::k4X ? 40 : 80);
-    unsigned th = mode == xenos::MsaaSamples::k1X ? 16 : 8;
+    unsigned pitch = W / (mode == xenos::MSAASamples::k4X ? 40 : 80);
+    unsigned th = mode == xenos::MSAASamples::k1X ? 16 : 8;
     Need(draw_util::AddWindowOffsetToEdramBase(row / th * pitch, tiles,
                                                false) == 0,
          "tile and prepass share EDRAM base");
   }
+  struct Settings final : rex::gpu::XenosSettings {};
+  const Settings settings;
   State s{};
-  draw_util::GetHostViewportInfo(r, 1, 1, false, 16384, 16384, false, depth,
+  draw_util::GetHostViewport(settings,r, 1, 1, false, 16384, 16384, false, depth,
                                  false, false, false, s.vp, true, carry);
   draw_util::GetScissor(r, s.sc, true, carry);
   s.offset[1] = carry ? -float(row) : 0;
@@ -172,9 +178,9 @@ float4 PS(float4 p:SV_Position):SV_Target{return float4((abs(floor(p.xy)+offset)
     for (unsigned samples : {1u, 2u, 4u}) {
       if (programmable && samples == 1)
         continue;
-      auto mode = samples == 1   ? xenos::MsaaSamples::k1X
-                  : samples == 2 ? xenos::MsaaSamples::k2X
-                                 : xenos::MsaaSamples::k4X;
+      auto mode = samples == 1   ? xenos::MSAASamples::k1X
+                  : samples == 2 ? xenos::MSAASamples::k2X
+                                 : xenos::MSAASamples::k4X;
       unsigned th = samples == 1 ? 16 : 8;
       D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{};
       pd.pRootSignature = root.Get();
@@ -352,19 +358,20 @@ float4 PS(float4 p:SV_Position):SV_Target{return float4((abs(floor(p.xy)+offset)
 }
 
 void VulkanRaster() {
-  using namespace rex::ui::vulkan;
-  auto instance = VulkanInstance::Create(false, true);
+  using namespace rex::gpu::vulkan;
+  auto instance = VulkanInstance::Create(false, true, false);
   Need(bool(instance), "Vulkan instance");
   std::vector<VkPhysicalDevice> physical;
   instance->EnumeratePhysicalDevices(physical);
   Need(!physical.empty(), "Vulkan GPU");
+  VulkanSettings settings;
   auto device =
-      VulkanDevice::CreateIfSupported(instance.get(), physical[0], true, false);
+      VulkanDevice::CreateIfSupported(instance.get(), physical[0], true, false, settings);
   Need(bool(device), "Vulkan Xenos device");
-  const auto &f = device->functions();
-  const auto &inf = instance->functions();
-  auto vk = device->device();
-  std::cout << "Vulkan GPU=" << device->properties().deviceName << '\n';
+  const auto &f = device->GetFunctions();
+  const auto &inf = instance->GetFunctions();
+  auto vk = device->GetDevice();
+  std::cout << "Vulkan GPU=" << device->GetProperties().deviceName << '\n';
   uint32_t layer_count = 0;
   inf.vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
   std::vector<VkLayerProperties> layers(layer_count);
@@ -418,14 +425,14 @@ void main(){color=vec4((abs(floor(gl_FragCoord.xy)+offset)+1)/255,128.0/255,1);}
   Need(f.vkCreatePipelineLayout(vk, &li, nullptr, &layout) == VK_SUCCESS,
        "Vulkan layout");
   VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-  pci.queueFamilyIndex = device->queue_family_graphics_compute();
+  pci.queueFamilyIndex = device->GetQueueFamilyGraphicsCompute();
   VkCommandPool pool;
   Need(f.vkCreateCommandPool(vk, &pci, nullptr, &pool) == VK_SUCCESS,
        "Vulkan pool");
   auto image_format =
       reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties>(
           inf.vkGetInstanceProcAddr(
-              instance->instance(),
+              instance->GetInstance(),
               "vkGetPhysicalDeviceImageFormatProperties"));
   for (unsigned scenario : {0u, 1u, 2u})
     for (unsigned requested : {1u, 2u, 4u}) {
@@ -445,14 +452,14 @@ void main(){color=vec4((abs(floor(gl_FragCoord.xy)+offset)+1)/255,128.0/255,1);}
         native2 = false;
       }
       Need((support.sampleCounts & samples) != 0, "Vulkan sample count");
-      auto mode = requested == 1   ? xenos::MsaaSamples::k1X
-                  : requested == 2 ? xenos::MsaaSamples::k2X
-                                   : xenos::MsaaSamples::k4X;
+      auto mode = requested == 1   ? xenos::MSAASamples::k1X
+                  : requested == 2 ? xenos::MSAASamples::k2X
+                                   : xenos::MSAASamples::k4X;
       unsigned th = requested == 1 ? 16 : 8;
       bool programmed =
           scenario != 0 && samples > 1 &&
-          device->extensions().ext_EXT_sample_locations &&
-          (device->properties().sampleLocationSampleCounts & samples);
+          device->GetExtensions().ext_EXT_sample_locations &&
+          (device->GetProperties().sampleLocationSampleCounts & samples);
       int8_t xy[4][2]{};
       VkSampleLocationEXT locations[4]{};
       if (samples > 1)
@@ -716,7 +723,7 @@ void main(){color=vec4((abs(floor(gl_FragCoord.xy)+offset)+1)/255,128.0/255,1);}
       submit.pCommandBuffers = &cmd;
       {
         auto queue = device->AcquireQueue(pci.queueFamilyIndex, 0);
-        Need(f.vkQueueSubmit(queue.queue(), 1, &submit, fence) == VK_SUCCESS,
+        Need(f.vkQueueSubmit(queue.GetQueue(), 1, &submit, fence) == VK_SUCCESS,
              "Vulkan submit");
       }
       Need(f.vkWaitForFences(vk, 1, &fence, VK_TRUE, 5'000'000'000ull) ==

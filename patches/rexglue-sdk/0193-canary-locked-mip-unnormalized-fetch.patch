@@ -1,20 +1,23 @@
-diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
---- a/include/rex/graphics/pipeline/shader/spirv_translator.h
-+++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
-@@ -34,7 +34,7 @@
-     // prototyping stage (easier to do small granular updates with an
-     // incremental counter).
-     // Also invalidate stored translations when emitted control-flow changes.
--    static constexpr uint32_t kVersion = 18;
-+    static constexpr uint32_t kVersion = 19;
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -32,7 +32,7 @@
+  public:
+   union Modification {
+     /** Pipeline storage version, incremented when the layout changes incompatibly. */
+-    static constexpr u32 kVersion = 0x12;
++    static constexpr u32 kVersion = 0x13;
  
- 
-     // Opt-in for backends that make every possible destination resident and
-diff --git a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
---- a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
-+++ b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
-@@ -876,6 +876,34 @@
-       // Fetch constants store size minus 1 - add 1.
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
+     enum class DepthStencilMode : u32 {
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator_fetch.cpp
+@@ -737,8 +737,38 @@
+     }
+     if (size_needed_components & 0b0111) {
+       // Fetch constants store the size minus 1.
++      // Fetch constants store size minus 1 - add 1.
        a_.OpIAdd(dxbc::Dest::R(size_and_is_3d_temp, size_needed_components & 0b0111),
                  dxbc::Src::R(size_and_is_3d_temp), dxbc::Src::LU(1));
 +      // HZB reducers in 555308B6 and 5553080B lock the sampler to one mip
@@ -27,7 +30,7 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp b/src/graphi
 +                                        instr.dimension == xenos::FetchOpDimension::k2D &&
 +                                        instr.attributes.unnormalized_coordinates;
 +      if (selected_mip_grid_possible) {
-+        uint32_t selected_mip_temp = PushSystemTemp();
++        u32 selected_mip_temp = PushSystemTemp();
 +        // Word 4 has MipMinLevel in bits 2:5 and MipMaxLevel in bits 6:9.
 +        a_.OpUBFE(dxbc::Dest::R(selected_mip_temp, 0b0011), dxbc::Src::LU(4, 4, 0, 0),
 +                  dxbc::Src::LU(2, 6, 0, 0), RequestTextureFetchConstantWord(tfetch_index, 4));
@@ -45,13 +48,14 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp b/src/graphi
 +                  dxbc::Src::R(selected_mip_temp, 0b00001101), dxbc::Src::R(size_and_is_3d_temp));
 +        PopSystemTemp();
 +      }
-       // Convert the size to float for multiplication/division.
++      // Convert the size to float for multiplication/division.
        a_.OpUToF(dxbc::Dest::R(size_and_is_3d_temp, size_needed_components & 0b0111),
                  dxbc::Src::R(size_and_is_3d_temp));
-diff --git a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp b/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
---- a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
-+++ b/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
-@@ -924,6 +924,38 @@
+     }
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator_fetch.cpp
+@@ -758,14 +758,60 @@
            }
          } break;
        }
@@ -63,7 +67,7 @@ diff --git a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp b/src/graph
 +      // only the denominator (Xenia Canary 8486e97a0).
 +      spv::Id selected_mip_level = spv::NoResult;
 +      spv::Id selected_mip_locked = spv::NoResult;
-+      bool selected_mip_grid_possible = instr.opcode == ucode::FetchOpcode::kTextureFetch &&
++      bool selected_mip_grid_possible = instr.opcode == xenos::ucode::FetchOpcode::kTextureFetch &&
 +                                        instr.dimension == xenos::FetchOpDimension::k2D &&
 +                                        instr.attributes.unnormalized_coordinates;
 +      if (selected_mip_grid_possible) {
@@ -79,33 +83,36 @@ diff --git a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp b/src/graph
 +                                        id_vector_temp_),
 +            spv::NoPrecision);
 +        selected_mip_level =
-+            builder_->createTriOp(spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_4_mips,
++            builder_->createTriOp(spv::OpBitFieldUExtract, type_uint, fetch_constant_word_4_mips,
 +                                  builder_->makeUintConstant(2), builder_->makeUintConstant(4));
 +        spv::Id mip_max_level =
-+            builder_->createTriOp(spv::OpBitFieldUExtract, type_uint_, fetch_constant_word_4_mips,
++            builder_->createTriOp(spv::OpBitFieldUExtract, type_uint, fetch_constant_word_4_mips,
 +                                  builder_->makeUintConstant(6), builder_->makeUintConstant(4));
 +        selected_mip_locked =
-+            builder_->createBinOp(spv::OpIEqual, type_bool_, selected_mip_level, mip_max_level);
++            builder_->createBinOp(spv::OpIEqual, type_bool, selected_mip_level, mip_max_level);
 +      }
        {
-         uint32_t size_remaining_components = size_needed_components;
-         uint32_t size_component_index;
-@@ -933,6 +965,18 @@
-           // Fetch constants store size minus 1 - add 1.
-           size_component_ref = builder_->createBinOp(spv::OpIAdd, type_uint_, size_component_ref,
+         u32 size_remaining_components = size_needed_components;
+         u32 size_component_index;
+         while (rex::bit_scan_forward(size_remaining_components, &size_component_index)) {
+           size_remaining_components &= ~(UINT32_C(1) << size_component_index);
+           spv::Id& size_component_ref = size[size_component_index];
++          // Fetch constants store size minus 1 - add 1.
+           size_component_ref = builder_->createBinOp(spv::OpIAdd, type_uint, size_component_ref,
                                                       builder_->makeUintConstant(1));
 +          if (selected_mip_locked != spv::NoResult) {
 +            // max(size >> mip, 1) for non-pow2 textures. Scaling stays
 +            // unchanged.
-+            spv::Id selected_mip_size = builder_->createBinBuiltinCall(
-+                type_uint_, ext_inst_glsl_std_450_, GLSLstd450UMax,
-+                builder_->createBinOp(spv::OpShiftRightLogical, type_uint_, size_component_ref,
++            spv::Id selected_mip_size = builder_->CreateBinBuiltinCall(
++                type_uint, ext_inst_glsl_std_450_, GLSLstd450UMax,
++                builder_->createBinOp(spv::OpShiftRightLogical, type_uint, size_component_ref,
 +                                      selected_mip_level),
 +                builder_->makeUintConstant(1));
-+            size_component_ref = builder_->createTriOp(spv::OpSelect, type_uint_,
++            size_component_ref = builder_->createTriOp(spv::OpSelect, type_uint,
 +                                                       selected_mip_locked, selected_mip_size,
 +                                                       size_component_ref);
 +          }
-           // Convert the size to float for multiplication or division.
++          // Convert the size to float for multiplication or division.
            size_component_ref =
-               builder_->createUnaryOp(spv::OpConvertUToF, type_float_, size_component_ref);
+               builder_->createUnaryOp(spv::OpConvertUToF, type_float, size_component_ref);
+         }

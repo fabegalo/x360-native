@@ -10,7 +10,7 @@ namespace x360n::avatar {
 // app manager, global heap or module entry point is initialized.
 class AotAvatarCatalog {
  public:
-  AotAvatarCatalog(rex::memory::Memory& memory, AvatarAotCall call);
+  AotAvatarCatalog(rex::kernel::GuestAddressSpace& memory, AvatarAotCall call);
   ~AotAvatarCatalog();
   AotAvatarCatalog(const AotAvatarCatalog&) = delete;
   AotAvatarCatalog& operator=(const AotAvatarCatalog&) = delete;
@@ -20,7 +20,7 @@ class AotAvatarCatalog {
   void Close();
 
  private:
-  rex::memory::Memory& memory_;
+  rex::kernel::GuestAddressSpace& memory_;
   AvatarAotCall call_;
   uint32_t workspace_ = 0;
   bool constructed_ = false, ready_ = false;

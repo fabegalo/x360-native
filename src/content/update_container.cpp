@@ -2,8 +2,10 @@
 // Copyright 2020 Ben Vanik; adapted by Tom Clay, 2026. BSD-3-Clause,
 // licenses/rexglue-sdk.txt. This preflight never extracts or interprets files.
 #include "update_container.h"
+#include "extraction.h"
+#include <rex/filesystem/file_system_factory.h>
 #include "paths.h"
-#include <rex/filesystem/devices/stfs_container_device.h>
+#include <rex/filesystem/stfs.h>
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -14,16 +16,16 @@ namespace fs=std::filesystem;
 namespace x360n::content {
 void ValidateUpdateContainer(const fs::path& path) {
   using namespace rex::filesystem;
-  const auto header=StfsContainerDevice::ReadPackageHeader(path);
+  const auto header=FileSystem().ReadPackageHeader(path);
   const auto size=io::file_size(path);
   if (!header || header->header.magic!=XContentPackageType::kPirs ||
-      header->metadata.volume_type!=XContentVolumeType::kStfs || header->metadata.data_file_count!=0 ||
+      header->metadata.volume_type!=XContentVolumeType::kSTFS || header->metadata.data_file_count!=0 ||
       !header->metadata.volume_descriptor.stfs.flags.bits.read_only_format || size>(512ull<<20))
     throw std::runtime_error("PIRS: expected a bounded read-only STFS update container");
   const auto& desc=header->metadata.volume_descriptor.stfs;
   const uint64_t start=(uint64_t(header->header.header_size)+4095)&~uint64_t(4095);
   const uint32_t blocks=desc.total_block_count, tables=desc.file_table_block_count;
-  if (start<sizeof(StfsHeader) || start>=size || !blocks || blocks>size/4096 || !tables || tables>64)
+  if (start<sizeof(XContentPackageHeader) || start>=size || !blocks || blocks>size/4096 || !tables || tables>64)
     throw std::runtime_error("PIRS: invalid/excessive allocation or file table");
   io::ifstream input(path,std::ios::binary);
   auto read=[&](uint64_t offset,void* buffer,size_t count) {
@@ -51,10 +53,10 @@ void ValidateUpdateContainer(const fs::path& path) {
   std::set<uint32_t> used;
   std::set<std::pair<uint16_t,std::string>> names;
   uint64_t declared=0;
-  uint32_t table=desc.file_table_block_number();
+  uint32_t table=desc.GetFileTableBlockNumber();
   for (uint32_t n=0;n<tables;++n) {
     if (!used.insert(table).second) throw std::runtime_error("PIRS: overlapping/cyclic table blocks");
-    StfsDirectoryBlock directory{};read(offset(table),&directory,sizeof(directory));
+    STFSDirectoryBlock directory{};read(offset(table),&directory,sizeof(directory));
     for (const auto& e:directory.entries) {
       if (!e.name[0]) break;
       const auto len=e.flags.name_length & 0x3F;
@@ -76,8 +78,8 @@ void ValidateUpdateContainer(const fs::path& path) {
       if (length>(512ull<<20) || length>(2ull<<30)-declared) throw std::runtime_error("PIRS: declared extraction limit exceeded");
       declared+=length;
       const auto allocated=(length+4095)/4096;
-      if (allocated!=e.allocated_data_blocks()) throw std::runtime_error("PIRS: allocation length mismatch");
-      auto block=e.start_block_number();
+      if (allocated!=e.GetAllocatedDataBlocks()) throw std::runtime_error("PIRS: allocation length mismatch");
+      auto block=e.GetStartBlockNumber();
       for (uint64_t i=0;i<allocated;++i) {
         offset(block);
         if (!used.insert(block).second) throw std::runtime_error("PIRS: overlapping/cyclic file blocks");

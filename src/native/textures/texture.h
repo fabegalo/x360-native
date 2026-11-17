@@ -4,8 +4,12 @@
 #include <array>
 #include <algorithm>
 #include <cstring>
-#include <rex/graphics/xenos.h>
-#include <rex/graphics/pipeline/texture/info.h>
+#include <rex/xenos/state.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/fetch.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/packet.h>
+#include <rex/xenos/texture.h>
 namespace x360n::native {
 // Guest RGBA4 stores R in the least significant nibble. Replication is an
 // exact conversion to UNORM8 (n / 15 == (n * 17) / 255), before fetch swizzle.
@@ -40,16 +44,16 @@ inline float DecodeDepthTexture(uint32_t packed, bool floating) {
 }
 // frac/int only selects the representation of fixed-point formats. IEEE
 // floating texture encodings keep their exponent/mantissa in either mode.
-constexpr bool IsFloatTexture(rex::graphics::xenos::TextureFormat f) {
-  using F = rex::graphics::xenos::TextureFormat;
+constexpr bool IsFloatTexture(rex::xenos::TextureFormat f) {
+  using F = rex::xenos::TextureFormat;
   return f == F::k_16_FLOAT || f == F::k_16_16_FLOAT || f == F::k_16_16_16_16_FLOAT ||
       f == F::k_32_FLOAT || f == F::k_32_32_FLOAT || f == F::k_32_32_32_32_FLOAT;
 }
 // Formats without an API-independent filterable host representation are
 // expanded before upload. Conversion precedes filtering and guest swizzle.
-inline unsigned ExpandedTextureComponents(rex::graphics::xenos::TextureFormat f, bool integer) {
-  using namespace rex::graphics::xenos;
-  f = rex::graphics::GetBaseFormat(f);
+inline unsigned ExpandedTextureComponents(rex::xenos::TextureFormat f, bool integer) {
+  using namespace rex::xenos;
+  f = rex::xenos::GetBaseFormat(f);
   switch (f) {
     case TextureFormat::k_1_5_5_5: return 4;
     case TextureFormat::k_5_6_5: case TextureFormat::k_6_5_5:
@@ -65,9 +69,9 @@ inline unsigned ExpandedTextureComponents(rex::graphics::xenos::TextureFormat f,
   }
 }
 inline std::array<float, 4> ExpandTextureTexel(const uint8_t* bytes,
-    rex::graphics::xenos::TextureFormat f, bool sign, bool integer) {
-  using namespace rex::graphics::xenos;
-  f = rex::graphics::GetBaseFormat(f);
+    rex::xenos::TextureFormat f, bool sign, bool integer) {
+  using namespace rex::xenos;
+  f = rex::xenos::GetBaseFormat(f);
   unsigned bits[4]{}, count = ExpandedTextureComponents(f, integer);
   switch (f) {
     case TextureFormat::k_1_5_5_5: bits[0]=bits[1]=bits[2]=5; bits[3]=1; break;
@@ -100,13 +104,13 @@ inline std::array<float, 4> ExpandTextureTexel(const uint8_t* bytes,
   for (unsigned i=count; i<4; ++i) values[i]=values[count-1];
   return values;
 }
-inline bool ExpandedTextureBlock(rex::graphics::xenos::TextureFormat f) {
-  using F=rex::graphics::xenos::TextureFormat;
+inline bool ExpandedTextureBlock(rex::xenos::TextureFormat f) {
+  using F=rex::xenos::TextureFormat;
   return f==F::k_DXT3A || f==F::k_DXT3A_AS_1_1_1_1 || f==F::k_CTX1;
 }
 inline std::array<float,4> ExpandTextureBlockPixel(const uint8_t* data,
-    rex::graphics::xenos::TextureFormat f, unsigned pixel, bool sign, bool integer) {
-  using F=rex::graphics::xenos::TextureFormat;
+    rex::xenos::TextureFormat f, unsigned pixel, bool sign, bool integer) {
+  using F=rex::xenos::TextureFormat;
   std::array<float,4> result{};
   auto component=[&](unsigned value,unsigned bits) {
     if(sign) { const int v=int(value)-(value&(1u<<(bits-1)) ? int(1u<<bits):0);
@@ -131,8 +135,8 @@ inline std::array<float,4> ExpandTextureBlockPixel(const uint8_t* data,
 }
 // Endian swap the pinned texture_load_* shaders apply per block size: none
 // for 8-bit blocks, only 8in16 for 16-bit blocks, every mode from 32 bits.
-constexpr rex::graphics::xenos::Endian TextureBlockEndian(unsigned block_bytes, rex::graphics::xenos::Endian endian) {
-  using E = rex::graphics::xenos::Endian;
+constexpr rex::xenos::Endian TextureBlockEndian(unsigned block_bytes, rex::xenos::Endian endian) {
+  using E = rex::xenos::Endian;
   return block_bytes == 1 ? E::kNone : block_bytes == 2 && endian != E::k8in16 ? E::kNone : endian;
 }
 // API-independent description; this is also the boundary for a future Vulkan backend.
@@ -140,6 +144,6 @@ struct ScanoutTexture {
   uint32_t address, width, height, pitch, tiled, endian, swizzle, bytes;
   bool rgb10 = false;
 };
-ScanoutTexture DecodeScanout(const rex::graphics::xenos::xe_gpu_texture_fetch_t& fetch,
+ScanoutTexture DecodeScanout(const rex::xenos::TextureFetch& fetch,
                             uint32_t active_width, uint32_t active_height);
 }

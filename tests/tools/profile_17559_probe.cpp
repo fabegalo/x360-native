@@ -1,3 +1,5 @@
+#include "tool_sdk.h"
+#include <rex/platform/dynlib.h>
 // Explicit headless original-code contract check. No UI entrypoint, renderer,
 // input, games or existing user storage. Assets are checked before loading.
 #include <cstdio>
@@ -6,14 +8,7 @@
 #include "../../titles/common/system_ui_context.h"
 #include "../../titles/dash_17559/src/system_ui_saved_state.h"
 #include "../sdkcheck/offline_achievement_fixture.h"
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/kernel/xam/offline_achievement_helpers.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xthread.h>
-#include <rex/system/offline_achievement_store.h>
+#include "xam/offline_achievement_helpers.h"
 #include <chrono>
 #include <thread>
 #include <cstring>
@@ -69,35 +64,51 @@ int main(int argc, char** argv) {
       if (ec) { std::cerr << "copy " << dir.string() << ": " << ec.message() << '\n'; return 4; }
     }
   }
-  rex::Runtime rt(originals, work, {}, work / "cache", work / "metadata");
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  if (rt.Setup(std::move(config))) return 5;
-  auto* state = rt.kernel_state();
-  for (const char* name : {"xam_ui", achievements_only ? "gamerprofile" : saved_only ? "signin" : "createprofile"}) {
-    const auto dll = (binaries / (std::string("dash_17559_") + name + ".dll")).string();
-    const auto path = std::string("game:\\system\\") + name + ".xex";
-    const auto file = std::string(name) + ".xex";
-    state->RegisterRecompiledModule(file.c_str(), path.c_str(), dll.c_str());
+  x360n::DiagnosticToolApp app("profile_17559_probe",work);
+  if(!app.Start())return 5;
+  // Register the same verified libraries before the canonical executable loader runs.
+  static std::filesystem::path module_binaries=binaries;
+  static std::string second=achievements_only ? "gamerprofile" : saved_only ? "signin" : "createprofile";
+  rex::platform::DynamicLibrary executable_library;
+  rex::kernel::FunctionDispatcher::RegisterFn register_executable=nullptr;
+  bool host_function_table=false;
+  rex::ppc::PPCImage image{};
+  if(achievements_only) {
+    if(!executable_library.Load(binaries/("dash_17559_"+second+".dll")))return 6;
+    const auto get_image=executable_library.GetSymbol<const rex::ppc::PPCImage*(*)()>("ReXGetModuleImage");
+    const auto host_table=executable_library.GetSymbol<bool(*)()>("ReXModule_UsesHostFunctionTable");
+    register_executable=executable_library.GetSymbol<rex::kernel::FunctionDispatcher::RegisterFn>("ReXRegisterModule");
+    if(!get_image || !get_image() || !register_executable || !host_table)return 6;
+    image=*get_image();host_function_table=host_table();
   }
-  auto xam = state->LoadUserModule("game:\\system\\xam_ui.xex", false);
-  auto create = state->LoadUserModule(achievements_only ? "game:\\system\\gamerprofile.xex" :
-      saved_only ? "game:\\system\\signin.xex" : "game:\\system\\createprofile.xex", false);
-  if (!xam || !create) return 6;
-  // The headless operation probe needs a process owner to start the normal
-  // deferred-completion worker. No module entrypoint is executed.
-  if (achievements_only) state->SetExecutableModule(create);
+  image.register_modules=[](rex::kernel::IModuleRegistry& modules) {
+    for (const auto& name : {std::string("xam_ui"),second}) {
+      const auto dll=(module_binaries/("dash_17559_"+name)).string();
+      const auto path=std::string("game:\\system\\")+name+".xex";
+      modules.RegisterRecompiledModule((name+".xex").c_str(),path.c_str(),dll.c_str());
+    }
+  };
+  rex::kernel::TitleRuntime rt(image,host_function_table);
+  if(!rt.GetTitlePaths().game_root.Set(originals) ||
+      !rt.GetTitlePaths().entry.Set(achievements_only ? "system/gamerprofile.xex" : "") || !rt.Load())return 5;
+  if(register_executable && !image.func_mappings)register_executable(&rex::kernel::GetFunctionDispatcher(rt));
+  auto& state=rt.GetModuleRegistry();
+  const auto xam_handle=state.LoadUserModule("game:\\system\\xam_ui.xex",false);
+  const auto create_handle=achievements_only ? rex::Ok(state.GetExecutable().value_or(0)) :
+      state.LoadUserModule("game:\\system\\"+second+".xex",false);
+  if(!xam_handle || !create_handle)return 6;
+  auto xam=rt.GetObjectTable().Get<rex::kernel::ModuleObject>(*xam_handle);
+  auto create=rt.GetObjectTable().Get<rex::kernel::ModuleObject>(*create_handle);
+  if(!xam || !create)return 6;
   for (auto ordinal : {0x233, 0x236, 0x2D0, 0x3BC, 0x3C7})
     std::cout << "original-export " << std::hex << ordinal << "="
-              << xam->GetProcAddressByOrdinal(uint16_t(ordinal)) << std::endl;
+              << xam->GetExportAddress(rt, uint16_t(ordinal)) << std::endl;
   bool passed = true;
-  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      state, 512 * 1024, 0, [&] {
-    x360n::SystemUiContext context(*rt.memory());
-    auto* dispatcher = rt.function_dispatcher();
-    auto* memory = rt.memory();
-    auto* profile = state->user_profile();
+  auto caller = rt.GetThreadRegistry().LaunchHostThread("profile_17559 probe", 512 * 1024, [&] {
+    x360n::SystemUiContext context(*(&rex::kernel::GetAddressSpace(rt)));
+    auto* dispatcher = (&rex::kernel::GetFunctionDispatcher(rt));
+    auto* memory = (&rex::kernel::GetAddressSpace(rt));
+    auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
     const auto object = memory->SystemHeapAlloc(4096);
     const auto login = memory->SystemHeapAlloc(128);
     if (!object || !login) { passed = false; return 7; }
@@ -146,17 +157,17 @@ int main(int argc, char** argv) {
       for (uint32_t i = 0; i < 4; ++i) {
         copies[i] = get(saved + 252 + 232 * i);
         if (!copies[i] || copies[i] == originals[i] ||
-            !rex::kernel::xam::AchievementGuestSpan(memory, copies[i], 34, rex::memory::kMemoryProtectRead)) {
+            !memory->IsGuestRangeAccessible(copies[i], 34, rex::kernel::kMemoryProtectRead)) {
           passed = false; return 15;
         }
         passed &= std::memcmp(memory->TranslateVirtual(originals[i]), memory->TranslateVirtual(copies[i]), 34) == 0;
       }
       dash17559::ReleaseDiscardedSystemUiState(*memory, 0x21001, state_bytes);
       for (uint32_t i = 0; i < 4; ++i) {
-        rex::memory::HeapAllocationInfo info{};
+        rex::kernel::HeapAllocation info{};
         auto* heap = memory->LookupHeap(copies[i]);
         passed &= heap && heap->QueryRegionInfo(copies[i], &info) &&
-            (info.state & rex::memory::kMemoryAllocationCommit) == 0;
+            (info.state & rex::kernel::kMemoryAllocationCommit) == 0;
         passed &= memory->TranslateVirtual<uint8_t*>(originals[i])[33] == 0x31 + i;
         memory->SystemHeapFree(originals[i]);
       }
@@ -176,8 +187,8 @@ int main(int argc, char** argv) {
       return passed ? 0 : 15;
     }
     if (close_only) {
-      auto kernel_xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-      const auto owner = create->hmodule_ptr();
+      auto kernel_xam = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI());
+      const auto owner = create->hmodule_ptr;
       passed &= kernel_xam->RegisterSystemApp({owner, 0xFF, 0x90105C98, 14}) == 0;
       for (const uint32_t completion : {1u, 2u}) {
         passed &= kernel_xam->BeginSystemUi(owner, 0xFF, 0);
@@ -209,10 +220,10 @@ int main(int argc, char** argv) {
           rex::memory::store_and_swap<uint16_t>(memory->TranslateVirtual(string + uint32_t(i * 2)), text[i]);
         uint64_t args[]{object, object + 64, object + 68, object + 72};
         const auto original = dispatcher->ExecuteTrap(context.thread_state(), 0x81670A50, args, 4);
-        auto& ctx = *context.thread_state()->context();
+        auto& ctx = *context.thread_state()->GetContext();
         ctx.r3.u64 = object + 128; ctx.r4.u64 = object + 192;
         ctx.r5.u64 = object + 196; ctx.r6.u64 = object + 200;
-        __imp__XamParseGamerTileKey(ctx, memory->virtual_membase());
+        __imp__XamParseGamerTileKey(ctx, memory->GetVirtualMembase());
         passed &= uint32_t(original) == ctx.r3.u32 && get(object + 8) == get(object + 136);
         for (uint32_t i = 0; i < 3; ++i) passed &= get(object + 64 + i * 4) == get(object + 192 + i * 4);
         std::cout << "original-tile-key length=" << std::hex << get(object + 8)
@@ -227,14 +238,14 @@ int main(int argc, char** argv) {
       // Exercise the actual GamerProfile operation methods, without its entry
       // point, scene creation, UI, games or the user's existing achievement 155.
       constexpr uint32_t title_a = 0x1234C901, title_b = 0x1234C902;
-      using Result = rex::system::OfflineAchievementResult;
-      auto& ledger = state->offline_achievements();
+      using Result = rex::xam::OfflineAchievementResult;
+      auto& ledger = REX_INTERFACE(rex::xam::IXAMTitleServices)->GetOfflineAchievements();
       passed &= ledger.ImportTitle(title_a, offline_achievement_fixture::Metadata()) == Result::kSuccess;
       passed &= ledger.ImportTitle(title_b, offline_achievement_fixture::Metadata(40)) == Result::kSuccess;
       uint64_t alpha = 0, bravo = 0;
       passed &= profile->CreateLocal("Alpha", &alpha) == 0;
       passed &= profile->CreateLocal("Bravo", &bravo) == 0;
-      std::vector<rex::system::OfflineAchievementRecord> unlocked;
+      std::vector<rex::xam::OfflineAchievementRecord> unlocked;
       const std::array<uint32_t, 1> ids{1};
       passed &= ledger.UnlockBatch(alpha, title_a, ids, unlocked) == Result::kSuccess;
       auto text = [&](uint32_t address) {
@@ -242,8 +253,8 @@ int main(int argc, char** argv) {
         if (!address) return value;
         for (size_t i = 0; i < 256; ++i) {
           const uint64_t next = uint64_t(address) + i * 2;
-          if (next > UINT32_MAX || !rex::kernel::xam::AchievementGuestSpan(
-                  memory, uint32_t(next), 2, rex::memory::kMemoryProtectRead))
+          if (next > UINT32_MAX || !memory->IsGuestRangeAccessible(
+                  uint32_t(next), 2, rex::kernel::kMemoryProtectRead))
             return std::u16string{};
           const auto c = rex::memory::load_and_swap<uint16_t>(memory->TranslateVirtual(uint32_t(next)));
           if (!c) break;
@@ -258,7 +269,7 @@ int main(int argc, char** argv) {
         return get(object + 8) == 0 && get(object + 12) == 2;
       };
       auto release = [&](uint32_t handle_offset, uint32_t buffer_offset) {
-        state->object_table()->RemoveHandle(get(object + handle_offset));
+        rex::kernel::CloseOwned(rt.GetObjectTable(),get(object + handle_offset));
         uint64_t args[]{get(object + buffer_offset)};
         dispatcher->ExecuteTrap(context.thread_state(), 0x9011C7A0, args, 1);
       };
@@ -397,16 +408,17 @@ int main(int argc, char** argv) {
       const auto pending = dispatcher->ExecuteTrap(context.thread_state(), 0x90103528, args, 1);
       const auto completion = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(login + 8));
       std::cout << "original-logon result=" << std::hex << uint32_t(pending)
-                << " completion=" << completion << " active=" << profile->xuid() << std::endl;
-      passed &= uint32_t(pending) == 0x8000000A && completion == 0 && profile->xuid() == xuid;
+                << " completion=" << completion << " active=" << profile->GetXUID() << std::endl;
+      passed &= uint32_t(pending) == 0x8000000A && completion == 0 && profile->GetXUID() == xuid;
       previous = xuid;
     }
     memory->SystemHeapFree(login); memory->SystemHeapFree(object);
     return 0;
-  }));
-  if (caller->Create()) return 8;
+  });
+  if (!caller) return 8;
   uint64_t timeout = uint64_t(-100'000'000ll);
-  if (caller->Wait(0, 0, 0, &timeout)) ExitProcess(9);
+  if (rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*caller, 0, 0, 0, &timeout)) ExitProcess(9);
+    rex::kernel::CloseOwned(rt.GetObjectTable(),*caller);
   std::cout << "original-profile-contracts=" << (passed ? "pass" : "FAIL") << std::endl;
   return passed ? 0 : 10;
 }

@@ -1,7 +1,7 @@
 // Executes the shader address helper against an independent physical-tile oracle.
 #include "scaled_resolve_address_math.h"
 #include <iostream>
-#include <rex/graphics/pipeline/render_target/scaled_resolve.h>
+#include <gpu/xenos/pipeline/render_target/scaled_resolve.h>
 uint32_t Reference(const XeResolveInfo& i, unsigned x, unsigned y, unsigned s) {
   uint64_t hx=uint64_t(x)+i.edram_offset_scaled.x;
   uint64_t hy=uint64_t(std::max(y,i.half_pixel_offset_fill_source.y))+i.edram_offset_scaled.y;
@@ -14,25 +14,27 @@ uint32_t Reference(const XeResolveInfo& i, unsigned x, unsigned y, unsigned s) {
 }
 int main() {
   uint64_t checks=0;
-  using namespace rex::graphics;
+  using namespace rex::gpu;
+  namespace xenos=rex::xenos;
+  namespace reg=rex::xenos::reg;
   reg::RB_COPY_DEST_INFO dest{};
   dest.copy_dest_format=xenos::ColorFormat::k_5_6_5;
-  auto enabled=[&](bool scaled,bool depth,unsigned source,xenos::MsaaSamples samples) {
+  auto enabled=[&](bool scaled,bool depth,unsigned source,xenos::MSAASamples samples) {
     return UseScaledRgb565Resolve(scaled,depth,source,samples,dest);
   };
-  bool guards=enabled(true,false,0,xenos::MsaaSamples::k2X) &&
-      enabled(true,false,7,xenos::MsaaSamples::k4X) &&
-      !enabled(false,false,0,xenos::MsaaSamples::k2X) &&
-      !enabled(true,true,0,xenos::MsaaSamples::k2X) &&
-      !enabled(true,false,0,xenos::MsaaSamples::k1X) &&
-      !enabled(true,false,1,xenos::MsaaSamples::k2X) &&
-      !enabled(true,false,4,xenos::MsaaSamples::k2X) &&
-      !enabled(true,false,5,xenos::MsaaSamples::k2X);
+  bool guards=enabled(true,false,0,xenos::MSAASamples::k2X) &&
+      enabled(true,false,7,xenos::MSAASamples::k4X) &&
+      !enabled(false,false,0,xenos::MSAASamples::k2X) &&
+      !enabled(true,true,0,xenos::MSAASamples::k2X) &&
+      !enabled(true,false,0,xenos::MSAASamples::k1X) &&
+      !enabled(true,false,1,xenos::MSAASamples::k2X) &&
+      !enabled(true,false,4,xenos::MSAASamples::k2X) &&
+      !enabled(true,false,5,xenos::MSAASamples::k2X);
   dest.copy_dest_format=xenos::ColorFormat::k_8_8;
-  guards=guards && !enabled(true,false,0,xenos::MsaaSamples::k2X);
+  guards=guards && !enabled(true,false,0,xenos::MSAASamples::k2X);
   dest.copy_dest_format=xenos::ColorFormat::k_5_6_5;
   dest.copy_dest_number=xenos::SurfaceNumberFormat::kUnsignedInteger;
-  guards=guards && !enabled(true,false,0,xenos::MsaaSamples::k2X);
+  guards=guards && !enabled(true,false,0,xenos::MSAASamples::k2X);
   ++checks;if(!guards)return 1;
   for(unsigned scale=1;scale<=7;++scale)
     for(unsigned x=0;x<65536;++x) {

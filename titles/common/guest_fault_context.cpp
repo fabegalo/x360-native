@@ -1,5 +1,6 @@
 #include "guest_fault_context.h"
-#include <rex/system/thread_state.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/memory/endian.h>
 #include <array>
 #include <algorithm>
 #include <cstdio>
@@ -16,8 +17,8 @@
 #endif
 
 namespace x360n {
-bool GuestFaultContext::Start(rex::memory::Memory& memory, const std::filesystem::path& path) {
-  if (memory_ || path.empty()) return false;
+bool GuestFaultContext::Start(rex::kernel::TitleRuntime& runtime, const std::filesystem::path& path) {
+  if (runtime_ || !runtime.IsLoaded() || path.empty()) return false;
 #if defined(_WIN32)
   // Never truncate an earlier diagnostic. No handles, buffers or directories
   // are created from the exception callback itself.
@@ -25,10 +26,11 @@ bool GuestFaultContext::Start(rex::memory::Memory& memory, const std::filesystem
                           CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return false;
   file_ = file;
-  memory_ = &memory;
+  runtime_ = &runtime;
+  guest_base_ = reinterpret_cast<uintptr_t>(runtime.GetMembase().GetBase());
   writing_.clear();
   records_ = 0;
-  rex::arch::ExceptionHandler::Install(Observe, this);
+  rex::platform::ExceptionHandler::Install(Observe, this);
   return true;
 #else
   return false;
@@ -36,29 +38,30 @@ bool GuestFaultContext::Start(rex::memory::Memory& memory, const std::filesystem
 }
 
 void GuestFaultContext::Stop() {
-  if (!memory_) return;
-  rex::arch::ExceptionHandler::Uninstall(Observe, this);
+  if (!runtime_) return;
+  rex::platform::ExceptionHandler::Uninstall(Observe, this);
 #if defined(_WIN32)
   CloseHandle(file_);
 #endif
   file_ = nullptr;
-  memory_ = nullptr;
+  runtime_ = nullptr;
+  guest_base_ = 0;
 }
 
-bool GuestFaultContext::Observe(rex::arch::Exception* exception, void* data) {
+bool GuestFaultContext::Observe(rex::platform::Exception* exception, void* data) {
 #if defined(_WIN32)
   auto& self = *static_cast<GuestFaultContext*>(data);
-  if (exception->code() != rex::arch::Exception::Code::kAccessViolation) return false;
-  auto* state = rex::runtime::ThreadState::Get();
-  if (!state || state->memory() != self.memory_) return false;
-  const auto address = exception->fault_address();
-  const auto begin = reinterpret_cast<uintptr_t>(self.memory_->virtual_membase());
-  const auto end = reinterpret_cast<uintptr_t>(self.memory_->physical_membase());
+  if (exception->GetCode() != rex::platform::Exception::Code::kAccessViolation) return false;
+  auto* state = rex::kernel::ThreadState::Get();
+  if (!state || state->GetRuntime() != self.runtime_) return false;
+  const auto address = exception->GetFaultAddress();
+  const auto begin = self.guest_base_;
+  const auto end = begin + (uint64_t{1} << 32);
   if (address < begin || address >= end || self.writing_.test_and_set()) return false;
   if (self.records_ == 16) { self.writing_.clear(); return false; }
   ++self.records_;
 
-  const auto& ctx = *state->context();
+  const auto& ctx = *state->GetContext();
   const std::array<uint64_t, 32> gpr{
       ctx.r0.u64, ctx.r1.u64, ctx.r2.u64, ctx.r3.u64,
       ctx.r4.u64, ctx.r5.u64, ctx.r6.u64, ctx.r7.u64,
@@ -68,13 +71,11 @@ bool GuestFaultContext::Observe(rex::arch::Exception* exception, void* data) {
       ctx.r20.u64, ctx.r21.u64, ctx.r22.u64, ctx.r23.u64,
       ctx.r24.u64, ctx.r25.u64, ctx.r26.u64, ctx.r27.u64,
       ctx.r28.u64, ctx.r29.u64, ctx.r30.u64, ctx.r31.u64};
-  const uint32_t cr = (ctx.cr0.raw() << 28) | (ctx.cr1.raw() << 24) |
-      (ctx.cr2.raw() << 20) | (ctx.cr3.raw() << 16) | (ctx.cr4.raw() << 12) |
-      (ctx.cr5.raw() << 8) | (ctx.cr6.raw() << 4) | ctx.cr7.raw();
-  const char* operation = exception->access_violation_operation() ==
-      rex::arch::Exception::AccessViolationOperation::kRead ? "read" :
-      exception->access_violation_operation() ==
-      rex::arch::Exception::AccessViolationOperation::kWrite ? "write" : "unknown";
+  const uint32_t cr = ctx.GetCR();
+  const char* operation = exception->GetAccessViolationOperation() ==
+      rex::platform::Exception::AccessViolationOperation::kRead ? "read" :
+      exception->GetAccessViolationOperation() ==
+      rex::platform::Exception::AccessViolationOperation::kWrite ? "write" : "unknown";
   // Fixed stack buffer; no logger, guest dereference, dispatcher or heap lock
   // in the fault path. LR and last_indirect_target are evidence, not guest PC.
   char output[8192];
@@ -84,7 +85,7 @@ bool GuestFaultContext::Observe(rex::arch::Exception* exception, void* data) {
       "operation=%s guest_address=%08llX host_address=%016llX\n"
       "lr=%016llX ctr=%016llX last_indirect_target=%08X cr=%08X fpscr=%08X\n"
       "PPCContext snapshot: AOT host locals may hold newer register values; LR is not PC\n",
-      static_cast<unsigned long long>(exception->pc()), GetCurrentThreadId(), state->thread_id(),
+      static_cast<unsigned long long>(exception->GetPC()), GetCurrentThreadId(), state->GetThreadID(),
       operation, static_cast<unsigned long long>(address - begin),
       static_cast<unsigned long long>(address), static_cast<unsigned long long>(ctx.lr),
       static_cast<unsigned long long>(ctx.ctr.u64), ctx.last_indirect_target, cr, ctx.fpscr.csr);

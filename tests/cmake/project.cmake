@@ -55,7 +55,7 @@ add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 if(WIN32)
   add_executable(x360n_aot_module_registration_probe EXCLUDE_FROM_ALL tools/aot_module_registration_probe.cpp)
-  target_link_libraries(x360n_aot_module_registration_probe PRIVATE x360n_core)
+  target_link_libraries(x360n_aot_module_registration_probe PRIVATE x360n_core rexbase)
   target_include_directories(x360n_aot_module_registration_probe PRIVATE
     ${X360_REXGLUE_DIR}/thirdparty/xxHash ${X360_REXGLUE_DIR}/thirdparty/simde)
   add_test(NAME x360n.benchmark-process-summary COMMAND pwsh -NoProfile -File

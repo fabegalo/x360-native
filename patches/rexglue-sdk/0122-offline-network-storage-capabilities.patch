@@ -1,0 +1,94 @@
+diff --git a/src/xam/xam_net.cpp b/src/xam/xam_net.cpp
+--- a/src/xam/xam_net.cpp
++++ b/src/xam/xam_net.cpp
+@@ -1208,6 +1208,14 @@
+ void NetDll_WSASetLastError_entry(u32 error_code) {
+   CurrentThread().SetLastError(error_code);
+ }
++
++// This runtime has no cloud storage backend; do not advertise a remote device.
++u32 XamNetworkStorageHasUserEnabledStorage_entry() { return 0; }
++u32 XamNetworkStorageIsEnabledInLiveHive_entry() { return 0; }
++u32 XamNetworkStorageIsSupportedContentType_entry() { return 0; }
++u32 XamNetworkStorageIsUserInSync_entry() { return 0; }
++u32 XamNetworkStorageUserHasPrivilege_entry() { return 0; }
++u32 XamNetworkStorageShouldHideFromTitle_entry() { return 1; }
+ 
+ }  // namespace xam
+ }  // namespace rex
+@@ -1263,3 +1271,10 @@
+ REX_XAM_BODY(__imp__NetDll_WSASetLastError, rex::xam::NetDll_WSASetLastError_entry)
+ 
+ REX_XAM_BODY(__imp__NetDll_WSACancelOverlappedIO, rex::xam::NetDll_WSACancelOverlappedIO_entry)
++
++REX_XAM_BODY(__imp__XamNetworkStorageHasUserEnabledStorage, rex::xam::XamNetworkStorageHasUserEnabledStorage_entry)
++REX_XAM_BODY(__imp__XamNetworkStorageIsEnabledInLiveHive, rex::xam::XamNetworkStorageIsEnabledInLiveHive_entry)
++REX_XAM_BODY(__imp__XamNetworkStorageIsSupportedContentType, rex::xam::XamNetworkStorageIsSupportedContentType_entry)
++REX_XAM_BODY(__imp__XamNetworkStorageIsUserInSync, rex::xam::XamNetworkStorageIsUserInSync_entry)
++REX_XAM_BODY(__imp__XamNetworkStorageUserHasPrivilege, rex::xam::XamNetworkStorageUserHasPrivilege_entry)
++REX_XAM_BODY(__imp__XamNetworkStorageShouldHideFromTitle, rex::xam::XamNetworkStorageShouldHideFromTitle_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -580,21 +580,21 @@
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserLastError);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserNetworkSyncTime);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserProperties);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageHasUserEnabledStorage);
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageIsCheckingSyncStates);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsEnabledInLiveHive);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsSupportedContentType);
++
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageIsTitleExempt);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsUserInSync);
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageLockFile);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageOnSigninChanged);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageOnUserSyncChange);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetTestMock);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetTitleProperties);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetUserInSync);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageShouldHideFromTitle);
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSignInTestMock);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageUserHasPrivilege);
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageUserNeedsToSync);
+ REX_EXPORT_STUB(__imp__XamOfflineTimerForceQuery);
+ REX_EXPORT_STUB(__imp__XamOfflineTimerGetContractData);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -364,3 +364,10 @@
+ REX_XAM_FORWARD(__imp__XamContentLaunchImageInternalEx)
+ 
+ REX_XAM_FORWARD(__imp__XNotifyBroadcast)
++
++REX_XAM_FORWARD(__imp__XamNetworkStorageHasUserEnabledStorage)
++REX_XAM_FORWARD(__imp__XamNetworkStorageIsEnabledInLiveHive)
++REX_XAM_FORWARD(__imp__XamNetworkStorageIsSupportedContentType)
++REX_XAM_FORWARD(__imp__XamNetworkStorageIsUserInSync)
++REX_XAM_FORWARD(__imp__XamNetworkStorageUserHasPrivilege)
++REX_XAM_FORWARD(__imp__XamNetworkStorageShouldHideFromTitle)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1237,3 +1237,16 @@
+     else CHECK(loader.launch_path.empty());
+   }
+ }
++
++
++REX_TEST_CASE("offline cloud storage capabilities never advertise a remote device", "[kernel][xam][offline-capabilities]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    for (const u32 user : {0u, 3u, 255u, 0xFFFFFFFFu}) {
++      for (const char* name : {"XamNetworkStorageHasUserEnabledStorage", "XamNetworkStorageIsEnabledInLiveHive",
++          "XamNetworkStorageIsSupportedContentType", "XamNetworkStorageIsUserInSync", "XamNetworkStorageUserHasPrivilege"})
++        CHECK(c.XAM(name, {user, 0xFFFFFFFF}) == 0);
++      CHECK(c.XAM("XamNetworkStorageShouldHideFromTitle", {user, 0xFFFFFFFF}) == 1);
++    }
++  });
++}

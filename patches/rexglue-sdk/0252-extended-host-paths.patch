@@ -1,0 +1,311 @@
+diff --git a/include/rex/platform/file.h b/include/rex/platform/file.h
+--- a/include/rex/platform/file.h
++++ b/include/rex/platform/file.h
+@@ -24,6 +24,12 @@
+ #include <rex/types.h>
+ 
+ namespace rex::platform {
++
++/** Absolute extended-length Windows spelling for host IO; unchanged on other hosts. */
++REX_API std::filesystem::path HostPath(const std::filesystem::path& path);
++/** Display/ancestor spelling without a Windows extended-length prefix. */
++REX_API std::filesystem::path OrdinaryPath(const std::filesystem::path& path);
++
+ 
+ /**
+  * @return The absolute path, or empty when the host does not report it.
+diff --git a/src/base/platform/file.cpp b/src/base/platform/file.cpp
+--- a/src/base/platform/file.cpp
++++ b/src/base/platform/file.cpp
+@@ -19,12 +19,38 @@
+ 
+ namespace rex::platform {
+ 
++std::filesystem::path HostPath(const std::filesystem::path& path) {
++#ifdef _WIN32
++  if (path.empty()) return path;
++  std::error_code ec;
++  // Normalize components before the prefix disables Win32 normalization.
++  const auto name =
++      std::filesystem::absolute(path, ec).lexically_normal().make_preferred().native();
++  if (ec) return path;
++  if (name.starts_with(L"\\\\?\\") || name.starts_with(L"\\\\.\\")) return name;
++  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
++#else
++  return path;
++#endif
++}
++
++std::filesystem::path OrdinaryPath(const std::filesystem::path& path) {
++#ifdef _WIN32
++  const auto& name = path.native();
++  if (name.starts_with(L"\\\\?\\UNC\\")) return L"\\\\" + name.substr(8);
++  if (name.starts_with(L"\\\\?\\") && name.size() > 5 && name[5] == L':') return name.substr(4);
++#endif
++  return path;
++}
++
++
++
+ std::FILE* OpenFile(const std::filesystem::path& path, const char* mode) {
+   if (!mode || !*mode) { errno = EINVAL; return nullptr; }
+ #if REX_PLATFORM_WIN32
+   std::FILE* file = nullptr;
+   const std::wstring wide_mode(mode, mode + std::strlen(mode));
+-  _wfopen_s(&file, path.c_str(), wide_mode.c_str());
++  _wfopen_s(&file, HostPath(path).c_str(), wide_mode.c_str());
+   return file;
+ #else
+   return std::fopen(path.c_str(), mode);
+diff --git a/src/filesystem/host_provider.cpp b/src/filesystem/host_provider.cpp
+--- a/src/filesystem/host_provider.cpp
++++ b/src/filesystem/host_provider.cpp
+@@ -90,17 +90,19 @@
+ HostProvider::HostProvider(Key, MountEntry entry) : Provider(std::move(entry)) {}
+ 
+ Result<std::unique_ptr<Provider>> HostProvider::Create(const MountEntry& entry) {
+-  auto provider = std::make_unique<HostProvider>(Key{}, entry);
++  auto mounted = entry;
++  mounted.source = platform::HostPath(mounted.source);
++  auto provider = std::make_unique<HostProvider>(Key{}, mounted);
+   std::error_code ec;
+-  if (!std::filesystem::exists(entry.source, ec)) {
++  if (!std::filesystem::exists(mounted.source, ec)) {
+     if (provider->IsReadOnly()) {
+       return Err<std::unique_ptr<Provider>>(BuildError(
+           FileSystemError::kNotFound,
+           std::format("host folder '{}' does not exist", string::PathToUTF8(entry.source))));
+     }
+-    std::filesystem::create_directories(entry.source, ec);
+-  }
+-  auto root = std::make_unique<HostNode>(*provider, nullptr, std::string(), entry.source);
++    std::filesystem::create_directories(mounted.source, ec);
++  }
++  auto root = std::make_unique<HostNode>(*provider, nullptr, std::string(), mounted.source);
+   root->Populate();
+   provider->root_ = std::move(root);
+   return std::unique_ptr<Provider>(std::move(provider));
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -3,6 +3,7 @@
+ #include <format>
+ 
+ #include <rex/chrono.h>
++#include <rex/platform/file.h>
+ #include <rex/chrono/frame_timing.h>
+ #include <rex/filesystem/mount.h>
+ #include <rex/filesystem/file_system.h>
+@@ -103,14 +104,14 @@
+ 
+ void TitleState::ResolveRoots() {
+   const TitlePaths& paths = GetTitlePaths();
+-  game_data_root_ = paths.game_root.Get();
++  game_data_root_ = platform::HostPath(paths.game_root.Get());
+   game_flags_ =
+       paths.game_writable.Get() ? filesystem::MountFlags::kWritable : filesystem::MountFlags::kNone;
+-  user_data_root_ = REX_PATHS().user_root.Get();
+-  update_data_root_ = paths.update_root.Get();
++  user_data_root_ = platform::HostPath(REX_PATHS().user_root.Get());
++  update_data_root_ = platform::HostPath(paths.update_root.Get());
+   metadata_root_ = paths.metadata_root.GetLayer() == SettingLayer::kDefault
+                        ? std::filesystem::path()
+-                       : paths.metadata_root.Get();
++                       : platform::HostPath(paths.metadata_root.Get());
+ }
+ 
+ filesystem::IFileSystem* TitleState::GetFileSystem() const {
+@@ -808,7 +809,7 @@
+     user_data_root = std::filesystem::absolute(user_data_root);
+   }
+   auto content_root = GetTitlePaths().content_root.Get();
+-  if (!content_root.empty()) content_root = std::filesystem::absolute(content_root);
++  if (!content_root.empty()) content_root = platform::HostPath(std::filesystem::absolute(content_root));
+   xam_ = GetKernelServices()->xam;
+   xam_managers_ = GetKernelServices()->managers;
+   if (auto attached = xam_->AttachTitle(rex::xam::XAMKernelInterfaces{
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -118,7 +118,7 @@
+ 
+ ContentManager::ContentManager(const XAMTitle& title, rex::xam::UserProfile& user_profile)
+     : title_(title),
+-      root_path_(title.content_data_root.empty() ? title.user_data_root : title.content_data_root),
++      root_path_(platform::HostPath(title.content_data_root.empty() ? title.user_data_root : title.content_data_root)),
+       user_profile_(user_profile) {}
+ 
+ ContentManager::~ContentManager() = default;
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -232,8 +232,9 @@
+   profiles_.clear();
+   storage_ready_ = false;
+   if (root.empty()) return false;
+-  profile_path_ = root / "profiles" / "local-v1.dat";
+-  const auto v2 = root / "profiles" / "local-v2.dat";
++  const auto host_root = platform::HostPath(root);
++  profile_path_ = host_root / "profiles" / "local-v1.dat";
++  const auto v2 = host_root / "profiles" / "local-v2.dat";
+   std::error_code error;
+   const bool version2 = std::filesystem::exists(v2, error);
+   if (error) return false;
+diff --git a/src/app/title_app.cpp b/src/app/title_app.cpp
+--- a/src/app/title_app.cpp
++++ b/src/app/title_app.cpp
+@@ -122,7 +122,7 @@
+   if (game_root.empty()) {
+     return failure("--game_data_root was not provided");
+   }
+-  if (!std::filesystem::is_directory(game_root)) {
++  if (!std::filesystem::is_directory(platform::HostPath(game_root))) {
+     return failure(std::format("--game_data_root {} does not exist", game_root.string()));
+   }
+ 
+diff --git a/src/base/log_file.cpp b/src/base/log_file.cpp
+--- a/src/base/log_file.cpp
++++ b/src/base/log_file.cpp
+@@ -107,7 +107,7 @@
+   if (!config.path.empty()) {
+     return config.path;
+   }
+-  const std::filesystem::path folder = config.folder.empty() ? DefaultLogFolder() : config.folder;
++  const auto folder = platform::HostPath(config.folder.empty() ? DefaultLogFolder() : config.folder);
+   const std::string name =
+       config.name.empty() ? platform::GetExecutablePath().stem().string() : config.name;
+   std::error_code ec;
+diff --git a/src/base/log_sink.cpp b/src/base/log_sink.cpp
+--- a/src/base/log_sink.cpp
++++ b/src/base/log_sink.cpp
+@@ -15,6 +15,7 @@
+ #include <utility>
+ 
+ #include "base/logger.h"
++#include <rex/platform/file.h>
+ 
+ namespace rex::log {
+ 
+@@ -102,10 +103,11 @@
+ Result<std::unique_ptr<LogFileSink>> LogFileSink::Open(const std::filesystem::path& path,
+                                                        LineFormat format) {
+   std::error_code ec;
+-  if (path.has_parent_path()) {
+-    std::filesystem::create_directories(path.parent_path(), ec);
++  const auto host_path = platform::HostPath(path);
++  if (host_path.has_parent_path()) {
++    std::filesystem::create_directories(host_path.parent_path(), ec);
+   }
+-  std::ofstream file(path, std::ios::out | std::ios::app | std::ios::binary);
++  std::ofstream file(host_path, std::ios::out | std::ios::app | std::ios::binary);
+   if (!file) {
+     return Err<std::unique_ptr<LogFileSink>>(
+         ErrorCategory::kIO, std::format("log file {} could not be opened", path.string()));
+diff --git a/tests/unit/base/host_paths_test.cpp b/tests/unit/base/host_paths_test.cpp
+--- a/tests/unit/base/host_paths_test.cpp
++++ b/tests/unit/base/host_paths_test.cpp
+@@ -21,6 +21,8 @@
+ #include <rex/platform.h>
+ #include <rex/platform/process.h>
+ #include <rex/platform/file.h>
++#include <rex/logging/logger.h>
++#include <rex/utility.h>
+ 
+ #if !REX_PLATFORM_WIN32
+ #include <sys/stat.h>
+@@ -226,3 +228,39 @@
+ REX_TEST_CASE("Bytes of a multi byte character pass through unchanged", "[base][paths]") {
+   CHECK(rex::platform::SanitizeFolderName("caf\xc3\xa9") == "caf\xc3\xa9");
+ }
++
++REX_TEST_CASE("host path conversion preserves spelling and Unicode long-path file and log IO", "[host-paths][long-host-path]") {
++  using rex::platform::HostPath;
++  using rex::platform::OrdinaryPath;
++  CHECK(HostPath({}).empty());
++  CHECK(OrdinaryPath({}).empty());
++  const rex::test::TempFolder folder("rex_long_host_path_");
++  auto deep = folder.path;
++  for (unsigned i = 0; i < 7; ++i) deep /= std::string(48, 'a' + i);
++  const auto host = HostPath(deep);
++  rex::ScopeGuard cleanup([&] { std::error_code error; std::filesystem::remove_all(HostPath(folder.path), error); CHECK_FALSE(error); });
++  CHECK(HostPath(host) == host);
++#if REX_PLATFORM_WIN32
++  CHECK(host.native().starts_with(L"\\\\?\\"));
++  CHECK(OrdinaryPath(host) == std::filesystem::absolute(deep).lexically_normal());
++  CHECK(OrdinaryPath(HostPath(L"\\\\server\\share\\folder")) == L"\\\\server\\share\\folder");
++#else
++  CHECK(host == deep);
++  CHECK(OrdinaryPath(host) == host);
++#endif
++  REQUIRE(std::filesystem::create_directories(host));
++  const auto ordinary_file = deep / std::filesystem::path(std::u16string(u"perfil-\u00e7.dat"));
++  auto* file = rex::platform::OpenFile(ordinary_file, "wb");
++  REQUIRE(file != nullptr);
++  CHECK(std::fwrite("bytes", 1, 5, file) == 5);
++  CHECK(std::fclose(file) == 0);
++  file = rex::platform::OpenFile(ordinary_file, "rb");
++  REQUIRE(file != nullptr);
++  char bytes[5]{}; CHECK(std::fread(bytes, 1, 5, file) == 5);
++  CHECK(std::fclose(file) == 0); CHECK(std::string_view(bytes, 5) == "bytes");
++  const auto log = deep / "logs" / "runtime.log";
++  auto sink = rex::log::LogFileSink::Open(log, {});
++  REQUIRE(sink);
++  sink->reset();
++  CHECK(std::filesystem::is_regular_file(HostPath(log)));
++}
+diff --git a/tests/unit/xam/achievement_manager_test.cpp b/tests/unit/xam/achievement_manager_test.cpp
+--- a/tests/unit/xam/achievement_manager_test.cpp
++++ b/tests/unit/xam/achievement_manager_test.cpp
+@@ -19,6 +19,7 @@
+ #include <vector>
+ 
+ #include "rex_test.h"
++#include <rex/platform/file.h>
+ 
+ #include <rex/kernel/title_runtime.h>
+ #include <rex/kernel/title_paths.h>
+@@ -196,10 +197,10 @@
+     rex::test::LoadedTitle loaded(
+         {}, false, [&] { REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(game_root)); });
+     rex::kernel::TitleRuntime& runtime = loaded.runtime;
+-    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == local_metadata);
++    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == rex::platform::HostPath(local_metadata));
+ 
+     std::filesystem::remove(local_metadata);
+-    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == parent_metadata);
++    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == rex::platform::HostPath(parent_metadata));
+   }
+ 
+   {
+@@ -208,7 +209,7 @@
+       REQUIRE(rex::kernel::GetTitlePaths().metadata_root.Set(temp.path / "custom"));
+     });
+     rex::kernel::TitleRuntime& runtime = loaded.runtime;
+-    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == explicit_metadata);
++    CHECK(StateOf(runtime).FindMetadataPath("achievements.toml") == rex::platform::HostPath(explicit_metadata));
+     CHECK_FALSE(StateOf(runtime).FindMetadataPath("missing.toml"));
+   }
+ }
+diff --git a/tests/unit/kernel/title_runtime_test.cpp b/tests/unit/kernel/title_runtime_test.cpp
+--- a/tests/unit/kernel/title_runtime_test.cpp
++++ b/tests/unit/kernel/title_runtime_test.cpp
+@@ -731,3 +731,19 @@
+   }
+   CHECK(std::filesystem::is_directory(disk.path / "0000000000000000/12345678/000D0000/shared-package"));
+ }
++
++REX_TEST_CASE_METHOD(Title, "runtime roots load a synthetic original from a Unicode path beyond MAX_PATH", "[kernel][title][long-host-path]") {
++  auto deep = folder.path;
++  for (unsigned i = 0; i < 7; ++i) deep /= std::string(48, 'a' + i);
++  deep /= std::filesystem::path(std::u16string(u"original-\u00e7"));
++  const auto host_path = rex::platform::HostPath(deep);
++  rex::ScopeGuard cleanup([&] { std::error_code error; std::filesystem::remove_all(host_path, error); CHECK_FALSE(error); });
++  rex::test::WriteTitle(host_path);
++  REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(deep));
++  REQUIRE(rex::kernel::GetTitlePaths().entry.Set("default.xex"));
++  rex::kernel::TitleRuntime runtime(MakeImage());
++  REQUIRE(runtime.Load());
++  CHECK(runtime.GetTitleID() == rex::test::kTitleId);
++  CHECK(runtime.GetFileSystem().Stat("game:\\default.xex").has_value());
++  runtime.Unload();
++}

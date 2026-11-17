@@ -1,0 +1,77 @@
+diff --git a/src/kernel/title_state.h b/src/kernel/title_state.h
+--- a/src/kernel/title_state.h
++++ b/src/kernel/title_state.h
+@@ -42,6 +42,7 @@
+ #include <rex/filesystem/xdbf.h>
+ #include <rex/kernel/guest_memory.h>
+ #include <rex/kernel/title_runtime.h>
++#include <rex/kernel/guest_allocator.h>
+ #include <rex/kernel/kernel_settings.h>
+ #include <rex/kernel/title_exit.h>
+ #include <rex/kernel/title_debug_output.h>
+@@ -109,7 +110,7 @@
+  * public TitleRuntime forwards its calls here. The subsystem getters are valid between Load and
+  * Unload.
+  */
+-class TitleState : public ITitleExit, public ITitleDebugOutput, public rex::NonCopyable {
++class TitleState : public ITitleExit, public ITitleDebugOutput, public ITitleWorkspace, public rex::NonCopyable {
+  public:
+   /**
+    * Creates an unloaded state for a title image.
+@@ -317,6 +318,10 @@
+   kernel::IThreadRegistry& GetThreadRegistry();
+ 
+   kernel::WorkspaceHeap& GetWorkspace();
++  // Stable service binding: the executable may replace the initially sized workspace.
++  Result<u32> Allocate(u32 size, bool zero) override;
++  void Free(u32 address) override;
++  std::optional<u32> QueryAllocationSize(u32 address) const override;
+ 
+   kernel::IModuleRegistry& GetModuleRegistry();
+ 
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -569,6 +569,21 @@
+   return *workspace_;
+ }
+ 
++Result<u32> TitleState::Allocate(u32 size, bool zero) {
++  REX_CHECK(workspace_, "Workspace allocation requires a loaded title");
++  return workspace_->Allocate(size, zero);
++}
++
++void TitleState::Free(u32 address) {
++  REX_CHECK(workspace_, "Workspace release requires a loaded title");
++  workspace_->Free(address);
++}
++
++std::optional<u32> TitleState::QueryAllocationSize(u32 address) const {
++  REX_CHECK(workspace_, "Workspace query requires a loaded title");
++  return workspace_->QueryAllocationSize(address);
++}
++
+ IModuleRegistry& TitleState::GetModuleRegistry() {
+   return *module_registry_;
+ }
+@@ -856,7 +871,7 @@
+           .exit = *this,
+           .debug = *this,
+           .heap = *memory_,
+-          .workspace = *workspace_,
++          .workspace = *this,
+           .file_system = *file_system_,
+           .file_system_factory = *GetKernelServices()->file_system,
+           .membase = memory_->GetMembase(),
+diff --git a/src/kernel/title_runtime.cpp b/src/kernel/title_runtime.cpp
+--- a/src/kernel/title_runtime.cpp
++++ b/src/kernel/title_runtime.cpp
+@@ -140,7 +140,7 @@
+ }
+ 
+ kernel::ITitleWorkspace& TitleRuntime::GetGuestWorkspace() {
+-  return state_->GetWorkspace();
++  return *state_;
+ }
+ 
+ kernel::ISystemHeap& TitleRuntime::GetGuestHeap() {

@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include "crt_fiber_fixture.h"
 #include <fstream>
@@ -58,17 +58,17 @@ TEST_CASE("Complete CRT fiber lifecycle selects host continuations without title
       std::ofstream config(work.dir/"test.toml");
       config << "project_name='fibers'\nfile_path='test.xex'\nout_directory_path='out'\n";
       if(variant==8) {
-        config << "[rexcrt]\n";
+        config << "[shim]\n";
         const char* names[]{"ConvertThreadToFiber","ConvertFiberToThread","CreateFiber","DeleteFiber","SwitchToFiber"};
         const uint32_t entries[]{family,family+0x90,family+0xE0,family+0x1C0,family+0x220};
         for(unsigned i=0;i<5;++i) config << names[i] << "=" << entries[i] << '\n';
       }
     }
-    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir/"test.toml");
+    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    CHECK(pipeline->context().Config().rexcrtFunctions.size()==(variant==8?5:0));
-    CHECK(pipeline->context().analysisState().crtFiberHooks.size()==(variant<2?6:0));
+    CHECK(pipeline->GetContext().GetConfig().shim_functions.size()==(variant==8?5:0));
+    CHECK(pipeline->GetContext().GetAnalysisState().crt_fiber_shims.size()==(variant<2?6:0));
     REQUIRE(pipeline->RunWrite().has_value());
     std::string output;
     for(const auto& file:std::filesystem::directory_iterator(work.dir/"out")) {
@@ -76,6 +76,6 @@ TEST_CASE("Complete CRT fiber lifecycle selects host continuations without title
       std::ifstream in(file.path());output.append(std::istreambuf_iterator<char>(in),{});
     }
     for(const char* name:{"ConvertThreadToFiber","ConvertFiberToThread","CreateFiber","DeleteFiber","SwitchToFiber"})
-      CHECK((output.find(std::string("rexcrt_")+name)!=std::string::npos)==(variant<2 || variant==8));
+      CHECK((output.find(std::string("rexshim_")+name)!=std::string::npos)==(variant<2 || variant==8));
   }
 }

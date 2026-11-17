@@ -5,22 +5,33 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
-#include <rex/graphics/pipeline/render_target/cache.h>
-#include <rex/string.h>
+#include "gpu/xenos/pipeline/render_target/cache.h"
+#include "gpu/xenos/xenos_settings.h"
+#include "gpu/fake_title_context.h"
+#ifdef X360N_EDRAM_WINDOW_CATCH
+#include <catch2/catch_test_macros.hpp>
+#endif
+#include <rex/string/text.h>
 
-using namespace rex::graphics;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+namespace reg = rex::xenos::reg;
+namespace draw_util = rex::gpu::draw_state;
+namespace {
+struct TestSettings : XenosSettings {};
 template <class T> void Set(RegisterFile &r, T v) {
-  r[T::register_index] = v.value;
+  r[T::kRegisterIndex] = v.value;
 }
 void F(RegisterFile &r, uint32_t i, float v) { std::memcpy(&r[i], &v, 4); }
 struct Cache final : RenderTargetCache {
   using Key = RenderTargetKey;
   using Rect = Transfer::Rectangle;
-  using RenderTargetCache::PixelShaderInterlockFullEdramBarrierPlaced;
+  using RenderTargetCache::PixelShaderInterlockFullEDRAMBarrierPlaced;
   Path path;
   unsigned creates = 0, barriers = 0;
-  Cache(RegisterFile &r, rex::memory::Memory &m, Path p)
-      : RenderTargetCache(r, m, 1, 1), path(p) {
+  Cache(RegisterFile &r, const XenosSettings& settings, rex::test::FakeTitleContext &m, Path p)
+      : RenderTargetCache(r, settings, m, 1, 1), path(p) {
     InitializeCommon();
   }
   Path GetPath() const override { return path; }
@@ -34,31 +45,31 @@ struct Cache final : RenderTargetCache {
   struct Resource : RenderTarget {
     Resource(Key k) : RenderTarget(k) {}
   };
-  RenderTarget *CreateRenderTarget(Key k) override {
+  std::unique_ptr<RenderTarget> CreateRenderTarget(Key k) override {
     ++creates;
-    return new Resource(k);
+    return std::make_unique<Resource>(k);
   }
   void RequestPixelShaderInterlockBarrier() override {
     ++barriers;
-    PixelShaderInterlockFullEdramBarrierPlaced();
+    PixelShaderInterlockFullEDRAMBarrierPlaced();
   }
   unsigned Transfers() const {
     unsigned n = 0;
     for (unsigned i = 0; i < 5; ++i)
-      n += last_update_transfers()[i].size();
+      n += GetLastUpdateTransfers()[i].size();
     return n;
   }
   Key Bound(unsigned i) const {
-    auto *r = last_update_accumulated_render_targets()[i];
-    return r ? r->key() : Key();
+    auto *r = GetLastUpdateAccumulatedRenderTargets()[i];
+    return r ? r->GetKey() : Key();
   }
 #ifndef X360N_EDRAM_WINDOW_LEGACY
   static uint32_t Rectangles(unsigned a, unsigned z, Key k, Rect *r) {
-    return Transfer::GetRangeRectangles(a, z, k, xenos::kEdramTileCount, r);
+    return Transfer::GetRangeRectangles(a, z, k, xenos::kEDRAMTileCount, r);
   }
 #endif
 };
-void Setup(RegisterFile &r, xenos::MsaaSamples msaa, int x, int y,
+void Setup(RegisterFile &r, xenos::MSAASamples msaa, int x, int y,
            bool b64 = false) {
   std::memset(r.values, 0, sizeof(r.values));
   reg::RB_SURFACE_INFO s{};
@@ -86,10 +97,10 @@ void Setup(RegisterFile &r, xenos::MsaaSamples msaa, int x, int y,
   v.vport_x_scale_ena = v.vport_x_offset_ena = 1;
   v.vport_y_scale_ena = v.vport_y_offset_ena = 1;
   Set(r, v);
-  F(r, XE_GPU_REG_PA_CL_VPORT_XSCALE, 640.f);
-  F(r, XE_GPU_REG_PA_CL_VPORT_XOFFSET, 640.f);
-  F(r, XE_GPU_REG_PA_CL_VPORT_YSCALE, -64.f);
-  F(r, XE_GPU_REG_PA_CL_VPORT_YOFFSET, 64.f);
+  F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_XSCALE), 640.f);
+  F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_XOFFSET), 640.f);
+  F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YSCALE), -64.f);
+  F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YOFFSET), 64.f);
   reg::RB_COLOR_INFO c{};
   c.color_base = 1024;
   c.color_format = b64 ? xenos::ColorRenderTargetFormat::k_16_16_16_16
@@ -99,27 +110,34 @@ void Setup(RegisterFile &r, xenos::MsaaSamples msaa, int x, int y,
   d.depth_base = 0;
   Set(r, d);
 }
-int main(int argc, char **) {
+int RunEDRAMChecks(int argc) {
   int checks = 0, failures = 0;
   auto check = [&](bool ok, const char *n) {
     ++checks;
+#ifdef X360N_EDRAM_WINDOW_CATCH
+    INFO(n);
+    CHECK(ok);
+#endif
     if (!ok) {
       ++failures;
       std::cerr << "FAIL " << n << '\n';
     }
   };
-  rex::memory::Memory memory;
+  TestSettings settings;
+  rex::kernel::GuestAddressSpace address_space;
+  if (!address_space.Initialize()) return 1;
+  rex::test::FakeTitleContext memory(address_space);
   Shader shader(xenos::ShaderType::kVertex, 0, nullptr, 0, std::endian::native);
   rex::string::StringBuffer dis;
-  shader.AnalyzeUcode(dis);
+  shader.AnalyzeUcode(dis, "");
   reg::RB_DEPTHCONTROL depth{};
   depth.z_enable = 1;
   depth.z_write_enable = 1;
 #ifndef X360N_EDRAM_WINDOW_LEGACY
-  for (auto msaa : {xenos::MsaaSamples::k1X, xenos::MsaaSamples::k2X,
-                    xenos::MsaaSamples::k4X}) {
-    const int tw = msaa == xenos::MsaaSamples::k4X ? 40 : 80;
-    const int th = msaa == xenos::MsaaSamples::k1X ? 16 : 8;
+  for (auto msaa : {xenos::MSAASamples::k1X, xenos::MSAASamples::k2X,
+                    xenos::MSAASamples::k4X}) {
+    const int tw = msaa == xenos::MSAASamples::k4X ? 40 : 80;
+    const int th = msaa == xenos::MSAASamples::k1X ? 16 : 8;
     const int pitch = 1280 / tw;
     for (bool host : {false, true})
       for (bool b64 : {false, true}) {
@@ -131,15 +149,15 @@ int main(int argc, char **) {
                       -pitch &&
                   !kept,
               "vertical whole tile");
-        auto original_color = r[reg::RB_COLOR_INFO::register_index];
-        Cache cache(r, memory,
+        auto original_color = r[reg::RB_COLOR_INFO::kRegisterIndex];
+        Cache cache(r, settings, memory,
                     host ? Cache::Path::kHostRenderTargets
                          : Cache::Path::kPixelShaderInterlock);
         check(cache.GetWindowOffsetTiles(r, depth, 15, 1) == -pitch,
               "cache offset decision");
         check(cache.Update(true, depth, 15, shader, -pitch),
               "real cache update");
-        check(r[reg::RB_COLOR_INFO::register_index] == original_color,
+        check(r[reg::RB_COLOR_INFO::kRegisterIndex] == original_color,
               "guest base preserved");
         if (host) {
           check(cache.Bound(0).base_tiles == unsigned(2048 - pitch),
@@ -171,15 +189,15 @@ int main(int argc, char **) {
         check(a.extent[0] == b.extent[0] && a.extent[1] == b.extent[1] &&
                   b.offset[1] == a.offset[1] + th,
               "scissor offset applied once");
-        DrawExtentEstimator extent(r, memory);
+        DrawExtentEstimator extent(r, settings, memory);
         check(extent.EstimateMaxY(false, shader, true) ==
                   extent.EstimateMaxY(false, shader, false) + th,
               "extent follows transformed scissor/viewport");
-        draw_util::ViewportInfo va{}, vb{};
-        draw_util::GetHostViewportInfo(r, 1, 1, false, 16384, 16384, false,
+        draw_util::HostViewport va{}, vb{};
+        draw_util::GetHostViewport(settings, r, 1, 1, false, 16384, 16384, false,
                                        depth, false, false, false, va, true,
                                        false);
-        draw_util::GetHostViewportInfo(r, 1, 1, false, 16384, 16384, false,
+        draw_util::GetHostViewport(settings, r, 1, 1, false, 16384, 16384, false,
                                        depth, false, false, false, vb, true,
                                        true);
         auto center = [](const auto &v) {
@@ -200,20 +218,20 @@ int main(int argc, char **) {
       }
     RegisterFile r;
     Setup(r, msaa, 0, -th);
-    Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+    Cache cache(r, settings, memory, Cache::Path::kHostRenderTargets);
     auto br = r.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
     br.br_y = 4096;
     Set(r, br);
     check(cache.GetWindowOffsetTiles(r, depth, 15, 1) == 0,
           "full-screen depth prepass refuses oversized host period");
-    F(r, XE_GPU_REG_PA_CL_VPORT_YOFFSET, 2048.f);
-    F(r, XE_GPU_REG_PA_CL_VPORT_YSCALE, -2048.f);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YOFFSET), 2048.f);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YSCALE), -2048.f);
     check(cache.Update(true, depth, 0, shader, 0),
           "full depth/stencil prepass updates ownership");
     br.br_y = 128;
     Set(r, br);
-    F(r, XE_GPU_REG_PA_CL_VPORT_YOFFSET, 64.f);
-    F(r, XE_GPU_REG_PA_CL_VPORT_YSCALE, -64.f);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YOFFSET), 64.f);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YSCALE), -64.f);
     check(cache.GetWindowOffsetTiles(r, depth, 15, 1) == 0 &&
               cache.GetWindowOffsetTiles(r, depth, 15, 2) == 0,
           "tile keeps prepass decision across passes and frames");
@@ -233,7 +251,7 @@ int main(int argc, char **) {
   Cache::Key key;
   key.base_tiles = 2040;
   key.pitch_tiles_at_32bpp = 16;
-  key.msaa_samples = xenos::MsaaSamples::k1X;
+  key.msaa_samples = xenos::MSAASamples::k1X;
   Cache::Rect rects[12]{};
   check(Cache::Rectangles(0, 8, key, rects) == 1 && rects[0].x_pixels == 640 &&
             rects[0].y_pixels == 0,
@@ -249,14 +267,14 @@ int main(int argc, char **) {
         "signed wrapping and 64bpp multiplier");
   {
     RegisterFile r;
-    Setup(r, xenos::MsaaSamples::k4X, 0, -8, true);
+    Setup(r, xenos::MSAASamples::k4X, 0, -8, true);
     auto d = r.Get<reg::RB_DEPTH_INFO>();
     d.depth_base = 100;
     Set(r, d);
     auto c = r.Get<reg::RB_COLOR_INFO>();
     c.color_base = 132;
     Set(r, c);
-    Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+    Cache cache(r, settings, memory, Cache::Path::kHostRenderTargets);
     check(cache.Update(true, depth, 15, shader, -32) &&
               cache.GetLastUpdateBoundRenderTargets() == 3,
           "different guest bases survive an adjusted 32/64bpp base collision");
@@ -269,19 +287,19 @@ int main(int argc, char **) {
   }
   {
     RegisterFile r;
-    Setup(r, xenos::MsaaSamples::k4X, 0, -8, true);
+    Setup(r, xenos::MSAASamples::k4X, 0, -8, true);
     auto tl = r.Get<reg::PA_SC_WINDOW_SCISSOR_TL>();
     tl.tl_y = 256;
     Set(r, tl);
     auto br = r.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
     br.br_y = 264;
     Set(r, br);
-    F(r, XE_GPU_REG_PA_CL_VPORT_YOFFSET, 260);
-    F(r, XE_GPU_REG_PA_CL_VPORT_YSCALE, -4);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YOFFSET), 260);
+    F(r, std::to_underlying(xenos::Register::PA_CL_VPORT_YSCALE), -4);
     bool kept = false;
     check(draw_util::GetWindowOffsetTiles(r, depth, 15, true, kept) == -32,
           "64bpp scissor wholly in next period is eligible");
-    Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+    Cache cache(r, settings, memory, Cache::Path::kHostRenderTargets);
     check(cache.Update(true, depth, 15, shader, -32) &&
               cache.Bound(1).next_period == 1,
           "real host ownership key selects the second 64bpp period");
@@ -295,20 +313,20 @@ int main(int argc, char **) {
   }
 #endif
   {
-    const auto original_capacity = REXCVAR_GET(edram_tile_count);
+    const auto original_capacity = settings.edram_tile_count.Get();
     reg::RB_COLOR_INFO high_color{};
     high_color.value = 8191;
     reg::RB_DEPTH_INFO high_depth{};
     high_depth.value = 8191;
     check(high_color.color_base == 8191 && high_depth.depth_base == 8191,
           "guest color and depth base registers preserve all 13 bits");
-    check(GetConfiguredEdramTileCount() == 2048, "standard EDRAM is the default");
+    check(settings.GetEDRAMTileCount() == 2048, "standard EDRAM is the default");
     for (const auto* mode : {"standard", "extended", "standard"}) {
-      REXCVAR_SET(edram_tile_count, std::string(mode));
+      if (!settings.edram_tile_count.Set(std::string(mode))) return 1;
       const unsigned tiles = mode == std::string_view("extended") ? 8192 : 2048;
       RegisterFile r;
-      Setup(r, xenos::MsaaSamples::k1X, 0, 0);
-      Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+      Setup(r, xenos::MSAASamples::k1X, 0, 0);
+      Cache cache(r, settings, memory, Cache::Path::kHostRenderTargets);
       check(cache.edram_tile_count() == tiles &&
                 cache.edram_size_bytes() == tiles * 5120,
             "capacity is captured when creating the render target cache");
@@ -316,12 +334,12 @@ int main(int argc, char **) {
                 draw_util::AddWindowOffsetToEdramBase(tiles - 1, 1, false, tiles) == 0 &&
                 draw_util::AddWindowOffsetToEdramBase(4096, 0, false, tiles) == (4096 & (tiles - 1)),
             "EDRAM wrapping uses the selected capacity");
-      Cache::Key key;
-      key.base_tiles = tiles - 1;
-      check(key.GetNonWrappedTileIndex(0, tiles) == tiles,
+      Cache::Key capacity_key;
+      capacity_key.base_tiles = tiles - 1;
+      check(capacity_key.GetNonWrappedTileIndex(0, tiles) == tiles,
             "transfer coordinates cross the selected wrap boundary");
-      key.next_period = 1;
-      check(key.GetNonWrappedTileIndex(0, tiles) == 2 * tiles,
+      capacity_key.next_period = 1;
+      check(capacity_key.GetNonWrappedTileIndex(0, tiles) == 2 * tiles,
             "64bpp transfers retain the extra addressing period");
       reg::RB_COLOR_INFO color{};
       color.color_base = 4096;
@@ -331,18 +349,18 @@ int main(int argc, char **) {
                 cache.Bound(1).base_tiles == (4096 & (tiles - 1)),
             "ownership keys wrap high guest bases at the configured boundary");
     }
-    REXCVAR_SET(edram_tile_count, original_capacity);
+    if (!settings.edram_tile_count.Set(original_capacity)) return 1;
   }
 #ifndef X360N_EDRAM_WINDOW_LEGACY
   // Read-only depth may share tiles with color writing only stencil bits.
-  for (auto msaa : {xenos::MsaaSamples::k1X, xenos::MsaaSamples::k2X,
-                    xenos::MsaaSamples::k4X}) {
+  for (auto msaa : {xenos::MSAASamples::k1X, xenos::MSAASamples::k2X,
+                    xenos::MSAASamples::k4X}) {
     RegisterFile r;
     Setup(r, msaa, 0, 0);
     reg::RB_COLOR_INFO color{};
     color.color_format = xenos::ColorRenderTargetFormat::k_8_8_8_8;
     Set(r, color);
-    Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+    Cache cache(r, settings, memory, Cache::Path::kHostRenderTargets);
     reg::RB_DEPTHCONTROL state{};
     state.z_enable = state.z_write_enable = 1;
     check(cache.Update(true, state, 0, shader, 0), "seed aliased depth ownership");
@@ -381,8 +399,8 @@ int main(int argc, char **) {
     for (int scenario : {0, 1, 2})
       for (bool host : {false, true}) {
 #endif
-        Setup(r, xenos::MsaaSamples::k4X, 0, scenario ? -8 : 0);
-        Cache c(r, memory,
+        Setup(r, xenos::MSAASamples::k4X, 0, scenario ? -8 : 0);
+        Cache c(r, settings, memory,
                 host ? Cache::Path::kHostRenderTargets
                      : Cache::Path::kPixelShaderInterlock);
         std::vector<double> samples;
@@ -432,3 +450,13 @@ int main(int argc, char **) {
   std::cout << checks - failures << '/' << checks << " checks passed" << std::endl;
   return failures ? 1 : 0;
 }
+
+}  // namespace
+
+#ifdef X360N_EDRAM_WINDOW_CATCH
+TEST_CASE("EDRAM ownership preserves offsets, capacities and read-only depth aliases", "[sdk][gpu][edram-alias][edram-capacity]") {
+  CHECK(RunEDRAMChecks(0) == 0);
+}
+#else
+int main(int argc, char**) { return RunEDRAMChecks(argc); }
+#endif

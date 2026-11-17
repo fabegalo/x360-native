@@ -1,0 +1,158 @@
+diff --git a/include/rex/kernel/object/file_object.h b/include/rex/kernel/object/file_object.h
+--- a/include/rex/kernel/object/file_object.h
++++ b/include/rex/kernel/object/file_object.h
+@@ -104,6 +104,7 @@
+ class IOpenedFile {
+  public:
+   virtual ~IOpenedFile() = default;
++  [[nodiscard]] virtual X_STATUS Flush() = 0;
+ 
+   /**
+    * Reads into guest memory and notifies the IO completion ports of the file.
+@@ -271,6 +272,7 @@
+   REX_KERNEL_API void SetPosition(u64 value);
+ 
+   REX_KERNEL_API u64 GetPosition();
++  [[nodiscard]] REX_KERNEL_API X_STATUS Flush() override;
+ 
+   REX_KERNEL_API void SetFindPattern(std::string_view pattern) override;
+ 
+diff --git a/include/rex/kernel/object/object_table.h b/include/rex/kernel/object/object_table.h
+--- a/include/rex/kernel/object/object_table.h
++++ b/include/rex/kernel/object/object_table.h
+@@ -39,7 +39,7 @@
+  * Owns every kernel object and maps handle values to them. Handles are 0xF8000000 plus 4 times
+  * the slot. The pseudo handle 0xFFFFFFFF translates to 0 and 0xFFFFFFFE to the calling thread.
+  */
+-REX_DECLARE_INTERFACE(IObjectTable, 2)
++REX_DECLARE_INTERFACE(IObjectTable, 3)
+   virtual ~IObjectTable() = default;
+ 
+   /**
+diff --git a/src/kernel/object/file_object.cpp b/src/kernel/object/file_object.cpp
+--- a/src/kernel/object/file_object.cpp
++++ b/src/kernel/object/file_object.cpp
+@@ -28,6 +28,15 @@
+ #include "kernel/title_state.h"
+ 
+ namespace rex::kernel {
++
++X_STATUS FileObject::Flush() {
++  std::lock_guard lock(file_lock);
++  if (!file->IsAccessible()) return X_STATUS_ACCESS_DENIED;
++  const auto writable = filesystem::Access::kWriteData | filesystem::Access::kAppendData;
++  if ((file->GetAccess() & writable) == filesystem::Access::kNone) return X_STATUS_SUCCESS;
++  const auto flushed = file->Flush();
++  return flushed ? X_STATUS_SUCCESS : ToXStatus(flushed.error());
++}
+ 
+ namespace {
+ 
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io.cpp b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+@@ -549,8 +549,7 @@
+ u32 NtFlushBuffersFile_entry(u32 file_handle, GuestPtrT<X_IO_STATUS_BLOCK> io_status_block) {
+   X_STATUS result = X_STATUS_INVALID_HANDLE;
+   if (auto file = kernel::GetCurrent().GetObjectTable().Get<FileObject>(file_handle)) {
+-    auto flushed = file->file->Flush();
+-    result = flushed ? X_STATUS_SUCCESS : ToXStatus(flushed.error());
++    result = file->Flush();
+   }
+ 
+   if (io_status_block) {
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -89,6 +89,7 @@
+   ContentManager(const XAMTitle& title, rex::xam::UserProfile& user_profile);
+   ~ContentManager() override;
+   void RetireStaleSaves();
++  u32 FlushContent(std::string_view root_name);
+ 
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContent(u32 device_id, u64 xuid,
+                                                            rex::kernel::XContentType content_type,
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -115,6 +115,25 @@
+     : title_(title), root_path_(title.user_data_root), user_profile_(user_profile) {}
+ 
+ ContentManager::~ContentManager() = default;
++
++u32 ContentManager::FlushContent(std::string_view root_name) {
++  auto session_lock = user_profile_.LockSettings();
++  std::lock_guard lock(mutex_);
++  const auto it = open_packages_.find(string::StringKeyIgnoreCase(root_name));
++  if (it == open_packages_.end()) return kernel::X_ERROR_FILE_NOT_FOUND;
++  if (it->second->GetPackageContentData().content_type == kernel::XContentType::kSavedGame &&
++      it->second->GetStorageEpoch() != user_profile_.GetStorageEpoch()) return kernel::X_ERROR_ACCESS_DENIED;
++  const auto root = title_.file_system.FindLink(std::string(root_name) + ':');
++  if (!root || root->empty()) return kernel::X_ERROR_FILE_NOT_FOUND;
++  for (const auto& file : title_.objects.All<kernel::IOpenedFile>()) {
++    const auto path = file->GetAbsolutePath();
++    if (!rex::string::utf8_starts_with_case(path, *root)) continue;
++    const auto rest = std::string_view(path).substr(root->size());
++    if (!rest.empty() && rest.front() != '\\' && rest.front() != '/' && root->back() != '\\' && root->back() != '/') continue;
++    if (kernel::XFAILED(file->Flush())) return kernel::X_ERROR_ACCESS_DENIED;
++  }
++  return kernel::X_ERROR_SUCCESS;
++}
+ 
+ void ContentManager::RetireStaleSaves() {
+   std::lock_guard lock(mutex_);
+@@ -456,6 +475,8 @@
+     open_root_name = it->first.GetView();
+     saved = it->second->GetPackageContentData().content_type == kernel::XContentType::kSavedGame;
+   }
++  const auto flushed = FlushContent(open_root_name);
++  if (flushed != kernel::X_ERROR_SUCCESS) return Err(kernel::XResultError(flushed));
+   if (!saved) CloseOpenedFilesFromContent(open_root_name);
+   DetachPackage(open_root_name);
+   return Ok();
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -320,8 +320,9 @@
+   return kernel::X_ERROR_FILE_NOT_FOUND;
+ }
+ 
+-u32 XamContentFlush_entry([[maybe_unused]] MappedString root_name, MappedVoid overlapped_ptr) {
+-  kernel::X_RESULT result = kernel::X_ERROR_SUCCESS;
++u32 XamContentFlush_entry(MappedString root_name, MappedVoid overlapped_ptr) {
++  const auto result = root_name ? CurrentXAM().GetContentManager().FlushContent(root_name.GetValue())
++                                : kernel::X_ERROR_INVALID_PARAMETER;
+   if (overlapped_ptr) {
+     CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr.GetGuestAddress(),
+                                                   {.result = result});
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1486,3 +1486,27 @@
+     REQUIRE(manager.CloseContent("DLC"));
+   });
+ }
++
++
++REX_TEST_CASE("content flush validates real mounted roots and publishes the original completion", "[kernel][xam][save-storage]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    auto& manager = rex::xam::CurrentXAM().GetContentManager();
++    const auto name = c.AllocString("SAVE"), overlap = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    CHECK(c.XAM("XamContentFlush", {0, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XamContentFlush", {name, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    CHECK(c.XAM("XamContentFlush", {name, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(c.Load32(overlap) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    rex::kernel::XCONTENT_AGGREGATE_DATA save{};
++    save.device_id = 1; save.title_id = 0x12345678;
++    save.xuid = profile.GetXUID(); save.content_type = rex::kernel::XContentType::kSavedGame;
++    save.SetFileName("flush");
++    REQUIRE(manager.CreateContent("SAVE", profile.GetXUID(), save));
++    CHECK(c.XAM("XamContentFlush", {name, 0}) == 0);
++    CHECK(c.XAM("XamContentFlush", {name, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(c.Load32(overlap) == 0);
++    REQUIRE(manager.CloseContent("SAVE"));
++    CHECK(c.XAM("XamContentFlush", {name, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++  });
++}

@@ -1,275 +1,200 @@
-diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
---- a/include/rex/input/sdl/sdl_input_driver.h
-+++ b/include/rex/input/sdl/sdl_input_driver.h
-@@ -60,6 +60,7 @@
- 
-   struct ControllerState {
-     SDL_Gamepad* sdl;
-+    SDL_JoystickID instance_id;
-     X_INPUT_CAPABILITIES caps;
-     X_INPUT_STATE state;
-     bool state_changed;
-@@ -74,6 +75,8 @@
-   void OnLostFocus(rex::ui::UISetupEvent& e) override;
-   void OnGotFocus(rex::ui::UISetupEvent& e) override;
- 
-+  static bool SDLCALL EventWatch(void* userdata, SDL_Event* event);
-+  void DetachFromWindow();
-   void HandleEvent(const SDL_Event& event);
-   std::unique_lock<std::mutex> DrainAndLock();
-   void ProcessEventLocked(const SDL_Event& event);
-@@ -91,10 +94,12 @@
-   void QueueControllerUpdate();
- 
-   rex::ui::Window* attached_window_ = nullptr;
--  bool sdl_events_initialized_;
--  bool SDL_Gamepad_initialized_;
-+  std::atomic<bool> sdl_events_initialized_;
-+  std::atomic<bool> SDL_Gamepad_initialized_;
-   std::atomic<int> sdl_events_unflushed_;
--  std::atomic<bool> sdl_pumpevents_queued_;
-+  struct PumpState { std::atomic<bool> queued{false}, active{true}; };
-+  std::shared_ptr<PumpState> pump_state_ = std::make_shared<PumpState>();
-+  std::mutex lifecycle_mutex_;
-   // Appended in connection order, never re-sorted, and unbounded: the
-   // assignment decides how many the guest sees.
-   std::vector<ControllerState> controllers_;
-diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
---- a/src/input/sdl/sdl_input_driver.cpp
-+++ b/src/input/sdl/sdl_input_driver.cpp
-@@ -37,11 +37,10 @@
-       sdl_events_initialized_(false),
-       SDL_Gamepad_initialized_(false),
-       sdl_events_unflushed_(0),
--      sdl_pumpevents_queued_(false),
-       controllers_(),
-       controllers_mutex_() {}
- 
--SDLInputDriver::~SDLInputDriver() {}
-+SDLInputDriver::~SDLInputDriver() { DetachFromWindow(); }
- 
- X_STATUS SDLInputDriver::Setup() {
-   if (!TestSDLVersion()) {
-@@ -53,7 +52,11 @@
- 
- void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
-   if (window && !attached_window_) {
--    attached_window_ = window;
-+    {
-+      std::lock_guard lock(lifecycle_mutex_);
-+      attached_window_ = window;
-+      pump_state_ = std::make_shared<PumpState>();
-+    }
-     window->AddListener(this);
-     window->app_context().CallInUIThreadSynchronous([this]() {
-       // Initialize SDL events subsystem
-@@ -66,27 +69,7 @@
- 
-       // With an event watch we will always get notified, even if the event queue
-       // is full, which can happen if another subsystem does not clear its events.
--      SDL_AddEventWatch(
--          [](void* userdata, SDL_Event* event) -> bool {
--            if (!userdata || !event) {
--              assert_always();
--              return false;
--            }
--
--            const auto type = event->type;
--            if (type < SDL_EVENT_JOYSTICK_AXIS_MOTION || type >= SDL_EVENT_FINGER_DOWN) {
--              return false;
--            }
--
--            // If another part of rex uses another SDL subsystem that generates
--            // events, this may seem like a bad idea. They will however not
--            // subscribe to controller events so we get away with that.
--            const auto driver = static_cast<SDLInputDriver*>(userdata);
--            driver->HandleEvent(*event);
--
--            return false;
--          },
--          this);
-+      SDL_AddEventWatch(EventWatch, this);
- 
-       // Initialize game controller subsystem
-       if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
-@@ -117,28 +100,38 @@
-   }
+diff --git a/src/hid/sdl3/sdl3_input_driver.cpp b/src/hid/sdl3/sdl3_input_driver.cpp
+--- a/src/hid/sdl3/sdl3_input_driver.cpp
++++ b/src/hid/sdl3/sdl3_input_driver.cpp
+@@ -159,6 +159,7 @@
+ struct SDL3InputDriver::State {
+   struct Controller {
+     SDL_Gamepad* sdl = nullptr;
++    SDL_JoystickID instance = 0;
+     PadDeviceID id = kInvalidPadDeviceID;
+     PadState state;
+     i32 xinput_slot = -1;
+@@ -220,12 +221,13 @@
  }
  
--void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
--  if (attached_window_) {
--    attached_window_->RemoveListener(this);
--    if (sdl_pumpevents_queued_) {
--      attached_window_->app_context().CallInUIThreadSynchronous(
--          [this]() { attached_window_->app_context().ExecutePendingFunctionsFromUIThread(); });
--    }
--    for (auto& controller : controllers_) {
--      SDL_CloseGamepad(controller.sdl);
--    }
-+bool SDLCALL SDLInputDriver::EventWatch(void* userdata, SDL_Event* event) {
-+  if (userdata && event && event->type >= SDL_EVENT_JOYSTICK_AXIS_MOTION &&
-+      event->type < SDL_EVENT_FINGER_DOWN)
-+    static_cast<SDLInputDriver*>(userdata)->HandleEvent(*event);
-+  return false;
-+}
-+
-+void SDLInputDriver::DetachFromWindow() {
-+  rex::ui::Window* window = nullptr;
-+  {
-+    std::lock_guard lock(lifecycle_mutex_);
-+    window = attached_window_;
-+    attached_window_ = nullptr;
-+    pump_state_->active = false;
-+  }
-+  if (!window) return;
-+  window->app_context().CallInUIThreadSynchronous([this, window] {
-+    window->RemoveListener(this);
-+    // RemoveEventWatch waits for concurrent dispatches. Do this before taking
-+    // the controller lock: an SDL caller can hold its joystick/watch locks.
-+    if (sdl_events_initialized_) SDL_RemoveEventWatch(EventWatch, this);
-+    std::lock_guard guard(controllers_mutex_);
-+    for (auto& controller : controllers_) SDL_CloseGamepad(controller.sdl);
-     controllers_.clear();
--    if (SDL_Gamepad_initialized_) {
--      SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
--      SDL_Gamepad_initialized_ = false;
--    }
--    if (sdl_events_initialized_) {
--      SDL_QuitSubSystem(SDL_INIT_EVENTS);
--      sdl_events_initialized_ = false;
--    }
--    attached_window_ = nullptr;
--  }
--}
-+    if (SDL_Gamepad_initialized_.exchange(false)) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
-+    if (sdl_events_initialized_.exchange(false)) SDL_QuitSubSystem(SDL_INIT_EVENTS);
-+    std::lock_guard events_guard(event_queue_mutex_);
-+    pending_events_.clear();
-+  });
-+}
-+
-+void SDLInputDriver::OnClosing(rex::ui::UIEvent&) { DetachFromWindow(); }
- 
- void SDLInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {}
- 
-@@ -168,7 +161,7 @@
- 
- X_RESULT SDLInputDriver::GetDeviceCapabilities(DeviceId id, uint32_t flags,
-                                                X_INPUT_CAPABILITIES* out_caps) {
--  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
-+  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
-   if (!out_caps) {
-     return X_ERROR_BAD_ARGUMENTS;
-   }
-@@ -192,7 +185,7 @@
- }
- 
- X_RESULT SDLInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
--  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
-+  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
- 
-   auto is_active = this->is_active();
- 
-@@ -225,7 +218,7 @@
- }
- 
- X_RESULT SDLInputDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) {
--  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
-+  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
- 
-   QueueControllerUpdate();
- 
-@@ -249,7 +242,7 @@
-                                             X_INPUT_KEYSTROKE* out_keystroke) {
-   // TODO(JoelLinn): Figure out the flags
-   // https://github.com/evilC/UCR/blob/0489929e2a8e39caa3484c67f3993d3fba39e46f/Libraries/XInput.ahk#L85-L98
--  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
-+  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
-   if (!out_keystroke) {
-     return X_ERROR_BAD_ARGUMENTS;
-   }
-@@ -320,6 +313,8 @@
-                 : uint64_t(0);
-   KeystrokeState& last = controller->keystroke;
- 
-+  if (!(curr_butts & (uint64_t(1) << last.repeat_butt_idx)))
-+    last.repeat_state = RepeatState::Idle;
-   // Handle repeating
-   auto guest_now = rex::chrono::Clock::QueryGuestUptimeMillis();
-   static_assert(HID_SDL_REPEAT_DELAY >= HID_SDL_REPEAT_RATE);
-@@ -408,12 +403,14 @@
- }
- 
- std::unique_lock<std::mutex> SDLInputDriver::DrainAndLock() {
-+  // Serialize both detaching a batch and applying it. Swapping before this
-+  // lock allowed later REMOVED events to overtake an older ADDED batch.
-+  std::unique_lock<std::mutex> guard(controllers_mutex_);
+ std::unique_lock<std::mutex> SDL3InputDriver::State::DrainAndLock() {
++  // Detach and apply each batch under one lock so removal cannot overtake arrival.
++  std::unique_lock<std::mutex> guard(mutex);
    std::vector<SDL_Event> events;
    {
-     std::lock_guard<std::mutex> guard(event_queue_mutex_);
-     events.swap(pending_events_);
+-    std::lock_guard<std::mutex> guard(event_mutex);
++    std::lock_guard<std::mutex> events_guard(event_mutex);
+     events.swap(pending);
    }
--  std::unique_lock<std::mutex> guard(controllers_mutex_);
-   for (const auto& event : events) {
+-  std::unique_lock<std::mutex> guard(mutex);
+   for (const SDL_Event& event : events) {
      ProcessEventLocked(event);
    }
-@@ -441,9 +438,11 @@
+@@ -271,6 +273,7 @@
  }
  
- void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
-+  if (GetControllerIndexFromInstanceID(event.gdevice.which)) return;
-   const auto controller = SDL_OpenGamepad(event.gdevice.which);
-   if (!controller) {
--    assert_always();
-+    // Hotplug notifications are asynchronous: removed before the guest poll.
-+    REXLOG_DEBUG("SDL: ignored expired gamepad arrival {}", event.gdevice.which);
-     return;
+ void SDL3InputDriver::State::OnGamepadAddedLocked(const SDL_Event& event) {
++  if (FindByInstance(event.gdevice.which)) return;
+   SDL_Gamepad* gamepad = SDL_OpenGamepad(event.gdevice.which);
+   if (!gamepad) {
+     REXHID_WARN("SDL: cannot open gamepad: {}", SDL_GetError());
+@@ -278,6 +281,7 @@
    }
-   REXLOG_INFO(
-@@ -462,6 +461,7 @@
-   // order and leaves non-XInput pads unnumbered.
-   ControllerState state = {};
-   state.sdl = controller;
-+  state.instance_id = event.gdevice.which;
-   state.id = AllocateDeviceId();
-   state.state_changed = true;  // XInput starts with packet_number = 1
-   UpdateXCapabilities(state);
-@@ -591,12 +591,7 @@
- std::optional<size_t> SDLInputDriver::GetControllerIndexFromInstanceID(SDL_JoystickID instance_id) {
-   // Loop through our controllers and try to match the given ID.
-   for (size_t i = 0; i < controllers_.size(); i++) {
--    auto controller = controllers_.at(i).sdl;
--    auto joystick = SDL_GetGamepadJoystick(controller);
--    assert(joystick);
--    auto joy_instance_id = SDL_GetJoystickID(joystick);
--    assert(joy_instance_id >= 0);
--    if (joy_instance_id == instance_id) {
-+    if (controllers_[i].instance_id == instance_id) {
-       return i;
+   Controller controller;
+   controller.sdl = gamepad;
++  controller.instance = event.gdevice.which;
+   controller.id = PadDeviceID{next_id++};
+   controller.xinput_slot = GetXInputSlot(gamepad);
+   REXHID_DEBUG("SDL GamepadAdded: \"{}\", VendorID(0x{:04X}), ProductID(0x{:04X}), slot {}",
+@@ -377,7 +381,7 @@
+ SDL3InputDriver::State::Controller* SDL3InputDriver::State::FindByInstance(
+     SDL_JoystickID instance) {
+   for (Controller& controller : controllers) {
+-    if (SDL_GetJoystickID(SDL_GetGamepadJoystick(controller.sdl)) == instance) {
++    if (controller.instance == instance) {
+       return &controller;
      }
    }
-@@ -669,15 +664,15 @@
+@@ -398,7 +402,7 @@
+     return;
+   }
+   context->PostToUIThread([self]() {
+-    SDL_PumpEvents();
++    if (self->running && self->events_up) SDL_PumpEvents();
+     self->pump_queued = false;
+   });
  }
+@@ -472,19 +476,22 @@
+   state_->context->GetSettingsRegistry().Unregister(*this);
+   std::shared_ptr<State> state = std::move(state_);
+   const Result<void> ran = state->context->RunOnUIThread([state]() {
++    // SDL waits for in-flight watchers; do not hold either driver lock here.
++    if (state->events_up) SDL_RemoveEventWatch(&State::EventWatch, state.get());
+     {
+       std::lock_guard<std::mutex> guard(state->mutex);
+       for (State::Controller& controller : state->controllers) {
+         SDL_CloseGamepad(controller.sdl);
+       }
+       state->controllers.clear();
++      std::lock_guard events_guard(state->event_mutex);
++      state->pending.clear();
+     }
+     if (state->gamepad_up) {
+       SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+       state->gamepad_up = false;
+     }
+     if (state->events_up) {
+-      SDL_RemoveEventWatch(&State::EventWatch, state.get());
+       SDL_QuitSubSystem(SDL_INIT_EVENTS);
+       state->events_up = false;
+     }
+diff --git a/tests/unit/hid/sdl3_input_test.cpp b/tests/unit/hid/sdl3_input_test.cpp
+--- a/tests/unit/hid/sdl3_input_test.cpp
++++ b/tests/unit/hid/sdl3_input_test.cpp
+@@ -11,6 +11,9 @@
+ #include "rex_test.h"
  
- void SDLInputDriver::QueueControllerUpdate() {
--  // Pump SDL events to ensure controller state is up to date.
--  bool is_queued = false;
--  sdl_pumpevents_queued_.compare_exchange_strong(is_queued, true);
--  if (!is_queued) {
--    attached_window_->app_context().CallInUIThread([this]() {
--      SDL_PumpEvents();
--      sdl_pumpevents_queued_ = false;
--    });
--  }
-+  std::lock_guard lock(lifecycle_mutex_);
-+  if (!attached_window_ || !pump_state_->active || pump_state_->queued.exchange(true)) return;
-+  auto pump = pump_state_;
-+  // Queued work owns no driver/window pointer. A shutdown can retire the
-+  // driver before the UI thread reaches this callback without a use-after-free.
-+  if (!attached_window_->app_context().CallInUIThread([pump]() {
-+        if (pump->active) SDL_PumpEvents();
-+        pump->queued = false;
-+      })) pump->queued = false;
+ #include <vector>
++#include <algorithm>
++#include <thread>
++#include <SDL3/SDL.h>
+ 
+ #include <rex/driver.h>
+ #include <rex/driver_context.h>
+@@ -103,3 +106,64 @@
+ 
+   driver->Shutdown();
  }
- 
- // Check if the analog inputs exceed their thresholds to become a button press
++
++
++REX_TEST_CASE_METHOD(Fixture, "SDL virtual hotplug ignores duplicate arrivals and retires detached state", "[hid][sdl3][sdl-lifetime]") {
++  auto driver = Create();
++  REQUIRE(driver);
++  TrackingContext context;
++  REQUIRE(driver->Initialize(context));
++  rex::ScopeGuard shutdown([&] { driver->Shutdown(); context.RunPosted(); });
++  SDL_VirtualJoystickDesc desc{};
++  SDL_INIT_INTERFACE(&desc);
++  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
++  desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
++  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
++  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
++  desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
++  desc.vendor_id = 0x1234; desc.product_id = 0x5678;
++  desc.name = "ReXGlue migration virtual pad";
++  const auto instance = SDL_AttachVirtualJoystick(&desc);
++  REQUIRE(instance != 0);
++  bool attached = true;
++  rex::ScopeGuard detach([&] { if (attached) SDL_DetachVirtualJoystick(instance); });
++  context.RunPosted();
++  std::vector<rex::hid::PadDevice> devices;
++  driver->EnumerateDevices(devices);
++  auto ours = [](const auto& d) { return d.info.vendor == 0x1234 && d.info.product == 0x5678; };
++  REQUIRE(std::ranges::count_if(devices, ours) == 1);
++  const auto id = std::ranges::find_if(devices, ours)->id;
++  SDL_Event duplicate{};
++  duplicate.type = SDL_EVENT_GAMEPAD_ADDED;
++  duplicate.gdevice.which = instance;
++  REQUIRE(SDL_PushEvent(&duplicate));
++  driver->EnumerateDevices(devices);
++  CHECK(std::ranges::count_if(devices, ours) == 1);
++  REQUIRE(driver->GetDeviceState(id));
++  // The pending pump is coalesced before guest threads start polling.
++  driver->GetDeviceRevision();
++  std::thread first([&] { for (int i = 0; i < 64; ++i) (void)driver->GetDeviceState(id); });
++  std::thread second([&] { for (int i = 0; i < 64; ++i) (void)driver->GetDeviceState(id); });
++  const bool removed = SDL_DetachVirtualJoystick(instance);
++  first.join(); second.join();
++  REQUIRE(removed); attached = false;
++  driver->EnumerateDevices(devices);
++  CHECK(std::ranges::count_if(devices, ours) == 0);
++  CHECK_FALSE(driver->GetDeviceState(id));
++  CHECK_FALSE(driver->GetDeviceCapabilities(id));
++  CHECK_FALSE(driver->SetDeviceVibration(id, {}));
++}
++
++REX_TEST_CASE_METHOD(Fixture, "SDL pending UI work is safe after driver destruction and shutdown is repeatable", "[hid][sdl3][sdl-lifetime]") {
++  TrackingContext context;
++  auto driver = Create();
++  REQUIRE(driver->Initialize(context));
++  CHECK(driver->GetDeviceRevision() != 0);
++  REQUIRE_FALSE(context.posted.empty());
++  driver->Shutdown(); driver->Shutdown();
++  CHECK(driver->GetDeviceRevision() == 0);
++  CHECK_FALSE(driver->GetDeviceState(rex::hid::PadDeviceID{1}));
++  driver.reset();
++  context.RunPosted();
++  CHECK(context.posted.empty());
++}
+diff --git a/tests/unit/app/app_test.cpp b/tests/unit/app/app_test.cpp
+--- a/tests/unit/app/app_test.cpp
++++ b/tests/unit/app/app_test.cpp
+@@ -509,6 +509,7 @@
+                      "[app][app][restart]") {
+   rex::log::LogCaptureSink sink;
+   auto sink_guard = REX_LOGGER().AddSink(sink);
++  const auto capture_begin = sink.GetLatestSequence(); // AddSink replays earlier sessions.
+   RestartApp app(RequestIn::kConfigure);
+   REQUIRE(app.Init(Args()));
+   CHECK(rex::app::IsShutdownRequested());
+@@ -516,7 +517,7 @@
+   REQUIRE(app.Shutdown() == 0);
+   sink_guard.Reset();
+   std::vector<rex::log::CapturedMessage> entries;
+-  sink.CopySince(0, entries);
++  sink.CopySince(capture_begin, entries);
+   CHECK(std::ranges::none_of(entries, [](const rex::log::CapturedMessage& entry) {
+     return entry.level >= rex::log::Level::kWarn;
+   }));
+@@ -532,6 +533,7 @@
+                      "[app][app][restart]") {
+   rex::log::LogCaptureSink sink;
+   auto sink_guard = REX_LOGGER().AddSink(sink);
++  const auto capture_begin = sink.GetLatestSequence(); // AddSink replays earlier sessions.
+   RestartApp app(RequestIn::kAction);
+   REQUIRE(app.Init(Args({"--repair"})));
+   CHECK(rex::app::IsShutdownRequested());
+@@ -539,7 +541,7 @@
+   REQUIRE(app.Shutdown() == 0);
+   sink_guard.Reset();
+   std::vector<rex::log::CapturedMessage> entries;
+-  sink.CopySince(0, entries);
++  sink.CopySince(capture_begin, entries);
+   CHECK(std::ranges::none_of(entries, [](const rex::log::CapturedMessage& entry) {
+     return entry.level >= rex::log::Level::kWarn;
+   }));

@@ -10,6 +10,7 @@ import os
 import platform as host_platform
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -18,6 +19,7 @@ parser = argparse.ArgumentParser()
 for name in ("supervisor", "cc", "cxx", "cmake", "ninja", "source_root", "git"):
     parser.add_argument("--" + name.replace("_", "-"), required=True)
 parser.add_argument("--sysroot")
+parser.add_argument("--dependency-recovery-only", action="store_true", help="Test missing compiler dependency recovery and verified reuse")
 parser.add_argument("--native-staging-only", action="store_true", help="Only test renderer staging/default cache recovery")
 parser.add_argument("--work-dir", help="Private temporary fixture directory, e.g. the WSL Linux filesystem")
 args = parser.parse_args()
@@ -51,6 +53,11 @@ def run(command, *, expected=0, timeout=180, log=None):
     if result.returncode != expected:
         raise AssertionError(f"exit {result.returncode}, expected {expected}: {command}\n{result.stdout[-12000:]}\nfixture: {root}")
     return result.stdout
+
+def delete_readonly(operation, path, _error):
+    os.chmod(path, stat.S_IWRITE)
+    operation(path)
+
 
 def digest(path):
     return hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
@@ -87,8 +94,10 @@ write(sdk / "gpu.cpp", '''#ifdef _WIN32
 #else
 #define EXPORT extern "C" __attribute__((visibility("default")))
 #endif
-EXPORT void* rex_gpu_create() { return nullptr; }
-EXPORT unsigned rex_gpu_abi_version() { return 1; }
+// Symbol-only fixture: never loaded as a runtime or graphics implementation.
+EXPORT void* ReXCreateInterface() { return nullptr; }
+EXPORT void* ReXEnumerateInterfaces() { return nullptr; }
+EXPORT const char* ReXBuildIdentity() { return "synthetic-pipeline-fixture"; }
 ''')
 write(sdk / "CMakeLists.txt", '''cmake_minimum_required(VERSION 3.25)
 project(fixture_sdk LANGUAGES C CXX)
@@ -122,6 +131,7 @@ include("${X360N_ROOT}/cmake/build/x360n_build_isolation.cmake")
 x360n_guard_ninja()
 find_package(Threads REQUIRED) # try_compile must retain its nested working directory
 add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
+add_custom_target(x360n_shared_sdk DEPENDS rexglue rexgpu-xenos rexruntime)
 export(TARGETS rexglue rexgpu-xenos rexruntime FILE "${CMAKE_BINARY_DIR}/targets.cmake")
 file(WRITE "${CMAKE_BINARY_DIR}/sdk.cmake" "include(\\"${CMAKE_BINARY_DIR}/targets.cmake\\")\\n")
 ''')
@@ -210,6 +220,26 @@ assert (root / ".local/preparation/fixture.incomplete").exists() == (native_buil
 after_guard = run(command, log="reuse-after-guard")
 assert not (root / ".local/preparation/fixture.incomplete").exists()
 assert ("reused-shared-sdk" if native_build != build else "reused verified preparation") in after_guard
+# A graph refresh can discard dependency records while old objects still exist.
+# Such objects must be rebuilt before a strict preparation receipt is published.
+deps_database = native_build / ".ninja_deps"
+assert deps_database.is_file()
+deps_database.unlink()
+main_source = project / "main.cpp"
+main_times = main_source.stat()
+write(main_source, main_source.read_text() + "// force receipt revalidation without changing behavior\n")
+os.utime(main_source, ns=(main_times.st_atime_ns, main_times.st_mtime_ns))
+recovered = run(command, log="missing-compiler-dependencies")
+assert "reused-codegen" in recovered, "dependency recovery unnecessarily regenerated guest code"
+assert deps_database.is_file()
+run([exe], expected=7)
+assert "reused verified preparation" in run(command, log="reuse-after-dependency-recovery")
+if args.dependency_recovery_only:
+    print("PASS: missing compiler dependencies rebuild objects before verified publication and reuse", flush=True)
+    shutil.rmtree(root.parent, onexc=delete_readonly)
+    raise SystemExit(0)
+
+
 process_times = process_source.stat()
 write(process_source, "// changed process adapter identity\n")
 os.utime(process_source, ns=(process_times.st_atime_ns, process_times.st_mtime_ns))
@@ -255,7 +285,7 @@ assert not (root / ".local/preparation/fixture.incomplete").exists()
 run([exe], expected=9)
 gpu = sdk / "gpu.cpp"
 original_gpu = gpu.read_text()
-write(gpu, original_gpu.replace("rex_gpu_abi_version", "missing_gpu_abi_version"))
+write(gpu, original_gpu.replace("ReXBuildIdentity", "MissingBuildIdentity"))
 assert "ABI export missing" in run(command, expected=1, log="missing-abi")
 assert (root / ".local/preparation/fixture.incomplete").exists()
 write(gpu, original_gpu)

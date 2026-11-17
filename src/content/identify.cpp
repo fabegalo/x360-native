@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
-#include <fmt/format.h>
+#include <format>
 
 namespace fs = std::filesystem;
 namespace x360n::desktop {
@@ -57,13 +57,13 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
       item.original_name = identity.original_pe_name.value_or("");
       for (const auto& dependency : identity.imports)
         item.imports.push_back(dependency.name + " " + dependency.version.ToString() + " (minimum " + dependency.version_min.ToString() + ")");
-      if (identity.region) item.region = fmt::format("{:08X}", *identity.region);
+      if (identity.region) item.region = std::format("{:08X}", *identity.region);
       item.kind = IsDashboardTitleId(identity.title_id) ? "dashboard" : "game";
       if (!item.recognized) item.label = item.kind == "dashboard" ? "Dashboard Xbox 360" : "Título Xbox 360";
       if (identity.has_execution_info) {
         item.version = identity.version.ToString();
-        item.title_id = fmt::format("{:08X}", identity.title_id);
-        item.media_id = fmt::format("{:08X}", identity.media_id);
+        item.title_id = std::format("{:08X}", identity.title_id);
+        item.media_id = std::format("{:08X}", identity.media_id);
         item.base_version = identity.base_version.ToString();
         item.disc_number = identity.disc_number; item.disc_count = identity.disc_count;
       }

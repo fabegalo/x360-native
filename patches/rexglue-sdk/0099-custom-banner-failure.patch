@@ -1,19 +1,42 @@
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -212,7 +212,14 @@ REX_EXPORT_STUB(__imp__XAutomationpInputXenonButton);
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -52,6 +52,11 @@
+ u32 XamLookupCommonStringByIndex_entry([[maybe_unused]] u32 index) {
+   REXXAM_WARN("XamLookupCommonStringByIndex({}): common-string resource unavailable", index);
+   return 0;
++}
++
++u32 XCustomGetBannerImage_entry(u32 output) {
++  // No banner provider: preserve caller storage and return a failed HRESULT.
++  return output ? 0x80004001u : 0x80070057u;
+ }
+ 
+ u32 XamFeatureEnabled_entry([[maybe_unused]] u32 unk) {
+@@ -458,3 +463,5 @@
+ REX_XAM_BODY(__imp__XamSwapDisc, rex::xam::XamSwapDisc_entry)
+ 
+ REX_XAM_BODY(__imp__XamLookupCommonStringByIndex, rex::xam::XamLookupCommonStringByIndex_entry)
++
++REX_XAM_BODY(__imp__XCustomGetBannerImage, rex::xam::XCustomGetBannerImage_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -202,7 +202,7 @@
  REX_EXPORT_STUB(__imp__XAutomationpUnbindController);
  REX_EXPORT_STUB(__imp__XCustomBroadcastActionEvent);
  REX_EXPORT_STUB(__imp__XCustomBroadcastGamercardEvent);
 -REX_EXPORT_STUB(__imp__XCustomGetBannerImage);
-+// No custom banner provider is implemented. Return an explicit failed HRESULT,
-+// never an unchanged output-pointer register interpreted as successful image data.
-+// The only known caller (Retail 1888 HUD 913E31E8) passes one stack word in r3
-+// and reads it only when r3 >= 0, keeping its own fallback artwork otherwise.
-+// Guest memory is not written: other callers' argument layouts are unverified.
-+extern "C" REX_FUNC(__imp__XCustomGetBannerImage) {
-+  ctx.r3.u64 = ctx.r3.u32 ? 0x80004001u : 0x80070057u;
-+}
++
  REX_EXPORT_STUB(__imp__XCustomGetCurrentGamercard);
  REX_EXPORT_STUB(__imp__XCustomGetLastActionPress);
  REX_EXPORT_STUB(__imp__XCustomGetLastActionPressEx);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -253,3 +253,5 @@
+ REX_XAM_FORWARD(__imp__XamLookupCommonStringByIndex)
+ 
+ REX_XAM_FORWARD(__imp__XamVoiceSetMicArrayIdleUsers)
++
++REX_XAM_FORWARD(__imp__XCustomGetBannerImage)

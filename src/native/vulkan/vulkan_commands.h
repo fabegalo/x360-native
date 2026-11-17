@@ -1,6 +1,6 @@
 #pragma once
 #include "../pipeline/deferred_commands.h"
-#include <rex/ui/vulkan/device.h>
+#include <gpu/xenos/host/vulkan/vulkan_device.h>
 #include <array>
 #include <stdexcept>
 #include <vector>
@@ -12,7 +12,7 @@ namespace x360n::native {
 // already outlive the submission's fence, which is after replay.
 class VulkanCommands {
  public:
-  using Functions = rex::ui::vulkan::VulkanDevice::Functions;
+  using Functions = rex::gpu::vulkan::VulkanDevice::Functions;
   explicit VulkanCommands(const Functions& fn) : fn_(fn) {}
   void Attach(VkCommandBuffer buffer) { commands_.Attach(buffer); }
   bool deferred() const { return commands_.deferred(); }

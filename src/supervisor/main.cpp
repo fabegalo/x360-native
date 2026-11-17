@@ -1,3 +1,4 @@
+#include <print>
 // x360n: development supervisor for x360-native.
 //
 // This is a developer tool, not a dashboard and not a game launcher UI.
@@ -19,8 +20,8 @@
 #include <csignal>
 
 #include <CLI/CLI.hpp>
-#include <fmt/chrono.h>
-#include <fmt/format.h>
+#include <chrono>
+#include <format>
 #include <nlohmann/json.hpp>
 
 #include "paths.h"
@@ -104,7 +105,7 @@ uint32_t ProcessId() {
 // Runs a short helper command and captures its output (doctor, git queries).
 // Per-process directory: concurrent x360n invocations must not share files.
 Captured Capture(const ProjectPaths& p, const fs::path& exe, std::vector<std::string> args) {
-  fs::path tmp = p.local() / "tmp" / fmt::format("capture-{}", ProcessId());
+  fs::path tmp = p.local() / "tmp" / std::format("capture-{}", ProcessId());
   std::error_code ec;
   io::create_directories(tmp, ec);
   ProcessSpec spec{exe, std::move(args), {}, tmp / "out.txt", tmp / "err.txt",
@@ -160,11 +161,11 @@ std::optional<std::string> GitHead(const ProjectPaths& p, const fs::path& repo) 
 int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk_override={},
            const fs::path& compiler_override={}, const fs::path& tool_override={}) {
   int fails = 0, warns = 0;
-  auto ok = [](const std::string& m) { fmt::print("[ OK ] {}\n", m); };
-  auto warn = [&](const std::string& m) { ++warns; fmt::print("[WARN] {}\n", m); };
-  auto fail = [&](const std::string& m) { ++fails; fmt::print("[FAIL] {}\n", m); };
+  auto ok = [](const std::string& m) { std::print("[ OK ] {}\n", m); };
+  auto warn = [&](const std::string& m) { ++warns; std::print("[WARN] {}\n", m); };
+  auto fail = [&](const std::string& m) { ++fails; std::print("[FAIL] {}\n", m); };
 
-  fmt::print("x360n doctor  (root: {}, config: {})\n", PathUtf8(p.root), config);
+  std::print("x360n doctor  (root: {}, config: {})\n", PathUtf8(p.root), config);
   const auto sdk=sdk_override.empty() ? p.sdk() : fs::absolute(sdk_override);
 
   // Pinned SDK revision.
@@ -176,10 +177,10 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
     if (!head) {
       fail("cannot read external/rexglue-sdk HEAD (run: git submodule update --init --recursive)");
     } else if (*head != X360N_SDK_COMMIT_LOCKED) {
-      fail(fmt::format("ReXGlue SDK at {} but deps.lock.json pins {} ({})", *head,
+      fail(std::format("ReXGlue SDK at {} but deps.lock.json pins {} ({})", *head,
                        X360N_SDK_COMMIT_LOCKED, X360N_SDK_TAG_LOCKED));
     } else {
-      ok(fmt::format("ReXGlue SDK at pinned {} ({})", *head, X360N_SDK_TAG_LOCKED));
+      ok(std::format("ReXGlue SDK at pinned {} ({})", *head, X360N_SDK_TAG_LOCKED));
     }
     auto st = Capture(p, *git, {"-C", PathUtf8(sdk), "status", "--porcelain", "--ignore-submodules=none"});
     if (st.ok) {
@@ -221,7 +222,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
     if (c.ok && FirstLine(c.out).find(want) != std::string::npos) {
       ok(FirstLine(c.out));
     } else {
-      fail(fmt::format("clang++ --version did not report '{}': {}", want, FirstLine(c.out + c.error)));
+      fail(std::format("clang++ --version did not report '{}': {}", want, FirstLine(c.out + c.error)));
     }
   }
 #ifdef _WIN32
@@ -257,7 +258,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
     auto c = Capture(p, rexglue, {"--version"});
     std::string v = FirstLine(c.out + c.err);
     if (!c.ok) {
-      fail(fmt::format("rexglue --version failed ({}): {}", DescribeExitCode(c.exit_code), v));
+      fail(std::format("rexglue --version failed ({}): {}", DescribeExitCode(c.exit_code), v));
     } else if (v.find("dev.unknown") != std::string::npos) {
       warn("rexglue --version reports '" + v +
            "': the SDK checkout has no reachable release tag (a clone without tags); the "
@@ -277,7 +278,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
 
 #ifdef _WIN32
   // Symlink capability decides whether submodule symlinks need materializing.
-  fs::path probe_dir = p.local() / "tmp" / fmt::format("symlink-probe-{}", ProcessId());
+  fs::path probe_dir = p.local() / "tmp" / std::format("symlink-probe-{}", ProcessId());
   std::error_code ec;
   io::create_directories(probe_dir, ec);
   fs::path link = probe_dir / "link";
@@ -296,11 +297,11 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
 
   // Local directories.
   for (auto& [name, dir] : {std::pair{"inputs", p.inputs()}, std::pair{"runs", p.runs()}}) {
-    if (io::is_directory(dir)) ok(fmt::format(".local/{} exists", name));
-    else warn(fmt::format(".local/{} does not exist yet ({})", name, PathUtf8(dir)));
+    if (io::is_directory(dir)) ok(std::format(".local/{} exists", name));
+    else warn(std::format(".local/{} does not exist yet ({})", name, PathUtf8(dir)));
   }
 
-  fmt::print("\n{} failure(s), {} warning(s)\n", fails, warns);
+  std::print("\n{} failure(s), {} warning(s)\n", fails, warns);
   return fails ? kExitFailed : kExitOk;
 }
 
@@ -311,12 +312,12 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
 int Identify(const fs::path& file, bool json) {
   std::error_code ec;
   if (!io::is_regular_file(file, ec)) {
-    fmt::print(stderr, "identify: not a regular file: {}\n", PathUtf8(file));
+    std::print(stderr, "identify: not a regular file: {}\n", PathUtf8(file));
     return kExitUsage;
   }
   auto digest = DigestFile(file);
   if (!digest) {
-    fmt::print(stderr, "identify: cannot read {}\n", PathUtf8(file));
+    std::print(stderr, "identify: cannot read {}\n", PathUtf8(file));
     return kExitFailed;
   }
 
@@ -356,30 +357,30 @@ int Identify(const fs::path& file, bool json) {
     if (!id) w.String("error", parsed.error);
     if (id) {
       w.BeginObject("xex");
-      w.String("module_flags", fmt::format("0x{:08X}", id->module_flags));
+      w.String("module_flags", std::format("0x{:08X}", id->module_flags));
       std::string flags;
       for (auto& f : DescribeModuleFlags(id->module_flags)) flags += (flags.empty() ? "" : ",") + f;
       w.String("module_flag_names", flags);
       if (id->has_execution_info) {
-        w.String("title_id", fmt::format("{:08X}", id->title_id));
-        w.String("media_id", fmt::format("{:08X}", id->media_id));
+        w.String("title_id", std::format("{:08X}", id->title_id));
+        w.String("media_id", std::format("{:08X}", id->media_id));
         w.String("version", id->version.ToString());
         w.String("base_version", id->base_version.ToString());
         w.Number("disc_number", id->disc_number);
         w.Number("disc_count", id->disc_count);
-        w.String("savegame_id", fmt::format("{:08X}", id->savegame_id));
+        w.String("savegame_id", std::format("{:08X}", id->savegame_id));
         w.Bool("is_dashboard_title_id", IsDashboardTitleId(id->title_id));
       } else {
         w.Null("title_id");
       }
       if (id->original_pe_name) w.String("original_pe_name", *id->original_pe_name);
-      if (id->entry_point) w.String("entry_point", fmt::format("0x{:08X}", *id->entry_point));
-      if (id->image_base) w.String("image_base", fmt::format("0x{:08X}", *id->image_base));
+      if (id->entry_point) w.String("entry_point", std::format("0x{:08X}", *id->entry_point));
+      if (id->image_base) w.String("image_base", std::format("0x{:08X}", *id->image_base));
       if (id->encryption_type) w.Number("encryption_type", *id->encryption_type);
       if (id->compression_type) w.Number("compression_type", *id->compression_type);
-      if (id->image_size) w.String("image_size", fmt::format("0x{:X}", *id->image_size));
-      if (id->load_address) w.String("load_address", fmt::format("0x{:08X}", *id->load_address));
-      if (id->region) w.String("region", fmt::format("0x{:08X}", *id->region));
+      if (id->image_size) w.String("image_size", std::format("0x{:X}", *id->image_size));
+      if (id->load_address) w.String("load_address", std::format("0x{:08X}", *id->load_address));
+      if (id->region) w.String("region", std::format("0x{:08X}", *id->region));
       w.BeginArray("imports");
       for (auto& lib : id->imports) {
         w.BeginObject();
@@ -398,33 +399,33 @@ int Identify(const fs::path& file, bool json) {
     w.EndObject();
     std::cout << w.Take();
   } else {
-    fmt::print("file          {}\nsize          {} bytes\nsha256        {}\nformat        {}\n",
+    std::print("file          {}\nsize          {} bytes\nsha256        {}\nformat        {}\n",
                PathUtf8(fs::absolute(file)), digest->size, digest->sha256,
                XexFormatName(parsed.format));
-    if (!id) fmt::print("error         {}\n", parsed.error);
+    if (!id) std::print("error         {}\n", parsed.error);
     if (id) {
       std::string flags;
       for (auto& f : DescribeModuleFlags(id->module_flags)) flags += (flags.empty() ? "" : ", ") + f;
-      fmt::print("module_flags  0x{:08X} ({})\n", id->module_flags, flags);
+      std::print("module_flags  0x{:08X} ({})\n", id->module_flags, flags);
       if (id->has_execution_info) {
-        fmt::print("title_id      {:08X}{}\n", id->title_id,
+        std::print("title_id      {:08X}{}\n", id->title_id,
                    IsDashboardTitleId(id->title_id) ? "  (dashboard title id)" : "");
-        fmt::print("media_id      {:08X}\nversion       {} (base {})\ndisc          {}/{}\n",
+        std::print("media_id      {:08X}\nversion       {} (base {})\ndisc          {}/{}\n",
                    id->media_id, id->version.ToString(), id->base_version.ToString(),
                    id->disc_number, id->disc_count);
       } else {
-        fmt::print("title_id      (no execution info header)\n");
+        std::print("title_id      (no execution info header)\n");
       }
-      if (id->original_pe_name) fmt::print("original_pe   {}\n", *id->original_pe_name);
-      if (id->entry_point) fmt::print("entry_point   0x{:08X}\n", *id->entry_point);
-      if (id->image_base) fmt::print("image_base    0x{:08X}\n", *id->image_base);
+      if (id->original_pe_name) std::print("original_pe   {}\n", *id->original_pe_name);
+      if (id->entry_point) std::print("entry_point   0x{:08X}\n", *id->entry_point);
+      if (id->image_base) std::print("image_base    0x{:08X}\n", *id->image_base);
       if (id->encryption_type)
-        fmt::print("file_format   encryption={} compression={}\n", *id->encryption_type,
+        std::print("file_format   encryption={} compression={}\n", *id->encryption_type,
                    id->compression_type.value_or(0));
       for (auto& lib : id->imports)
-        fmt::print("import        {} {} (min {}), {} table entries\n", lib.name,
+        std::print("import        {} {} (min {}), {} table entries\n", lib.name,
                    lib.version.ToString(), lib.version_min.ToString(), lib.table_entries);
-      for (auto& w : id->warnings) fmt::print("warning       {}\n", w);
+      for (auto& w : id->warnings) std::print("warning       {}\n", w);
     }
   }
   return (is_xex && !id) ? kExitFailed : kExitOk;
@@ -436,7 +437,7 @@ int Identify(const fs::path& file, bool json) {
 
 std::string UtcStamp() {
   auto now = std::chrono::system_clock::now();
-  return fmt::format("{:%Y%m%dT%H%M%SZ}", std::chrono::floor<std::chrono::seconds>(now));
+  return std::format("{:%Y%m%dT%H%M%SZ}", std::chrono::floor<std::chrono::seconds>(now));
 }
 
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
@@ -449,11 +450,11 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   if (!verification) verification = std::make_unique<DigestBatch>();
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckPreparedLaunch(p, exe, receipt)) {
-    fmt::print(stderr, "run: {}\n", *why);
+    std::print(stderr, "run: {}\n", *why);
     return kExitUsage;
   }
   if (auto why = CheckLaunchable(p, exe)) {
-    fmt::print(stderr, "run: {}\n", *why);
+    std::print(stderr, "run: {}\n", *why);
     return kExitUsage;
   }
   if (label.empty()) {
@@ -462,7 +463,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
       if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') c = '_';
   }
   if (!IsSafeLabel(label)) {
-    fmt::print(stderr, "run: label must be 1-64 chars of [A-Za-z0-9._-]\n");
+    std::print(stderr, "run: label must be 1-64 chars of [A-Za-z0-9._-]\n");
     return kExitUsage;
   }
 
@@ -470,7 +471,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   std::error_code ec;
   const fs::path dir = CreateRunDirectory(p.runs(), started, label, ec);
   if (ec) {
-    fmt::print(stderr, "run: cannot create run in {}: {}\n", PathUtf8(p.runs()), ec.message());
+    std::print(stderr, "run: cannot create run in {}: {}\n", PathUtf8(p.runs()), ec.message());
     return kExitUsage;
   }
 
@@ -499,14 +500,14 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   const char* selected_keys = std::getenv("X360N_XEX_KEYS");
   if ((!selected_keys || !*selected_keys) &&
       io::is_regular_file(p.root / ".local/keys/xex-keys.txt") &&
-      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xex_keys_file"); }))
-    args.push_back("--xex_keys_file=" + PathUtf8(p.root / ".local/keys/xex-keys.txt"));
+      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xex.keys_file"); }))
+    args.push_back("--xex.keys_file=" + PathUtf8(p.root / ".local/keys/xex-keys.txt"));
   // Kernel RSA public keys (XeKeysVerifyRSASignature) are local user material too.
   const char* selected_rsa = std::getenv("X360N_RSA_KEYS");
   if ((!selected_rsa || !*selected_rsa) &&
       io::is_regular_file(p.root / ".local/keys/rsa-public-keys.txt") &&
-      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xekeys_rsa_public_file"); }))
-    args.push_back("--xekeys_rsa_public_file=" + PathUtf8(p.root / ".local/keys/rsa-public-keys.txt"));
+      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--runtime.xekeys_rsa_public_file"); }))
+    args.push_back("--runtime.xekeys_rsa_public_file=" + PathUtf8(p.root / ".local/keys/rsa-public-keys.txt"));
 
   auto exe_digest = DigestFile(exe);
   std::vector<std::pair<fs::path, std::optional<FileDigest>>> dll_digests;
@@ -530,7 +531,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   spec.should_cancel=[] { return stop_requested!=0; };
 #endif
   if (window) spec.cancel_event = window->close_event();
-  fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
+  std::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
              PathUtf8(dir));
   auto r = RunProcess(spec);
   ActionTrace::Event("session.child.exited");
@@ -595,7 +596,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.Bool("cancelled", r.cancelled);
   w.Number("exit_code", int64_t(int32_t(r.exit_code)));
   w.Number("termination_signal", r.termination_signal);
-  w.String("exit_code_hex", fmt::format("0x{:08X}", r.exit_code));
+  w.String("exit_code_hex", std::format("0x{:08X}", r.exit_code));
   w.String("exit_description", !r.launched ? "not launched"
                                  : r.cancelled ? "session window closed by user"
                                  : r.timed_out ? "terminated by the supervisor after the timeout"
@@ -637,9 +638,9 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     w.BeginObject("crash");
     w.Bool("captured", r.crash.captured);
     if (r.crash.captured) {
-      w.String("exception_code", fmt::format("0x{:08X}", r.crash.code));
+      w.String("exception_code", std::format("0x{:08X}", r.crash.code));
       w.String("exception", DescribeExitCode(r.crash.code));
-      w.String("address", fmt::format("0x{:016X}", r.crash.address));
+      w.String("address", std::format("0x{:016X}", r.crash.address));
       if (!r.crash.access.empty()) w.String("access", r.crash.access);
       w.Number("thread_id", r.crash.thread_id);
       w.BeginArray("frames");
@@ -654,29 +655,29 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   io::ofstream(dir / "report.json", std::ios::binary) << w.Take();
   if (r.crash.captured) {
     io::ofstream txt(dir / "crash.txt", std::ios::binary);
-    txt << fmt::format("exception 0x{:08X} ({}) at 0x{:016X}, thread {}\n", r.crash.code,
+    txt << std::format("exception 0x{:08X} ({}) at 0x{:016X}, thread {}\n", r.crash.code,
                        DescribeExitCode(r.crash.code), r.crash.address, r.crash.thread_id);
     if (!r.crash.access.empty()) txt << "access: " << r.crash.access << "\n";
     for (const auto& f : r.crash.frames) txt << f << "\n";
   }
 
   if (!r.launched) {
-    fmt::print(stderr, "run: launch failed: {}\n", r.launch_error);
+    std::print(stderr, "run: launch failed: {}\n", r.launch_error);
     return kExitUsage;
   }
   size_t unimpl = 0;
   for (auto& [k, v] : scan.unimplemented_messages) unimpl += v;
   // The summary line stays last: callers take the report path from its end.
-  for (const auto& e : scan.first_errors) fmt::print("run:   error: {}\n", e);
+  for (const auto& e : scan.first_errors) std::print("run:   error: {}\n", e);
   if (r.crash.captured) {
-    fmt::print("run:   crash: 0x{:08X} at 0x{:016X}{}{}; stack in crash.txt\n", r.crash.code,
+    std::print("run:   crash: 0x{:08X} at 0x{:016X}{}{}; stack in crash.txt\n", r.crash.code,
                r.crash.address, r.crash.access.empty() ? "" : ", ", r.crash.access);
     for (size_t i = 0; i < r.crash.frames.size() && i < 8; ++i)
-      fmt::print("run:   {}\n", r.crash.frames[i]);
+      std::print("run:   {}\n", r.crash.frames[i]);
   } else if (crash_stack) {
-    fmt::print("run:   crash: none captured (no unhandled exception)\n");
+    std::print("run:   crash: none captured (no unhandled exception)\n");
   }
-  fmt::print(
+  std::print(
       "run: {} after {} ms; {} stub line(s), {} unimplemented message(s), {} error(s), {} critical; "
       "report {}\n",
       r.cancelled ? std::string("CANCELLED, session window closed")
@@ -714,7 +715,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     // Darwin. Keep the same session/handoff loop, never cross-process embed.
     separate_windows = true;
     struct NotifyEnd { SessionNotification& event; ~NotifyEnd() { event.Signal(); } } notify_end{notification};
-    fmt::print("session: native title windows ({})\n", HostPlatform());
+    std::print("session: native title windows ({})\n", HostPlatform());
 #endif
     std::unique_ptr<SessionWindow> window;
     // Discovery of generated AOT routes also inspects receipts. Keep it in the
@@ -729,19 +730,19 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       desktop::CatalogLaunchVerification launch_paths;
       PrimeLaunchVerification(paths, catalog, catalog_target);
       desktop::VerifyCatalogLaunch(paths, catalog, catalog_target, manifest);
-      fmt::print("X360N_LAUNCH_VERIFIED\n");
+      std::print("X360N_LAUNCH_VERIFIED\n");
       std::fflush(stdout);
     }
     if (!separate_windows) {
       window = std::make_unique<SessionWindow>(true, notification.handle(), renderer_settings.fullscreen);
-      fmt::print("session: persistent window {}\n", window->handle());
+      std::print("session: persistent window {}\n", window->handle());
     }
-    fmt::print("session: console language={} country={} (snapshot until restart)\n",
+    std::print("session: console language={} country={} (snapshot until restart)\n",
                console_settings.language, console_settings.country);
     auto dashboard = load_profile(manifest);
     BindLibraryLaunchTargets(dashboard, catalog);
     CheckSessionRenderer(dashboard.exe, renderer_settings);
-    fmt::print("session: {}renderer {}{}\n",
+    std::print("session: {}renderer {}{}\n",
         diagnostic_xenos ? "diagnostic " : "global ",
         renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos",
         renderer_settings.experimental ? " (explicit experimental development access)" : "");
@@ -784,7 +785,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       std::chrono::milliseconds child_lifetime{};
-      const auto run_prefix = fmt::format("session-{}-", step);
+      const auto run_prefix = std::format("session-{}-", step);
       // Content-derived project IDs may already occupy the complete safe-label
       // budget. Shorten only the diagnostic label, never the routed identity.
       const auto run_label = run_prefix + active.name.substr(0, 64 - run_prefix.size());
@@ -804,12 +805,12 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       }
       LaunchRequest request;
       if (!ReadLaunchRequest(handoff, request)) {
-        fmt::print(stderr, "session: missing or invalid handoff: {}\n", PathUtf8(handoff));
+        std::print(stderr, "session: missing or invalid handoff: {}\n", PathUtf8(handoff));
         return kExitFailed;
       }
       const auto can_continue = [&] {
         if (progress.CanContinue(child_lifetime)) return true;
-        fmt::print(stderr, "session: repeated transitions without sustained execution; request preserved in {}\n",
+        std::print(stderr, "session: repeated transitions without sustained execution; request preserved in {}\n",
                    PathUtf8(handoff));
         return false;
       };
@@ -817,7 +818,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         // Closing a host window exits the platform, never impersonates Xbox Home.
         if (request.kind == LaunchRequest::WindowClose) return kExitOk;
         if (request.kind == LaunchRequest::FirmwareExit) {
-          fmt::print("session: {} requested firmware exit (routine {}); closing platform\n", active.name, request.flags);
+          std::print("session: {} requested firmware exit (routine {}); closing platform\n", active.name, request.flags);
           return kExitOk;
         }
         // A dashboard can request a dashboard route too (for example Retail
@@ -827,11 +828,11 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         if (request.kind == LaunchRequest::Dashboard &&
             std::find(dashboard.dashboard_return_flags.begin(), dashboard.dashboard_return_flags.end(),
                       request.flags) == dashboard.dashboard_return_flags.end()) {
-          fmt::print(stderr, "session: dashboard return flags {:08X} are not implemented; request preserved in {}\n",
+          std::print(stderr, "session: dashboard return flags {:08X} are not implemented; request preserved in {}\n",
                      request.flags, PathUtf8(handoff));
           return kExitFailed;
         }
-        fmt::print("session: {} {}; returning to {}\n", active.name,
+        std::print("session: {} {}; returning to {}\n", active.name,
             request.kind == LaunchRequest::Dashboard ? "requested dashboard" :
             request.kind == LaunchRequest::TitleTerminate ? "requested title termination" :
             "main thread returned (no explicit return request)",
@@ -843,18 +844,18 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       auto target = std::find_if(targets.begin(), targets.end(),
           [&](const auto& profile) { return MatchesLaunch(profile, request, dashboard.user_root); });
       if (target == targets.end()) {
-        fmt::print(stderr, "session: no verified AOT profile for {} (flags {:08X})\n",
+        std::print(stderr, "session: no verified AOT profile for {} (flags {:08X})\n",
                    request.path, request.flags);
         return kExitFailed;
       }
-      fmt::print("session: original request matched {} ({})\n", target->name, target->sha256);
+      std::print("session: original request matched {} ({})\n", target->name, target->sha256);
       if (!can_continue()) return kExitFailed;
       incoming = handoff; active = *target;
     }
   } catch (const VerificationCancelled&) {
     return kExitOk;
   } catch (const std::exception& e) {
-    fmt::print(stderr, "session: {}\n", e.what());
+    std::print(stderr, "session: {}\n", e.what());
     return kExitUsage;
   }
 }
@@ -870,7 +871,7 @@ int main(int argc, char** argv) {
     try {
       std::vector<std::string> arguments; for (int i=1;i<argc;++i) arguments.emplace_back(argv[i]);
       return GuardNinja(CurrentExecutablePath().parent_path()/"x360n-ninja.json",arguments,[] { return stop_requested!=0; });
-    } catch (const std::exception& error) { fmt::print(stderr,"ninja guard: {}\n",error.what()); return 73; }
+    } catch (const std::exception& error) { std::print(stderr,"ninja guard: {}\n",error.what()); return 73; }
   }
   app.set_version_flag("--version", X360N_VERSION);
   app.require_subcommand(1);
@@ -965,17 +966,17 @@ int main(int argc, char** argv) {
   if (recover->parsed()) {
     try {
       x360n::desktop::RecoverUpdate(PathFromUtf8(recovery_package), PathFromUtf8(recovery_transaction));
-      fmt::print("Previous application restored and verified. User data preserved.\n");
+      std::print("Previous application restored and verified. User data preserved.\n");
       return kExitOk;
     } catch (const std::exception& e) {
-      fmt::print(stderr, "Recovery incomplete: {}\n", e.what());
+      std::print(stderr, "Recovery incomplete: {}\n", e.what());
       return kExitFailed;
     }
   }
 
   auto paths = FindProjectRoot(root_opt.empty() ? SelfPath() : PathFromUtf8(root_opt));
   if (!paths) {
-    fmt::print(stderr, "x360n: project root (deps.lock.json) not found; pass --root\n");
+    std::print(stderr, "x360n: project root (deps.lock.json) not found; pass --root\n");
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config,PathFromUtf8(doctor_sdk),PathFromUtf8(doctor_compiler),PathFromUtf8(doctor_tool));
@@ -992,11 +993,11 @@ int main(int argc, char** argv) {
         const auto equals=variable.find('='); if (equals==std::string::npos) throw std::runtime_error("CMake definition requires NAME=VALUE");
         options.variables[variable.substr(0,equals)]=variable.substr(equals+1);
       }
-      options.progress=[](const auto& stage) { fmt::print("{}\n",stage); std::fflush(stdout); };
+      options.progress=[](const auto& stage) { std::print("{}\n",stage); std::fflush(stdout); };
       const auto result=PrepareAot(std::move(options));
-      fmt::print("{}: {}\n",result.reused ? "reused verified preparation" : "built",PathUtf8(result.executable));
+      std::print("{}: {}\n",result.reused ? "reused verified preparation" : "built",PathUtf8(result.executable));
       return kExitOk;
-    } catch (const std::exception& error) { fmt::print(stderr,"prepare: {}\n",error.what()); return kExitFailed; }
+    } catch (const std::exception& error) { std::print(stderr,"prepare: {}\n",error.what()); return kExitFailed; }
   }
   if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event, catalog_target, diagnostic_xenos);
   if (run->parsed()) {
@@ -1009,7 +1010,7 @@ int main(int argc, char** argv) {
         lease.emplace(*paths);
       return Run(*paths, PathFromUtf8(exe), child_args, label, timeout_s, rex_log, crash_stack);
     } catch (const std::exception& e) {
-      fmt::print(stderr, "run: {}\n", e.what());
+      std::print(stderr, "run: {}\n", e.what());
       return kExitUsage;
     }
   }

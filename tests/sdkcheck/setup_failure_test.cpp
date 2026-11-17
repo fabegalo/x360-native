@@ -1,88 +1,75 @@
-// A failed Runtime::Setup must leave teardown to the owner of the Runtime.
-//
-// At f5337cdc, a failure after the graphics system was handed over (e.g. the
-// function table, src/system/runtime.cpp) called Runtime::Shutdown() inside
-// Setup, destroying the graphics system and its D3D12 device while ReXApp still
-// held an immediate drawer, ImGui textures and the window's presenter made from
-// it. ReXApp::OnDestroy then released those and crashed inside D3D12Core
-// (x360n run --crash-stack, docs/dashboard.md §0.6). patches/rexglue-sdk/0002
-// keeps the partly set-up Runtime intact on failure; ~Runtime() runs Shutdown().
+// A failed title load leaves host graphics alive until its App owner shuts down.
 #include <catch2/catch_test_macros.hpp>
-
-#include <filesystem>
-#include <memory>
-#include <system_error>
-
-#include <rex/image_info.h>
-#include <rex/runtime.h>
-#include <rex/system/interfaces/graphics.h>
-
-using rex::X_STATUS;  // X_STATUS_SUCCESS expands to a cast to it
+#include <rex/app/title_app.h>
+#include <rex/gpu/graphics_system.h>
+#include <rex/path_settings.h>
+#include "object_app.h"
+#include "kernel/title_fakes.h"
+#include "kernel/title_image.h"
+#include "test_memory.h"
+#include "temp_folder.h"
 
 namespace {
-
-namespace fs = std::filesystem;
-
-struct GraphicsProbe {
-  bool alive = false;
-  bool shutdown_called = false;
-};
-
-class FakeGraphics : public rex::system::IGraphicsSystem {
+class SetupFailureApp final : public rex::test::ObjectApp<rex::app::TitleApp> {
  public:
-  explicit FakeGraphics(GraphicsProbe* probe) : probe_(probe) { probe_->alive = true; }
-  ~FakeGraphics() override { probe_->alive = false; }
-  rex::X_STATUS SetupPresentation(rex::ui::WindowedAppContext*) override { return X_STATUS_SUCCESS; }
-  rex::X_STATUS SetupGuestGpu(rex::runtime::FunctionDispatcher*, rex::system::KernelState*) override {
-    return X_STATUS_SUCCESS;
+  explicit SetupFailureApp(const rex::ppc::PPCImage& image) : ObjectApp("setup_failure", image, false) {
+    rex::test::ReleaseTestMemory();
+    rex::test::g_counts.Reset();
+    static_cast<rex::test_ui::FakeUIData&>(rex::test_ui::g_ui) = {};
+    rex::test::WriteTitle(folder.path / "game");
   }
-  bool has_presentation() const override { return false; }
-  void Shutdown() override { probe_->shutdown_called = true; }
-
+  rex::test::TempFolder folder{"x360n_setup_failure_"};
+ protected:
+  void ReportError(std::string_view message) override { rex::app::App::ReportError(message); }
+  void OnRegisterModules(std::vector<rex::IModule*>& modules) override {
+    ObjectApp::OnRegisterModules(modules);
+    modules.push_back(&provider_);
+  }
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(TitleApp::OnConfigure(settings));
+    REX_TRY_VOID(root.SetText(rex::SettingLayer::kTitle, folder.path.string()));
+    for (const auto& [name, value] : std::initializer_list<std::pair<const char*, std::string>>{
+        {"title.entry", "default.xex"}, {"title.imports", ""},
+        {"title.game_root", (folder.path / "game").string()},
+        {"app.user_root", (folder.path / "user").string()},
+        {"app.cache_root", (folder.path / "cache").string()},
+        {"app.log_root", (folder.path / "logs").string()},
+        {"app.config_file", (folder.path / "config.toml").string()},
+        {"ui.driver", "count"}, {"hid.drivers", "count"}, {"apu.driver", "count"}, {"gpu.driver", "count"}}) {
+      REX_TRY_VOID(settings.Reset(name));
+      REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle, name, value));
+    }
+    return rex::Ok();
+  }
+  void OnRelease() override {
+    for (const auto* name : {"title.entry", "title.imports", "title.game_root"})
+      if (REX_SETTINGS().Find(name)) CHECK(REX_SETTINGS().Reset(name));
+    TitleApp::OnRelease();
+  }
  private:
-  GraphicsProbe* probe_;
+  rex::test::CountingProvider provider_;
 };
+}
 
-struct GameRoot {
-  fs::path dir = fs::temp_directory_path() / "x360n_setup_failure_test";
-  GameRoot() { fs::create_directories(dir); }
-  ~GameRoot() {
-    std::error_code ec;
-    fs::remove_all(dir, ec);
-  }
-};
-
-}  // namespace
-
-TEST_CASE("a failed Runtime::Setup keeps the graphics system until the Runtime is destroyed",
-          "[sdk][runtime]") {
-  GameRoot root;
-  GraphicsProbe probe;
+TEST_CASE("a failed title load keeps host graphics until App shutdown", "[sdk][runtime]") {
+  // The legacy function table crosses the end of the 0x90000000 XEX heap.
+  rex::ppc::PPCImage image{};
+  image.code_base = image.image_base = 0x9FFF0000;
+  image.code_size = 0x1000;
+  image.image_size = 0x8000;
   {
-    auto runtime = std::make_unique<rex::Runtime>(root.dir);
-    rex::RuntimeConfig config{};
-    config.graphics = std::make_unique<FakeGraphics>(&probe);
-    // Function table range crosses the end of the 0x90000000 XEX heap, so the
-    // second phase of Setup fails after the graphics system was handed over.
-    rex::PPCImageInfo image{};
-    image.code_base = 0x9FFF0000;
-    image.code_size = 0x1000;
-    image.image_base = 0x9FFF0000;
-    image.image_size = 0x8000;
-    rex::X_STATUS status = runtime->Setup(image, std::move(config));
-    CHECK(XFAILED(status));
-    // The owner (ReXApp) still holds objects made from the graphics system: it
-    // must not have been shut down or destroyed by the failed Setup.
-    CHECK(probe.alive);
-    CHECK_FALSE(probe.shutdown_called);
+    SetupFailureApp app(image);
+    REQUIRE(app.Init({}));
+    REQUIRE_FALSE(app.LaunchTitle());
+    CHECK(app.GetGraphics().HasDriver());
+    CHECK(app.GetGraphics().GetDriverName() == "count");
+    CHECK(rex::test::g_counts.graphics_shutdown == 0);
+    app.Shutdown();
+    CHECK(rex::test::g_counts.graphics_shutdown == 1);
+    CHECK_FALSE(app.GetGraphics().HasDriver());
   }
-  // Destroying the Runtime tears everything down, graphics included.
-  CHECK(probe.shutdown_called);
-  CHECK_FALSE(probe.alive);
-
-  // The global Runtime instance was released: a new Runtime can be set up.
-  auto again = std::make_unique<rex::Runtime>(root.dir);
-  rex::RuntimeConfig tool{};
-  tool.tool_mode = true;
-  CHECK(again->Setup(std::move(tool)) == X_STATUS_SUCCESS);
+  SetupFailureApp again(image);
+  REQUIRE(again.Init({}));
+  CHECK(again.Shutdown() == 0);
+  CHECK(rex::test::g_counts.graphics_shutdown == 1);
 }

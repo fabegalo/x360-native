@@ -1,16 +1,20 @@
-#include <rex/graphics/vulkan/upload_hazard_tracker.h>
+#include <catch2/catch_test_macros.hpp>
+#include <rex/types.h>
+#include "gpu/xenos/vulkan/upload_hazard_tracker.h"
+#include "gpu/xenos/host/deferred_stream.h"
 
 #include <cstdint>
 #include <iostream>
 #include <limits>
 
-int main() {
-  rex::graphics::vulkan::UploadHazardTracker tracker;
+TEST_CASE("Upload ordering rejects every overlapping read range", "[sdk][gpu][shader-fetch][upload-ordering]") {
+  rex::gpu::vulkan::UploadHazardTracker tracker;
   uint32_t failures = 0;
   uint32_t checks = 0;
   auto check = [&](bool value, const char* what) {
     ++checks;
-    if (!value) { ++failures; std::cerr << what << '\n'; }
+    INFO(what);
+    CHECK(value);
   };
   tracker.Reset(131072);
   auto serial = tracker.BeginPass();
@@ -39,5 +43,28 @@ int main() {
   check(tracker.Intersects(128, 1) && !tracker.Intersects(0, 128),
         "clamped mark protects the final partial word without wrapping");
   std::cout << "Vulkan upload ordering: " << checks << " checks, " << failures << " failures\n";
-  return failures ? 1 : 0;
+  REQUIRE(failures == 0);
+}
+
+TEST_CASE("Deferred stream truncation and transfer retain header and buffer ownership", "[sdk][gpu][shader-fetch][upload-ordering]") {
+  enum class Command : uint32_t { kFirst, kSecond };
+  rex::gpu::DeferredStream<Command> stream;
+  auto* first = static_cast<uint64_t*>(stream.Write(Command::kFirst, sizeof(uint64_t)));
+  *first = 0x123456789ABCDEF0;
+  const auto boundary = stream.Size();
+  *static_cast<uint64_t*>(stream.Write(Command::kSecond, sizeof(uint64_t))) = 7;
+  REQUIRE(stream.Size() > boundary);
+  stream.Truncate(boundary);
+  REQUIRE(stream.Size() == boundary);
+  std::vector<uintmax_t> submitted;
+  stream.Swap(submitted);
+  REQUIRE(stream.Size() == 0);
+  REQUIRE(submitted.size() == boundary);
+  using Header = rex::gpu::DeferredStream<Command>::Header;
+  const auto& header = *reinterpret_cast<const Header*>(submitted.data());
+  REQUIRE(header.command == Command::kFirst);
+  REQUIRE(header.arguments_size_elements == 1);
+  REQUIRE(submitted[rex::gpu::DeferredStream<Command>::kHeaderSizeElements] == 0x123456789ABCDEF0);
+  *static_cast<uint64_t*>(stream.Write(Command::kSecond, sizeof(uint64_t))) = 9;
+  REQUIRE(submitted[rex::gpu::DeferredStream<Command>::kHeaderSizeElements] == 0x123456789ABCDEF0);
 }

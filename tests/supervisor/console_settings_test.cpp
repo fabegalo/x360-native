@@ -28,10 +28,12 @@ TEST_CASE("console preferences persist independent language and locale across re
 }
 TEST_CASE("console settings replace manifest overrides for every session child", "[console-settings]") {
   CHECK(SessionConsoleArguments({"--user_language=1", "--user-country", "103", "--foo=bar",
-                                  "--user-language", "2", "--user_country=53"}, {9, 13}) ==
-        std::vector<std::string>{"--foo=bar", "--user_language=9", "--user_country=13"});
+                                  "--user-language", "2", "--user_country=53", "--kernel.user_language=2", "--kernel.user_country", "1"}, {9, 13}) ==
+        std::vector<std::string>{"--foo=bar", "--kernel.user_language=9", "--kernel.user_country=13"});
   CHECK_THROWS(SessionConsoleArguments({"--user_language"}, {}));
   CHECK_THROWS(SessionConsoleArguments({"--user_country", "--foo"}, {}));
+  CHECK_THROWS(SessionConsoleArguments({"--kernel.user_language"}, {}));
+  CHECK_THROWS(SessionConsoleArguments({"--kernel.user_country", "--foo"}, {}));
   CHECK_THROWS(SessionConsoleArguments({"--"}, {}));
   std::set<uint32_t> languages, countries, locales;
   for (auto v : ConsoleLanguages()) CHECK(languages.insert(v.id).second);

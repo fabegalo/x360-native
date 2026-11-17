@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace rex { class Runtime; }
+namespace rex::kernel { class TitleRuntime; }
 namespace dash17559 {
 using GammaRamp = std::array<uint16_t, 3 * 256>;
 
@@ -16,5 +16,5 @@ inline GammaRamp TransitionRamp(const GammaRamp& original, unsigned step) {
     result[i] = static_cast<uint16_t>((uint32_t(original[i]) * (32 - step)) >> 5);
   return result;
 }
-void InstallDisplayTransition(rex::Runtime& runtime);
+void InstallDisplayTransition(rex::kernel::TitleRuntime& runtime);
 }

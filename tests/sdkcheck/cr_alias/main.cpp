@@ -14,7 +14,7 @@ int main() {
   for (unsigned n = 0; n < 4096; ++n) {
     const uint32_t input = n < 32 ? 1u << n : random();
     for (unsigned variant = 0; variant < 6; ++variant) {
-      for (unsigned i = 0; i < 8; ++i) cr[i]->set_raw(input >> (28 - 4 * i));
+      for (unsigned i = 0; i < 8; ++i) cr[i]->SetRaw(input >> (28 - 4 * i));
       // Variants 4/5 are crset 5 and crclr 30: constant results, no source.
       const unsigned dest[] = {7, 2, 28, 31, 5, 30}, source[] = {31, 2, 0, 7, 0, 0};
       const uint32_t bit = variant == 4 ? 1u : variant == 5 ? 0u
@@ -30,7 +30,7 @@ int main() {
         case 5: cr_alias_82010028(ctx, memory); break;
       }
       uint32_t got = 0;
-      for (unsigned i = 0; i < 8; ++i) got |= cr[i]->raw() << (28 - 4 * i);
+      for (unsigned i = 0; i < 8; ++i) got |= cr[i]->GetRaw() << (28 - 4 * i);
       if (got != expected) {
         std::printf("FAIL alias=%u input=%08X got=%08X expected=%08X\n", variant, input, got, expected);
         return 1;

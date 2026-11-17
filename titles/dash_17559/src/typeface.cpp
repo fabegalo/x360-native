@@ -3,9 +3,9 @@
 // replace SegoeXbox-Light or claim that a resource file exists.
 #include <string_view>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
+#include <rex/ppc/hook.h>
 
-extern "C" REX_FUNC(__imp__XamGetLanguageTypeface) {
+REX_HOOK_RAW(__imp__XamGetLanguageTypeface) {
   const auto language = ctx.r3.u32;
   const auto capacity = ctx.r4.u32;  // UTF-16 code units, as used by dash.
   const auto address = ctx.r5.u32;
@@ -28,7 +28,7 @@ extern "C" REX_FUNC(__imp__XamGetLanguageTypeface) {
   ctx.r3.u64 = 0;
 }
 
-extern "C" REX_FUNC(__imp__XamGetLanguageTypefacePatch) {
+REX_HOOK_RAW(__imp__XamGetLanguageTypefacePatch) {
   // No optional font patch is selected. This is a nullable locator pointer,
   // never the incoming numeric language ID (the SDK stub's former result).
   ctx.r3.u64 = 0;

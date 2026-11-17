@@ -1,0 +1,169 @@
+diff --git a/include/rex/xam/loader_state.h b/include/rex/xam/loader_state.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/xam/loader_state.h
+@@ -0,0 +1,24 @@
++/**
++ * @copyright Copyright (c) 2013 Ben Vanik. All rights reserved.
++ *            Copyright (c) 2026 Tom Clay. All rights reserved.
++ * @license BSD 3-Clause License; see LICENSE.
++ */
++#pragma once
++
++#include <string>
++#include <vector>
++#include <rex/types.h>
++
++namespace rex::xam {
++
++/** One title's launch handoff, owned by XAM until DetachTitle. */
++struct XAMLoaderState {
++  enum class ExitRequest { None, Dashboard, Terminate };
++  ExitRequest exit_request = ExitRequest::None;
++  bool launch_data_present = false;
++  std::vector<u8> launch_data;
++  u32 launch_flags = 0;
++  std::string launch_path;
++};
++
++}  // namespace rex::xam
+diff --git a/src/xam/xam_state.h b/src/xam/xam_state.h
+--- a/src/xam/xam_state.h
++++ b/src/xam/xam_state.h
+@@ -26,6 +26,7 @@
+ #include <rex/kernel/title_runtime.h>
+ #include <rex/xam/app_manager.h>
+ #include <rex/xam/title_lifecycle.h>
++#include <rex/xam/loader_state.h>
+ #include "xam/xam_title.h"
+ #include <rex/xam/user_profile.h>
+ #include <rex/xam/system_ui.h>
+@@ -42,13 +43,6 @@
+ 
+ namespace rex::xam {
+ 
+-/** The launch request state that the XAM loader exports keep. */
+-struct XAMLoaderState {
+-  bool launch_data_present = false; /**< True once the title stored launch data. */
+-  std::vector<u8> launch_data;
+-  u32 launch_flags = 0;
+-  std::string launch_path; /**< `game:\default.xex` when the title passed no path. */
+-};
+ 
+ class XAMState;
+ 
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -43,6 +43,7 @@
+ 
+ namespace rex::xam {
+ 
++struct XAMLoaderState;
+ class SystemUIState;
+ class UserProfile;
+ class IAchievementManager;
+@@ -96,7 +97,7 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 3)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 4)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+@@ -107,6 +108,7 @@
+   /** Title-owned services, valid between AttachTitle and DetachTitle. */
+   [[nodiscard]] virtual SystemUIState& GetSystemUI() = 0;
+   [[nodiscard]] virtual UserProfile& GetUserProfile() = 0;
++  [[nodiscard]] virtual XAMLoaderState& GetLoaderState() = 0;
+ 
+   /**
+    * @return The manager, valid between AttachTitle and DetachTitle.
+diff --git a/src/xam/xam_title_lifecycle.h b/src/xam/xam_title_lifecycle.h
+--- a/src/xam/xam_title_lifecycle.h
++++ b/src/xam/xam_title_lifecycle.h
+@@ -35,6 +35,7 @@
+   [[nodiscard]] IContentManager& GetContentManager() override;
+   [[nodiscard]] SystemUIState& GetSystemUI() override;
+   [[nodiscard]] UserProfile& GetUserProfile() override;
++  [[nodiscard]] XAMLoaderState& GetLoaderState() override;
+   [[nodiscard]] IAchievementManager& GetAchievementManager() override;
+   [[nodiscard]] u32 GetTitleID() const override;
+   [[nodiscard]] std::unique_ptr<filesystem::IXDBFTitleData> GetTitleXDBF() const override;
+diff --git a/src/xam/xam_title_lifecycle.cpp b/src/xam/xam_title_lifecycle.cpp
+--- a/src/xam/xam_title_lifecycle.cpp
++++ b/src/xam/xam_title_lifecycle.cpp
+@@ -54,6 +54,7 @@
+ 
+ SystemUIState& XAMTitleLifecycle::GetSystemUI() { return state_->GetSystemUI(); }
+ UserProfile& XAMTitleLifecycle::GetUserProfile() { return state_->GetUserProfile(); }
++XAMLoaderState& XAMTitleLifecycle::GetLoaderState() { return state_->GetLoaderState(); }
+ 
+ IContentManager& XAMTitleLifecycle::GetContentManager() {
+   return state_->GetContentManager();
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -288,6 +288,7 @@
+   {
+     auto& loader_data = CurrentXAM().GetLoaderState();
+     loader_data.launch_flags = flags;
++    loader_data.exit_request = XAMLoaderState::ExitRequest::None;
+ 
+     if (raw_name_ptr) {
+       std::string path(raw_name_ptr.GetValue());
+@@ -303,6 +304,8 @@
+         loader_data.launch_path = path;
+       }
+     } else {
++      loader_data.launch_path.clear();
++      loader_data.exit_request = XAMLoaderState::ExitRequest::Dashboard;
+       REXXAM_INFO("The title exits to the dashboard");
+     }
+   }
+@@ -312,6 +315,10 @@
+ }
+ 
+ void XamLoaderTerminateTitle_entry() {
++  auto& loader_data = CurrentXAM().GetLoaderState();
++  loader_data.launch_path.clear();
++  loader_data.launch_flags = 0;
++  loader_data.exit_request = XAMLoaderState::ExitRequest::Terminate;
+   // This function does not return.
+   CurrentTitle().exit.TerminateTitle();
+ }
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1210,3 +1210,30 @@
+     }
+   });
+ }
++
++
++REX_TEST_CASE("title return distinguishes dashboard, termination and explicit image handoffs", "[kernel][xam][title-return]") {
++  for (const u32 kind : {0u, 1u, 2u}) {
++    KernelFixture fixture;
++    auto& loader = rex::xam::CurrentXAM().GetLoaderState();
++    loader.launch_path = "stale.xex";
++    loader.launch_flags = 0x1234;
++    loader.launch_data_present = true;
++    loader.launch_data = {1, 2, 3};
++    loader.exit_request = rex::xam::XAMLoaderState::ExitRequest::Terminate;
++    bool returned = false;
++    fixture.RunUntilGuestThreadEnds([&](Caller& c) {
++      if (kind == 1) c.XAM("XamLoaderTerminateTitle");
++      else c.XAM("XamLoaderLaunchTitle", {kind == 2 ? c.AllocString("") : 0, 0x20});
++      returned = true;
++    });
++    CHECK_FALSE(returned);
++    CHECK(loader.launch_data_present);
++    CHECK(loader.launch_data == std::vector<u8>{1, 2, 3});
++    using Exit = rex::xam::XAMLoaderState::ExitRequest;
++    CHECK(loader.exit_request == (kind == 0 ? Exit::Dashboard : kind == 1 ? Exit::Terminate : Exit::None));
++    CHECK(loader.launch_flags == (kind == 1 ? 0 : 0x20));
++    if (kind == 2) CHECK(loader.launch_path == "game:\\default.xex");
++    else CHECK(loader.launch_path.empty());
++  }
++}

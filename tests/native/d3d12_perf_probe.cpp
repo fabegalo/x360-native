@@ -3,12 +3,16 @@
 #include "../../src/native/d3d12/d3d12_scanout.h"
 #include "../../src/native/d3d12/d3d12_hybrid.h"
 #include "../../src/native/commands/primitive_indices.h"
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/cvar.h>
+#include "../../src/gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/heap.h>
+#include <rex/ppc/image.h>
+#include <rex/string/text.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
 #include <rex/chrono/frame_timing.h>
-#include <rex/logging.h>
-#include <rex/graphics/format/ucode.h>
+#include <rex/logging/log_category.h>
+#include <rex/xenos/ucode.h>
 #include <Windows.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
@@ -22,8 +26,12 @@
 #include <mutex>
 #include <thread>
 using namespace x360n::native;
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using namespace rex::xenos;
+namespace xenos=rex::xenos;
+namespace ucode=rex::xenos::ucode;
+namespace texture_util=rex::xenos;
+extern "C" rex::IInterface* ReXCreateInterface(const char*,rex::u32);
 namespace {
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 std::vector<uint32_t> ExportShader() {
@@ -71,23 +79,26 @@ uint64_t CpuNs() {
   auto ticks=[](FILETIME t) { return (uint64_t(t.dwHighDateTime)<<32)|t.dwLowDateTime; };
   return (ticks(k)+ticks(u))*100;
 }
-void CheckPipelineInitialization(rex::ui::d3d12::D3D12Provider& provider,
-    rex::memory::Memory& memory, RegisterFile& draw, RegisterFile& resolve,
+void CheckPipelineInitialization(rex::gpu::d3d12::D3D12Provider& provider,
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, RegisterFile& draw, RegisterFile& resolve,
     const std::filesystem::path& output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   for (unsigned prelude=0;prelude<3;++prelude) {
     const auto directory=output/("cache-init-"+std::to_string(prelude));
     std::filesystem::path file;
     std::filesystem::file_time_type published{};
     for (unsigned run=0;run<2;++run) {
-      D3D12Scanout backend(provider);
+      D3D12Scanout backend(provider,settings,watch);
       backend.InitializeShaderStorage(directory,0);
       if (prelude==0) backend.SetSampleCounts({},false);
       else if (prelude==1) backend.ReadSampleCounts(false);
-      else backend.Resolve(resolve,memory);
+      else backend.Resolve(resolve, physical_memory);
       auto words=ExportShader();for(auto& word:words)word=rex::byte_swap(word);
       auto* shader=backend.LoadShader(ShaderType::kVertex,words.data(),uint32_t(words.size()));
       const auto start=std::chrono::steady_clock::now();
-      backend.Draw(draw,memory,shader,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+      backend.Draw(draw, physical_memory,shader,nullptr,PrimitiveType::kTriangleList,1,nullptr);
       const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
       backend.Drain();
       if (!run) {
@@ -100,7 +111,7 @@ void CheckPipelineInitialization(rex::ui::d3d12::D3D12Provider& provider,
     }
   }
 }
-DXGI_QUERY_VIDEO_MEMORY_INFO VideoMemory(const rex::ui::d3d12::D3D12Provider& provider) {
+DXGI_QUERY_VIDEO_MEMORY_INFO VideoMemory(const rex::gpu::d3d12::D3D12Provider& provider) {
   Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
   Require(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))), "memory budget factory");
   Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter;
@@ -116,25 +127,28 @@ struct Render : D3D12Render {
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) { SyncPacketRead(address,length,opcode); }
   Shader* LoadShader(ShaderType type, const uint32_t* words, uint32_t count) { return shaders.Load(type,words,count); }
 };
-void CheckTextureViews(Render& render, RegisterFile draw, rex::memory::Memory& memory, uint32_t output) {
-  const auto source = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
+void CheckTextureViews(Render& render, RegisterFile draw, rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
+  const auto source = memory.SystemHeapAlloc(65536, 4096, rex::kernel::kSystemHeapPhysical);
   Require(source != 0, "texture descriptor source allocation");
   auto words = TextureExportShader();
   for (auto& word : words) word = rex::byte_swap(word);
   auto* vs = render.LoadShader(ShaderType::kVertex, words.data(), uint32_t(words.size()));
-  xe_gpu_texture_fetch_t fetch{};
+  TextureFetch fetch{};
   fetch.type = FetchConstantType::kTexture; fetch.dimension = DataDimension::k2DOrStacked;
   fetch.format = TextureFormat::k_32_32_32_32_FLOAT; fetch.pitch = 1;
   fetch.base_address = memory.GetPhysicalAddress(source) >> 12;
   fetch.size_2d.width = fetch.size_2d.height = 31;
   fetch.swizzle = 0x688;
   fetch.clamp_x = fetch.clamp_y = fetch.clamp_z = ClampMode::kClampToEdge;
-  auto set_fetch = [&] { std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch)); };
+  auto set_fetch = [&] { std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)], &fetch, sizeof(fetch)); };
   set_fetch();
   const uint32_t physical = memory.GetPhysicalAddress(output);
   auto issue = [&](unsigned slot) {
-    draw[XE_GPU_REG_SHADER_CONSTANT_000_X] = ((physical + slot * 16) >> 2) | (1u << 30);
-    render.Draw(draw, memory, vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    draw[uint32_t(Register::SHADER_CONSTANT_000_X)] = ((physical + slot * 16) >> 2) | (1u << 30);
+    render.Draw(draw, physical_memory, vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
   };
   auto verify = [&](unsigned slot, const std::array<float, 4>& value) {
     Require(!std::memcmp(memory.TranslatePhysical(physical + slot * 16), value.data(), sizeof(value)),
@@ -181,7 +195,10 @@ void CheckTextureViews(Render& render, RegisterFile draw, rex::memory::Memory& m
   memory.SystemHeapFree(source);
   std::cout << "PASS immutable texture descriptors: 6000 reuses, live swizzles, CPU writes, null view and arena lifetime\n";
 }
-void CheckConstantUploads(Render& render, RegisterFile draw, rex::memory::Memory& memory, uint32_t output) {
+void CheckConstantUploads(Render& render, RegisterFile draw, rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical = memory.GetPhysicalAddress(output) + 65536;
   auto load = [&](bool alternate) {
     auto code = ExportShader();
@@ -192,17 +209,17 @@ void CheckConstantUploads(Render& render, RegisterFile draw, rex::memory::Memory
   auto* vs = load(false); auto* other_vs = load(true);
   const std::array<float, 4> a{.25f, .5f, .75f, 1}, b{1, .75f, .5f, .25f};
   auto issue = [&](unsigned slot, const std::array<float, 4>& value, unsigned bank = 0, bool alternate = false) {
-    draw[XE_GPU_REG_SQ_VS_CONST] = 0x000FF000 | bank;
-    xe_gpu_memexport_stream_t stream{};
+    draw[uint32_t(Register::SQ_VS_CONST)] = 0x000FF000 | bank;
+    MemExportStream stream{};
     stream.base_address = (physical + slot * 16) >> 2; stream.const_0x1 = 1;
     stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
     stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
     stream.index_count = 1; stream.const_0x96 = 0x96;
-    const auto base = XE_GPU_REG_SHADER_CONSTANT_000_X + bank * 4;
+    const auto base = uint32_t(Register::SHADER_CONSTANT_000_X) + bank * 4;
     std::memcpy(&draw[base], &stream, sizeof(stream));
     std::memset(&draw[base + 4], 0, 16); draw[base + 5] = std::bit_cast<uint32_t>(1.f);
     std::memcpy(&draw[base + (alternate ? 12 : 8)], value.data(), sizeof(value));
-    render.Draw(draw, memory, alternate ? other_vs : vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    render.Draw(draw, physical_memory, alternate ? other_vs : vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
   };
   auto verify = [&](unsigned slot, const std::array<float, 4>& value) {
     Require(!std::memcmp(memory.TranslatePhysical(physical + slot * 16), value.data(), sizeof(value)),
@@ -218,9 +235,9 @@ void CheckConstantUploads(Render& render, RegisterFile draw, rex::memory::Memory
         "identical draw constants allocated another upload");
   }
   // Even unconsumed fields are compared, never trusted to a guest dirty bit.
-  for (const auto change : {std::pair{XE_GPU_REG_PA_CL_VTE_CNTL, 0u},
-                            std::pair{XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031, 3u},
-                            std::pair{XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, 4u}}) {
+  for (const auto change : {std::pair{uint32_t(Register::PA_CL_VTE_CNTL), 0u},
+                            std::pair{uint32_t(Register::SHADER_CONSTANT_BOOL_000_031), 3u},
+                            std::pair{uint32_t(Register::SHADER_CONSTANT_FETCH_00_0), 4u}}) {
     const auto prior = render.performance();
     draw[change.first] ^= change.second == 0 ? 1u << 8 : 1u;
     issue(0, a);
@@ -242,9 +259,12 @@ void CheckConstantUploads(Render& render, RegisterFile draw, rex::memory::Memory
   std::cout << "PASS draw constants: exact reuse, changed system/bool/fetch bytes, VS maps/banks, immutable exports and arenas\n";
 }
 void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolve,
-    rex::memory::Memory& memory, uint32_t output, bool check_constants = false) {
-  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output, bool check_constants = false) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(vertices && index_storage, "resident index allocations");
   auto load = [&](bool vertex, std::vector<uint32_t> words) {
     for (auto& word : words) word = rex::byte_swap(word);
@@ -253,43 +273,43 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
   auto* vs = load(true, RasterShader(true));
   auto* ps = load(false, RasterShader(false));
   const float triangle[]{-1, -1, .5f, 1, -1, 3, .5f, 1, 3, -1, .5f, 1};
-  xe_gpu_vertex_fetch_t fetch{};
+  VertexFetch fetch{};
   fetch.type = FetchConstantType::kVertex; fetch.address = memory.GetPhysicalAddress(vertices) >> 2; fetch.size = 16;
-  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0] = fetch.dword_0;
-  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1] = fetch.dword_1;
-  draw[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kColorDepth);
-  draw[XE_GPU_REG_RB_SURFACE_INFO] = 80;
-  draw[XE_GPU_REG_RB_COLOR_MASK] = 15;
-  draw[XE_GPU_REG_RB_COLOR_INFO] = 0; // RGBA8 at EDRAM base 0.
+  draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)] = fetch.dword_0;
+  draw[uint32_t(Register::SHADER_CONSTANT_FETCH_00_1)] = fetch.dword_1;
+  draw[uint32_t(Register::RB_MODECONTROL)] = uint32_t(EDRAMMode::kColorDepth);
+  draw[uint32_t(Register::RB_SURFACE_INFO)] = 80;
+  draw[uint32_t(Register::RB_COLOR_MASK)] = 15;
+  draw[uint32_t(Register::RB_COLOR_INFO)] = 0; // RGBA8 at EDRAM base 0.
   reg::RB_BLENDCONTROL blend{};
   blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
-  draw[XE_GPU_REG_RB_BLENDCONTROL0] = blend.value;
-  draw[XE_GPU_REG_PA_CL_VTE_CNTL] = 0x3F;
+  draw[uint32_t(Register::RB_BLENDCONTROL0)] = blend.value;
+  draw[uint32_t(Register::PA_CL_VTE_CNTL)] = 0x3F;
   auto fp = [&](unsigned reg, float value) { draw[reg] = std::bit_cast<uint32_t>(value); };
-  fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 16);
-  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 16);
-  fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0);
-  draw[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR] = 32 | (32 << 16);
-  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL] = 0x80000000;
-  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR] = 32 | (32 << 16);
-  draw[XE_GPU_REG_PA_SU_VTX_CNTL] = 1;
+  fp(uint32_t(Register::PA_CL_VPORT_XSCALE), 16); fp(uint32_t(Register::PA_CL_VPORT_XOFFSET), 16);
+  fp(uint32_t(Register::PA_CL_VPORT_YSCALE), -16); fp(uint32_t(Register::PA_CL_VPORT_YOFFSET), 16);
+  fp(uint32_t(Register::PA_CL_VPORT_ZSCALE), 1); fp(uint32_t(Register::PA_CL_VPORT_ZOFFSET), 0);
+  draw[uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR)] = 32 | (32 << 16);
+  draw[uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL)] = 0x80000000;
+  draw[uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)] = 32 | (32 << 16);
+  draw[uint32_t(Register::PA_SU_VTX_CNTL)] = 1;
   const std::array<float, 4> color{.25f, .5f, .75f, 1};
-  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4], color.data(), sizeof(color));
+  std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 256 * 4], color.data(), sizeof(color));
   reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1); copy.color_clear_enable = 1;
-  resolve[XE_GPU_REG_RB_COPY_CONTROL] = copy.value;
-  resolve[XE_GPU_REG_RB_COLOR_CLEAR] = resolve[XE_GPU_REG_RB_COLOR_CLEAR_LO] = 0;
-  resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = memory.GetPhysicalAddress(output) + 4096;
+  resolve[uint32_t(Register::RB_COPY_CONTROL)] = copy.value;
+  resolve[uint32_t(Register::RB_COLOR_CLEAR)] = resolve[uint32_t(Register::RB_COLOR_CLEAR_LO)] = 0;
+  resolve[uint32_t(Register::RB_COPY_DEST_BASE)] = memory.GetPhysicalAddress(output) + 4096;
   auto capture = [&] {
-    render.Resolve(resolve, memory); render.Flush(true);
-    const auto* bytes = memory.TranslatePhysical<const uint8_t*>(resolve[XE_GPU_REG_RB_COPY_DEST_BASE]);
+    render.Resolve(resolve, physical_memory); render.Flush(true);
+    const auto* bytes = memory.TranslatePhysical<const uint8_t*>(resolve[uint32_t(Register::RB_COPY_DEST_BASE)]);
     return std::vector<uint8_t>(bytes, bytes + 4096);
   };
   capture(); // Clear EDRAM before the first comparison.
   if (check_constants) {
     std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
     reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = PrimitiveType::kTriangleList;
-    draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
-    auto issue = [&](Shader* pixel) { render.Draw(draw, memory, vs, pixel, PrimitiveType::kTriangleList, 3, nullptr); };
+    draw[uint32_t(Register::VGT_DRAW_INITIATOR)] = initiator.value;
+    auto issue = [&](Shader* pixel) { render.Draw(draw, physical_memory, vs, pixel, PrimitiveType::kTriangleList, 3, nullptr); };
     issue(ps);
     const auto prior = render.performance(); issue(ps);
     Require(render.performance().constant_uploads[2] == prior.constant_uploads[2] &&
@@ -300,21 +320,21 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
         "constant test reference triangle did not render");
     auto* other_ps = load(false, RasterShader(false, 1));
     const std::array<float, 4> other_color{1, .75f, .5f, .25f};
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 257 * 4], other_color.data(), sizeof(other_color));
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 257 * 4], other_color.data(), sizeof(other_color));
     issue(other_ps); const auto second = capture();
     Require(first != second, "pixel shader constant maps did not change color");
     // Keep both pixel uploads alive across compute resolve roots, in one list.
-    issue(ps); render.Resolve(resolve, memory);
-    issue(other_ps); resolve[XE_GPU_REG_RB_COPY_DEST_BASE] += 4096; render.Resolve(resolve, memory);
+    issue(ps); render.Resolve(resolve, physical_memory);
+    issue(other_ps); resolve[uint32_t(Register::RB_COPY_DEST_BASE)] += 4096; render.Resolve(resolve, physical_memory);
     render.Flush(true);
-    Require(!std::memcmp(memory.TranslatePhysical(resolve[XE_GPU_REG_RB_COPY_DEST_BASE] - 4096), first.data(), first.size()) &&
-        !std::memcmp(memory.TranslatePhysical(resolve[XE_GPU_REG_RB_COPY_DEST_BASE]), second.data(), second.size()),
+    Require(!std::memcmp(memory.TranslatePhysical(resolve[uint32_t(Register::RB_COPY_DEST_BASE)] - 4096), first.data(), first.size()) &&
+        !std::memcmp(memory.TranslatePhysical(resolve[uint32_t(Register::RB_COPY_DEST_BASE)]), second.data(), second.size()),
         "queued draws overwrote earlier immutable pixel constants");
-    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] -= 4096;
-    draw[XE_GPU_REG_SQ_PS_CONST] = 0x000FF080;
-    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 128 * 4], other_color.data(), sizeof(other_color));
+    resolve[uint32_t(Register::RB_COPY_DEST_BASE)] -= 4096;
+    draw[uint32_t(Register::SQ_PS_CONST)] = 0x000FF080;
+    std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X) + 128 * 4], other_color.data(), sizeof(other_color));
     issue(ps); Require(capture() == second, "pixel constant bank reused stale packed bytes");
-    draw[XE_GPU_REG_SQ_PS_CONST] = 0x000FF100;
+    draw[uint32_t(Register::SQ_PS_CONST)] = 0x000FF100;
     std::cout << "PASS pixel constants: exact reuse, shader maps/banks and immutable pixels across compute roots\n";
   }
   const uint32_t indices_physical = memory.GetPhysicalAddress(index_storage);
@@ -337,23 +357,23 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
                      uint32_t reset = 0xFFFFFF) {
     std::memset(memory.TranslateVirtual(vertices), 0, 4096);
     std::memcpy(memory.TranslateVirtual<uint8_t*>(vertices) + minimum * 16, triangle, sizeof(triangle));
-    draw[XE_GPU_REG_VGT_INDX_OFFSET] = uint32_t(offset);
-    draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = minimum; draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = maximum;
+    draw[uint32_t(Register::VGT_INDX_OFFSET)] = uint32_t(offset);
+    draw[uint32_t(Register::VGT_MIN_VTX_INDX)] = minimum; draw[uint32_t(Register::VGT_MAX_VTX_INDX)] = maximum;
     reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = primitive;
-    draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+    draw[uint32_t(Register::VGT_DRAW_INITIATOR)] = initiator.value;
     reg::PA_SU_SC_MODE_CNTL mode{}; mode.multi_prim_ib_ena = restart;
-    draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = mode.value;
-    draw[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = reset;
+    draw[uint32_t(Register::PA_SU_SC_MODE_CNTL)] = mode.value;
+    draw[uint32_t(Register::VGT_MULTI_PRIM_IB_RESET_INDX)] = reset;
     // An unaligned copy intentionally selects the existing CPU-normalized
     // path. It is the byte-for-byte reference for the identical guest indices.
     auto cpu = encode(indices, format, endian, true);
-    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &cpu);
+    render.Draw(draw, physical_memory, vs, ps, primitive, uint32_t(indices.size()), &cpu);
     const auto expected = capture();
     Require(std::any_of(expected.begin(), expected.end(), [](uint8_t b) { return b != 0; }),
         "reference indexed triangle did not render");
     auto gpu = encode(indices, format, endian, false);
     const auto before = render.performance();
-    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &gpu);
+    render.Draw(draw, physical_memory, vs, ps, primitive, uint32_t(indices.size()), &gpu);
     const auto after = render.performance();
     const auto actual = capture();
     Require(actual == expected, "resident and normalized index pixels differ");
@@ -397,42 +417,42 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
 
   // A GPU producer updates the index bytes in the resident mirror. The draw
   // must consume them without waiting for their guest readback publication.
-  draw[XE_GPU_REG_VGT_INDX_OFFSET] = draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = 0;
-  draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF; draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = 0;
+  draw[uint32_t(Register::VGT_INDX_OFFSET)] = draw[uint32_t(Register::VGT_MIN_VTX_INDX)] = 0;
+  draw[uint32_t(Register::VGT_MAX_VTX_INDX)] = 0xFFFFFF; draw[uint32_t(Register::PA_SU_SC_MODE_CNTL)] = 0;
   reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = PrimitiveType::kTriangleList;
-  draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+  draw[uint32_t(Register::VGT_DRAW_INITIATOR)] = initiator.value;
   std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
   std::memset(memory.TranslateVirtual(index_storage), 0xCC, 16);
   RegisterFile producer;
-  producer[XE_GPU_REG_SQ_PROGRAM_CNTL] = draw[XE_GPU_REG_SQ_PROGRAM_CNTL];
-  producer[XE_GPU_REG_SQ_VS_CONST] = 0x000FF000;
-  producer[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF;
-  producer[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kNoOperation);
-  xe_gpu_memexport_stream_t stream{}; stream.base_address = indices_physical >> 2; stream.const_0x1 = 1;
+  producer[uint32_t(Register::SQ_PROGRAM_CNTL)] = draw[uint32_t(Register::SQ_PROGRAM_CNTL)];
+  producer[uint32_t(Register::SQ_VS_CONST)] = 0x000FF000;
+  producer[uint32_t(Register::VGT_MAX_VTX_INDX)] = 0xFFFFFF;
+  producer[uint32_t(Register::RB_MODECONTROL)] = uint32_t(EDRAMMode::kNoOperation);
+  MemExportStream stream{}; stream.base_address = indices_physical >> 2; stream.const_0x1 = 1;
   stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_16_16_16_16;
   stream.num_format = SurfaceNumberFormat::kUnsignedInteger; stream.const_0x4b0 = 0x4B0;
   stream.index_count = 1; stream.const_0x96 = 0x96;
-  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
-  producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 5] = std::bit_cast<uint32_t>(1.f);
+  std::memcpy(&producer[uint32_t(Register::SHADER_CONSTANT_000_X)], &stream, sizeof(stream));
+  producer[uint32_t(Register::SHADER_CONSTANT_000_X) + 5] = std::bit_cast<uint32_t>(1.f);
   const std::array<float, 4> produced{0, 1, 2, 0};
-  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], produced.data(), sizeof(produced));
+  std::memcpy(&producer[uint32_t(Register::SHADER_CONSTANT_000_X) + 8], produced.data(), sizeof(produced));
   auto* exporter = load(true, ExportShader());
-  render.Draw(producer, memory, exporter, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+  render.Draw(producer, physical_memory, exporter, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
   const auto before = render.performance();
   DrawIndices produced_indices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 8};
-  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &produced_indices);
+  render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &produced_indices);
   Require(render.performance().submissions == before.submissions, "GPU index consumer waited for CPU readback");
   const auto produced_pixels = capture();
   const std::array<uint16_t, 4> expected_indices{0, 1, 2, 0};
   Require(!std::memcmp(memory.TranslatePhysical(indices_physical), expected_indices.data(), 8), "GPU index producer bytes");
   const auto cpu = encode(strip, IndexFormat::kInt16, Endian::kNone, true);
-  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &cpu);
+  render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &cpu);
   Require(capture() == produced_pixels, "GPU-produced resident indices differ from CPU-normalized pixels");
   for (const auto invalid : {DrawIndices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 5},
                             DrawIndices{IndexFormat::kInt32, Endian::kNone, 3, 0x1FFFFFF8, 12},
                             DrawIndices{IndexFormat::kInt32, Endian::kNone, 2, indices_physical, 12}}) {
     bool rejected = false;
-    try { render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &invalid); }
+    try { render.Draw(draw, physical_memory, vs, ps, PrimitiveType::kTriangleList, 3, &invalid); }
     catch (const std::runtime_error&) { rejected = true; }
     Require(rejected, "resident indices bypassed extent validation");
   }
@@ -442,15 +462,18 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
       << " normalized/GPU pixel pairs, endian, offset/clamp, restart/conversion fallbacks, CPU writes, GPU producer, arenas and bounds\n";
 }
 void CheckResolveContracts(Render& render, RegisterFile& regs,
-    rex::memory::Memory& memory, uint32_t output) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, uint32_t output) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical=memory.GetPhysicalAddress(output)+65536;
   reg::RB_COPY_CONTROL control{}; control.copy_command=CopyCommand(1); control.color_clear_enable=1;
-  regs[XE_GPU_REG_RB_COPY_CONTROL]=control.value;
+  regs[uint32_t(Register::RB_COPY_CONTROL)]=control.value;
   auto resolve=[&](unsigned index,uint32_t clear) {
-    regs[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+index*4096;
-    regs[XE_GPU_REG_RB_COLOR_CLEAR]=clear;
-    regs[XE_GPU_REG_RB_COLOR_CLEAR_LO]=clear;
-    render.Resolve(regs,memory); render.Flush(false);
+    regs[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+index*4096;
+    regs[uint32_t(Register::RB_COLOR_CLEAR)]=clear;
+    regs[uint32_t(Register::RB_COLOR_CLEAR_LO)]=clear;
+    render.Resolve(regs, physical_memory); render.Flush(false);
   };
   constexpr uint32_t a=0x332211FF,b=0x11CC22FF;
   resolve(0,a); resolve(1,b); resolve(2,0);
@@ -472,14 +495,14 @@ void CheckResolveContracts(Render& render, RegisterFile& regs,
 void CheckHybridTransfers(Render& render) {
   render.Flush(true);
   auto original = render.ReadEdram();
-  for (uint32_t i = 0; i < xenos::kEdramSizeBytes / 4; ++i) {
+  for (uint32_t i = 0; i < xenos::kEDRAMSizeBytes / 4; ++i) {
     const uint32_t word = i * 1664525u + 1013904223u;
     std::memcpy(original.bytes.data() + i * 4, &word, 4);
   }
   render.WriteEdram(original);
   D3D12HybridColor hybrid(render);
   unsigned comparisons = 0;
-  for (unsigned msaa = 0; msaa < 3; ++msaa) for (unsigned base : {0u, xenos::kEdramTileCount-4}) {
+  for (unsigned msaa = 0; msaa < 3; ++msaa) for (unsigned base : {0u, xenos::kEDRAMTileCount-4}) {
     HybridColorKey key{base, (160u << (msaa == 2)) / 80, 160, 32, msaa, 3, 5, 157, 29};
     hybrid.Begin(key);
     hybrid.End();
@@ -500,15 +523,18 @@ void CheckHybridTransfers(Render& render) {
   std::cout << "PASS hybrid HDR transfers: " << comparisons
             << " whole-EDRAM byte comparisons, 7e3/alpha, MSAA, wrap, windows and cache eviction\n";
 }
-void CheckHybridDraws(rex::ui::d3d12::D3D12Provider& provider, rex::memory::Memory& memory) {
-  const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::memory::kSystemHeapPhysical);
+void CheckHybridDraws(rex::gpu::d3d12::D3D12Provider& provider, rex::kernel::TitleRuntime& runtime, const XenosSettings& settings) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
+  const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::kernel::kSystemHeapPhysical);
   Require(vertices!=0,"hybrid vertices");
   const float triangle[]{-1,-1,.5f,1, -1,3,.5f,1, 3,-1,.5f,1};
   std::memcpy(memory.TranslateVirtual(vertices),triangle,sizeof(triangle));
   std::vector<EdramSnapshot> expected;
   for (bool enabled:{false,true}) {
-    rex::cvar::SetFlagByName("native_d3d12_hybrid_color",enabled?"true":"false");
-    Render render(provider);
+    Require(bool(GetNativeSettings().d3d12_hybrid_color.Set(enabled)),"hybrid color setting");
+    Render render(provider,settings,watch);
     D3D12HybridColor classifier(render);
     auto load=[&](bool vertex) {
       auto code=RasterShader(vertex); for(auto& word:code) word=rex::byte_swap(word);
@@ -517,81 +543,81 @@ void CheckHybridDraws(rex::ui::d3d12::D3D12Provider& provider, rex::memory::Memo
     auto* vs=load(true); auto* ps=load(false);
     RegisterFile regs;
     reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg=2; program.ps_num_reg=1;
-    regs[XE_GPU_REG_SQ_PROGRAM_CNTL]=program.value;
-    regs[XE_GPU_REG_SQ_VS_CONST]=0x000FF000; regs[XE_GPU_REG_SQ_PS_CONST]=0x000FF100;
-    regs[XE_GPU_REG_VGT_MAX_VTX_INDX]=0xFFFFFF;
-    regs[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kColorDepth);
-    regs[XE_GPU_REG_RB_COLOR_MASK]=15;
-    xe_gpu_vertex_fetch_t fetch{}; fetch.type=FetchConstantType::kVertex;
+    regs[uint32_t(Register::SQ_PROGRAM_CNTL)]=program.value;
+    regs[uint32_t(Register::SQ_VS_CONST)]=0x000FF000; regs[uint32_t(Register::SQ_PS_CONST)]=0x000FF100;
+    regs[uint32_t(Register::VGT_MAX_VTX_INDX)]=0xFFFFFF;
+    regs[uint32_t(Register::RB_MODECONTROL)]=uint32_t(EDRAMMode::kColorDepth);
+    regs[uint32_t(Register::RB_COLOR_MASK)]=15;
+    VertexFetch fetch{}; fetch.type=FetchConstantType::kVertex;
     fetch.address=memory.GetPhysicalAddress(vertices)>>2; fetch.size=12;
-    regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]=fetch.dword_0;
-    regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1]=fetch.dword_1;
-    regs[XE_GPU_REG_PA_CL_VTE_CNTL]=0x3F;
+    regs[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)]=fetch.dword_0;
+    regs[uint32_t(Register::SHADER_CONSTANT_FETCH_00_1)]=fetch.dword_1;
+    regs[uint32_t(Register::PA_CL_VTE_CNTL)]=0x3F;
     auto fp=[&](unsigned reg,float value){regs[reg]=std::bit_cast<uint32_t>(value);};
-    fp(XE_GPU_REG_PA_CL_VPORT_XSCALE,16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET,16);
-    fp(XE_GPU_REG_PA_CL_VPORT_YSCALE,-16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET,16);
-    fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE,1);
-    regs[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR]=32|(32<<16);
-    regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL]=0x80000000|3|(5<<16);
-    regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]=29|(27<<16);
-    regs[XE_GPU_REG_PA_SU_VTX_CNTL]=1;
+    fp(uint32_t(Register::PA_CL_VPORT_XSCALE),16); fp(uint32_t(Register::PA_CL_VPORT_XOFFSET),16);
+    fp(uint32_t(Register::PA_CL_VPORT_YSCALE),-16); fp(uint32_t(Register::PA_CL_VPORT_YOFFSET),16);
+    fp(uint32_t(Register::PA_CL_VPORT_ZSCALE),1);
+    regs[uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR)]=32|(32<<16);
+    regs[uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL)]=0x80000000|3|(5<<16);
+    regs[uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)]=29|(27<<16);
+    regs[uint32_t(Register::PA_SU_VTX_CNTL)]=1;
     reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type=PrimitiveType::kTriangleList;
-    regs[XE_GPU_REG_VGT_DRAW_INITIATOR]=initiator.value;
+    regs[uint32_t(Register::VGT_DRAW_INITIATOR)]=initiator.value;
     reg::RB_BLENDCONTROL blend{}; blend.color_srcblend=blend.alpha_srcblend=BlendFactor::kOne;
-    regs[XE_GPU_REG_RB_BLENDCONTROL0]=blend.value;
+    regs[uint32_t(Register::RB_BLENDCONTROL0)]=blend.value;
     unsigned comparison=0;
     for(unsigned msaa=0;msaa<3;++msaa) for(unsigned format:{3u,12u}) for(unsigned mode=0;mode<4;++mode) {
       auto initial=render.ReadEdram(); std::fill(initial.bytes.begin(),initial.bytes.end(),0);
       initial.sample_counting=true;
       SampleCounts seed{}; seed.fill(0xFFFFFFF0u);
       render.WriteEdram(initial); render.SetSampleCounts(seed,false);
-      reg::RB_SURFACE_INFO surface{}; surface.surface_pitch=80; surface.msaa_samples=MsaaSamples(msaa);
-      regs[XE_GPU_REG_RB_SURFACE_INFO]=surface.value;
+      reg::RB_SURFACE_INFO surface{}; surface.surface_pitch=80; surface.msaa_samples=MSAASamples(msaa);
+      regs[uint32_t(Register::RB_SURFACE_INFO)]=surface.value;
       reg::RB_COLOR_INFO color{}; color.color_format=ColorRenderTargetFormat(format);
-      regs[XE_GPU_REG_RB_COLOR_INFO]=color.value;
+      regs[uint32_t(Register::RB_COLOR_INFO)]=color.value;
       reg::RB_DEPTH_INFO depth{}; depth.depth_base=1024; depth.depth_format=DepthRenderTargetFormat::kD24FS8;
-      regs[XE_GPU_REG_RB_DEPTH_INFO]=depth.value;
+      regs[uint32_t(Register::RB_DEPTH_INFO)]=depth.value;
       reg::RB_DEPTHCONTROL dc{}; dc.z_enable=mode==1; dc.z_write_enable=mode==1; dc.zfunc=CompareFunction::kGreater;
-      regs[XE_GPU_REG_RB_DEPTHCONTROL]=dc.value;
+      regs[uint32_t(Register::RB_DEPTHCONTROL)]=dc.value;
       reg::RB_COLORCONTROL cc{}; cc.alpha_func=mode==2?CompareFunction::kLess:CompareFunction::kAlways;
       cc.alpha_test_enable=mode==2; cc.alpha_to_mask_enable=mode==3;
-      regs[XE_GPU_REG_RB_COLORCONTROL]=cc.value;
-      fp(XE_GPU_REG_RB_ALPHA_REF,.5f);
+      regs[uint32_t(Register::RB_COLORCONTROL)]=cc.value;
+      fp(uint32_t(Register::RB_ALPHA_REF),.5f);
       // A retained span, a ROV route change, then a fresh import with a partial mask.
       for(unsigned draw=0;draw<3;++draw) {
-        regs[XE_GPU_REG_RB_COLOR_MASK]=draw==2?5:15;
+        regs[uint32_t(Register::RB_COLOR_MASK)]=draw==2?5:15;
         auto b=blend; if(draw==1) b.color_srcblend=BlendFactor::kZero;
-        regs[XE_GPU_REG_RB_BLENDCONTROL0]=b.value;
+        regs[uint32_t(Register::RB_BLENDCONTROL0)]=b.value;
         if(!draw) {
           Require(classifier.Classify(regs,15).has_value(),"hybrid fixture is ineligible");
           Require(!classifier.Classify(regs,0) && !classifier.Classify(regs,255),"hybrid accepted disabled or multiple targets");
           auto unsupported=regs;
-          unsupported[XE_GPU_REG_RB_COLOR_INFO]=0;
+          unsupported[uint32_t(Register::RB_COLOR_INFO)]=0;
           Require(!classifier.Classify(unsupported,15),"hybrid accepted a format without a bridge");
-          unsupported=regs; unsupported[XE_GPU_REG_RB_BLENDCONTROL0]=0;
+          unsupported=regs; unsupported[uint32_t(Register::RB_BLENDCONTROL0)]=0;
           Require(!classifier.Classify(unsupported,15),"hybrid accepted unsupported blending");
           unsupported=regs;
           auto overlap=depth; overlap.depth_base=1;
           auto active=dc; active.z_enable=1;
-          unsupported[XE_GPU_REG_RB_DEPTH_INFO]=overlap.value;
-          unsupported[XE_GPU_REG_RB_DEPTHCONTROL]=active.value;
+          unsupported[uint32_t(Register::RB_DEPTH_INFO)]=overlap.value;
+          unsupported[uint32_t(Register::RB_DEPTHCONTROL)]=active.value;
           Require(!classifier.Classify(unsupported,15),"hybrid accepted overlapping depth/color tiles");
         }
         const std::array<float,4> value{draw?31.8f:.251f,.003f,1.234f,draw?.75f:.25f};
-        std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X+256*4],value.data(),sizeof(value));
-        render.Draw(regs,memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
+        std::memcpy(&regs[uint32_t(Register::SHADER_CONSTANT_000_X)+256*4],value.data(),sizeof(value));
+        render.Draw(regs, physical_memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
         if(!draw) {
-          render.Draw(regs,memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
+          render.Draw(regs, physical_memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
           render.Flush(false); // Retain the host surface across recording arenas.
         }
       }
       auto actual=render.ReadEdram();
       if(!enabled) {
         if(!mode) {
-          Require(std::any_of(actual.bytes.begin(),actual.bytes.begin()+xenos::kEdramSizeBytes,
+          Require(std::any_of(actual.bytes.begin(),actual.bytes.begin()+xenos::kEDRAMSizeBytes,
               [](uint8_t value){return value!=0;}),"hybrid reference draw produced no pixels");
           SampleCounts counts{};
-          std::memcpy(counts.data(),actual.bytes.data()+xenos::kEdramSizeBytes,sizeof(counts));
+          std::memcpy(counts.data(),actual.bytes.data()+xenos::kEDRAMSizeBytes,sizeof(counts));
           const uint32_t total=seed[0]+4u*26u*22u*(1u<<msaa);
           Require(counts[0]==total && counts[4]==total,"MSAA passing counter overflow differs");
         }
@@ -602,13 +628,16 @@ void CheckHybridDraws(rex::ui::d3d12::D3D12Provider& provider, rex::memory::Memo
       ++comparison;
     }
   }
-  rex::cvar::SetFlagByName("native_d3d12_hybrid_color","false");
+  Require(bool(GetNativeSettings().d3d12_hybrid_color.Set(false)),"reset hybrid color setting");
   memory.SystemHeapFree(vertices);
   std::cout<<"PASS hybrid/ROV draws: 24 whole-EDRAM/counter pairs, HDR formats, MSAA, alpha, depth, retained spans and route changes\n";
 }
 void CheckPendingContracts(Render& render, RegisterFile& regs,
-    rex::memory::Memory& memory, rex::graphics::Shader* vs, uint32_t output,
-    rex::ui::d3d12::D3D12Provider& provider) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, rex::gpu::Shader* vs, uint32_t output,
+    rex::gpu::d3d12::D3D12Provider& provider) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   const uint32_t physical=memory.GetPhysicalAddress(output);
   Microsoft::WRL::ComPtr<ID3D12Fence> gate;
   Require(SUCCEEDED(provider.GetDevice()->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&gate))),"test gate fence");
@@ -621,9 +650,9 @@ void CheckPendingContracts(Render& render, RegisterFile& regs,
     Require(SUCCEEDED(gate->Signal(1)),"release test gate");
   });
   auto draw=[&](uint32_t address,float value) {
-    regs[XE_GPU_REG_SHADER_CONSTANT_000_X]=(address>>2)|(1u<<30);
-    for(unsigned c=0;c<4;++c) regs[XE_GPU_REG_SHADER_CONSTANT_000_X+8+c]=std::bit_cast<uint32_t>(value);
-    render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+    regs[uint32_t(Register::SHADER_CONSTANT_000_X)]=(address>>2)|(1u<<30);
+    for(unsigned c=0;c<4;++c) regs[uint32_t(Register::SHADER_CONSTANT_000_X)+8+c]=std::bit_cast<uint32_t>(value);
+    render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
     render.Flush(false);
   };
   draw(physical,0.75f);
@@ -658,24 +687,27 @@ void CheckPendingContracts(Render& render, RegisterFile& regs,
   std::cout<<"PASS gated in-flight writebacks: disjoint read, ring reuse, CPU epochs, overlap order, counters, events\n";
 }
 void CheckStagingGrowth(Render& render, RegisterFile& regs,
-    rex::memory::Memory& memory, rex::graphics::Shader* vs) {
+    rex::kernel::TitleRuntime& runtime, const XenosSettings& settings, rex::gpu::Shader* vs) {
+  auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+  auto& physical_memory=runtime.GetPhysicalMemory();
+  auto& watch=runtime.GetPhysicalWriteWatch();
   constexpr uint32_t bytes=17u<<20;
-  const auto allocation=memory.SystemHeapAlloc(bytes,4096,rex::memory::kSystemHeapPhysical);
+  const auto allocation=memory.SystemHeapAlloc(bytes,4096,rex::kernel::kSystemHeapPhysical);
   Require(allocation!=0,"large staging allocation");
   std::memset(memory.TranslateVirtual(allocation),0xCD,bytes);
-  xe_gpu_memexport_stream_t stream;
-  std::memcpy(&stream,&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],16);
+  MemExportStream stream;
+  std::memcpy(&stream,&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],16);
   stream.base_address=memory.GetPhysicalAddress(allocation)>>2;
   stream.index_count=bytes/16;
-  std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-  render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+  std::memcpy(&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+  render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
   render.Flush(false);
   // Change the extent again before the first large staging buffer retires.
   stream.index_count=1;
-  std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-  render.Draw(regs,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+  std::memcpy(&regs[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+  render.Draw(regs, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
   render.CompleteGuestWrites(kGuestSyncPacket,0);
-  Require(!std::memcmp(memory.TranslateVirtual(allocation),&regs[XE_GPU_REG_SHADER_CONSTANT_000_X+8],16),"grown staging data");
+  Require(!std::memcmp(memory.TranslateVirtual(allocation),&regs[uint32_t(Register::SHADER_CONSTANT_000_X)+8],16),"grown staging data");
   const auto* result=memory.TranslateVirtual<const uint8_t*>(allocation);
   for(uint32_t i=16;i<bytes;++i) Require(result[i]==0xCD,"grown staging padding or offsets");
   memory.SystemHeapFree(allocation);
@@ -692,31 +724,46 @@ int main(int argc, char** argv) {
     const bool measured=argc<=5 || std::stoi(argv[5])!=0;
     Require(iterations>0,"positive iteration count");
     Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
-    rex::InitLogging((out/"runtime.log").string().c_str());
-    if (argc > 7) rex::cvar::SetFlagByName("native_pipeline_threads", argv[7]);
-    if (argc > 8) rex::cvar::SetFlagByName("native_d3d12_striped_sample_counts", argv[8]);
-    rex::cvar::SetFlagByName("native_stats", measured?"true":"false");
-    if (scale>1) {
-      rex::chrono::FrameTiming::ActivateNative();
-      rex::cvar::SetFlagByName("native_enhanced", "true");
-      rex::cvar::SetFlagByName("native_scale_x", std::to_string(scale));
-      rex::cvar::SetFlagByName("native_scale_y", std::to_string(scale));
+    std::vector<std::string> options{
+        "--app.user_root="+rex::string::PathToUTF8(out/"user"),
+        "--app.config_file=",
+        "--log.file_name="+rex::string::PathToUTF8(std::filesystem::absolute(out/"runtime.log")),
+        "--gpu.native.stats="+(measured?std::string("true"):std::string("false"))};
+    if(argc>7)options.emplace_back("--gpu.native.pipeline_threads="+std::string(argv[7]));
+    if(argc>8)options.emplace_back("--gpu.native.d3d12_striped_sample_counts="+std::string(argv[8]));
+    if(scale>1) {
+      options.emplace_back("--gpu.native.enhanced=true");
+      options.emplace_back("--gpu.native.scale_x="+std::to_string(scale));
+      options.emplace_back("--gpu.native.scale_y="+std::to_string(scale));
     }
-    rex::Runtime runtime(out, out/"user");
-    rex::RuntimeConfig config; config.tool_mode=true; config.kernel_init=rex::kernel::InitializeKernel;
-    Require(runtime.Setup(std::move(config))==0,"runtime setup");
+    auto* module=static_cast<rex::IModule*>(ReXCreateInterface(rex::IModule::kInterface.name,rex::IModule::kInterface.version));
+    Require(module!=nullptr,"linked Native module");
+    x360n::GPUProbeApp app(out,"rexgpu-native","native-d3d12",module);
+    const auto initialized=app.Init(rex::CLIArgList::Parse(options));
+    if(!initialized)throw std::runtime_error(initialized.error().GetDescription());
+    auto& driver=static_cast<rex::gpu::XenosGraphicsDriverBase&>(app.GetProbeDriver());
+    const auto surface=driver.SetSurface({});
+    if(!surface)throw std::runtime_error(surface.error().GetDescription());
+    const auto& settings=static_cast<const XenosSettings&>(driver);
+    if(scale>1)rex::chrono::FrameTiming::ActivateNative();
     Require(GetNativeQualitySettings().scale_x==scale,"requested Enhanced scale is inactive");
-    auto& memory=*runtime.memory();
-    auto provider=rex::ui::d3d12::D3D12Provider::Create();
-    Require(bool(provider),"D3D12 provider");
-
-    const auto output=memory.SystemHeapAlloc(1<<20,4096,rex::memory::kSystemHeapPhysical);
-    const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::memory::kSystemHeapPhysical);
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    Require(bool(runtime.GetTitlePaths().game_root.Set(out)),"benchmark game path");
+    Require(bool(runtime.GetTitlePaths().entry.Set(std::string{})),"benchmark entry path");
+    const auto loaded=runtime.Load();
+    if(!loaded)throw std::runtime_error(loaded.error().GetDescription());
+    auto& memory=static_cast<rex::kernel::GuestAddressSpace&>(runtime.GetGuestHeap());
+    auto& physical_memory=runtime.GetPhysicalMemory();
+    auto& watch=runtime.GetPhysicalWriteWatch();
+    auto* provider=static_cast<rex::gpu::d3d12::D3D12Provider*>(driver.GetProvider());
+    Require(provider!=nullptr,"requested graphics provider");
+    const auto output=memory.SystemHeapAlloc(1<<20,4096,rex::kernel::kSystemHeapPhysical);
+    const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::kernel::kSystemHeapPhysical);
     Require(output&&vertices,"physical allocations");
     const uint32_t physical=memory.GetPhysicalAddress(output);
     std::memset(memory.TranslateVirtual(output),0xCD,1<<20);
     {
-      Render render(*provider);
+      Render render(*provider,settings,watch);
       if (argc > 6 && std::string(argv[6]) == "contracts") {
         render.Flush(true);
         const auto before = render.performance().submissions;
@@ -734,44 +781,44 @@ int main(int argc, char** argv) {
       }
       RegisterFile draw, resolve;
       reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg=2; program.ps_num_reg=1;
-      draw[XE_GPU_REG_SQ_PROGRAM_CNTL]=program.value;
-      draw[XE_GPU_REG_VGT_MAX_VTX_INDX]=0xFFFFFF;
-      draw[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kNoOperation);
-      draw[XE_GPU_REG_SQ_VS_CONST]=0x000FF000; draw[XE_GPU_REG_SQ_PS_CONST]=0x000FF100;
-      xe_gpu_memexport_stream_t stream{}; stream.base_address=physical>>2; stream.const_0x1=1;
+      draw[uint32_t(Register::SQ_PROGRAM_CNTL)]=program.value;
+      draw[uint32_t(Register::VGT_MAX_VTX_INDX)]=0xFFFFFF;
+      draw[uint32_t(Register::RB_MODECONTROL)]=uint32_t(EDRAMMode::kNoOperation);
+      draw[uint32_t(Register::SQ_VS_CONST)]=0x000FF000; draw[uint32_t(Register::SQ_PS_CONST)]=0x000FF100;
+      MemExportStream stream{}; stream.base_address=physical>>2; stream.const_0x1=1;
       stream.const_0x4b000000=0x4B000000; stream.format=ColorFormat::k_32_32_32_32_FLOAT;
       stream.num_format=SurfaceNumberFormat::kFloat; stream.const_0x4b0=0x4B0;
       stream.index_count=1; stream.const_0x96=0x96;
       const std::array<float,4> data{.25f,.5f,.75f,1.f};
-      std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X],&stream,16);
-      draw[XE_GPU_REG_SHADER_CONSTANT_000_X+5]=std::bit_cast<uint32_t>(1.f);
-      std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X+8],data.data(),16);
+      std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)],&stream,16);
+      draw[uint32_t(Register::SHADER_CONSTANT_000_X)+5]=std::bit_cast<uint32_t>(1.f);
+      std::memcpy(&draw[uint32_t(Register::SHADER_CONSTANT_000_X)+8],data.data(),16);
       auto shader=ExportShader();
       for(auto& word:shader) word=rex::byte_swap(word);
       auto* vs=render.LoadShader(ShaderType::kVertex,shader.data(),uint32_t(shader.size()));
       const float xy[]{0,0,32,0,0,32}; std::memcpy(memory.TranslateVirtual(vertices),xy,sizeof(xy));
-      xe_gpu_vertex_fetch_t fetch{}; fetch.type=FetchConstantType::kVertex;
+      VertexFetch fetch{}; fetch.type=FetchConstantType::kVertex;
       fetch.address=memory.GetPhysicalAddress(vertices)>>2; fetch.size=6;
-      resolve[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]=fetch.dword_0;
-      resolve[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1]=fetch.dword_1;
-      resolve[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kCopy);
-      resolve[XE_GPU_REG_RB_SURFACE_INFO]=80;
-      resolve[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL]=0x80000000;
-      resolve[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]=32|(32<<16);
-      resolve[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR]=32|(32<<16);
-      resolve[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+4096;
-      resolve[XE_GPU_REG_RB_COPY_DEST_PITCH]=32|(32<<16);
-      resolve[XE_GPU_REG_RB_COPY_DEST_INFO]=uint32_t(TextureFormat::k_8_8_8_8)<<7;
+      resolve[uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)]=fetch.dword_0;
+      resolve[uint32_t(Register::SHADER_CONSTANT_FETCH_00_1)]=fetch.dword_1;
+      resolve[uint32_t(Register::RB_MODECONTROL)]=uint32_t(EDRAMMode::kCopy);
+      resolve[uint32_t(Register::RB_SURFACE_INFO)]=80;
+      resolve[uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL)]=0x80000000;
+      resolve[uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)]=32|(32<<16);
+      resolve[uint32_t(Register::PA_SC_SCREEN_SCISSOR_BR)]=32|(32<<16);
+      resolve[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+4096;
+      resolve[uint32_t(Register::RB_COPY_DEST_PITCH)]=32|(32<<16);
+      resolve[uint32_t(Register::RB_COPY_DEST_INFO)]=uint32_t(TextureFormat::k_8_8_8_8)<<7;
       reg::RB_COPY_CONTROL control{}; control.copy_command=CopyCommand(1);
-      resolve[XE_GPU_REG_RB_COPY_CONTROL]=control.value;
+      resolve[uint32_t(Register::RB_COPY_CONTROL)]=control.value;
       auto workload=[&](unsigned i) {
         if(mode=="resolve") {
-          resolve[XE_GPU_REG_RB_COPY_DEST_BASE]=physical+4096+(i%8)*4096;
-          render.Resolve(resolve,memory);
+          resolve[uint32_t(Register::RB_COPY_DEST_BASE)]=physical+4096+(i%8)*4096;
+          render.Resolve(resolve, physical_memory);
         } else if(mode!="none") {
           // Adjacent and overlapping writes, within and across submissions.
-          draw[XE_GPU_REG_SHADER_CONSTANT_000_X]=((physical+(i%8)*16)>>2)|(1u<<30);
-          render.Draw(draw,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
+          draw[uint32_t(Register::SHADER_CONSTANT_000_X)]=((physical+(i%8)*16)>>2)|(1u<<30);
+          render.Draw(draw, physical_memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
         } else render.SetSampleCounts({},false);
         if(mode!="batch") render.Flush(false);
         if(mode=="sync") render.SyncGuestRead(physical,128,0xFF);
@@ -816,30 +863,30 @@ int main(int argc, char** argv) {
           <<",\"vram_usage_bytes\":"<<video.CurrentUsage<<",\"vram_budget_bytes\":"<<video.Budget<<"}\n";
       std::cout<<"PASS "<<mode<<" iterations="<<iterations<<" wall_ms="<<wall<<" waits="<<counters.waits-before.waits<<"\n";
       if(argc>6 && std::string(argv[6])=="contracts") {
-        CheckPendingContracts(render,draw,memory,vs,output,*provider);
-        CheckStagingGrowth(render,draw,memory,vs);
-        CheckResolveContracts(render,resolve,memory,output);
-        CheckPipelineInitialization(*provider,memory,draw,resolve,out);
+        CheckPendingContracts(render,draw,runtime, settings,vs,output,*provider);
+        CheckStagingGrowth(render,draw,runtime, settings,vs);
+        CheckResolveContracts(render,resolve,runtime, settings,output);
+        CheckPipelineInitialization(*provider,runtime, settings,draw,resolve,out);
       }
       if(argc>6 && std::string(argv[6])=="cache-contracts")
-        CheckPipelineInitialization(*provider,memory,draw,resolve,out);
+        CheckPipelineInitialization(*provider,runtime, settings,draw,resolve,out);
       if(argc>6 && std::string(argv[6])=="texture-contracts")
-        CheckTextureViews(render,draw,memory,output);
+        CheckTextureViews(render,draw,runtime, settings,output);
       if(argc>6 && std::string(argv[6])=="index-contracts")
-        CheckResidentIndices(render,draw,resolve,memory,output);
+        CheckResidentIndices(render,draw,resolve,runtime, settings,output);
       if(argc>6 && std::string(argv[6])=="hybrid-contracts")
         CheckHybridTransfers(render);
       if(argc>6 && std::string(argv[6])=="constant-contracts") {
-        CheckConstantUploads(render,draw,memory,output);
-        CheckResidentIndices(render,draw,resolve,memory,output,true);
+        CheckConstantUploads(render,draw,runtime, settings,output);
+        CheckResidentIndices(render,draw,resolve,runtime, settings,output,true);
       }
     }
-    if(argc>6 && std::string(argv[6])=="hybrid-contracts") CheckHybridDraws(*provider,memory);
+    if(argc>6 && std::string(argv[6])=="hybrid-contracts") CheckHybridDraws(*provider,runtime, settings);
     if(argc>6) for(unsigned i=0;i<3;++i) {
-      Render recreated(*provider); recreated.SetSampleCounts({},false); recreated.Flush(false);
+      Render recreated(*provider,settings,watch); recreated.SetSampleCounts({},false); recreated.Flush(false);
     }
     memory.SystemHeapFree(output); memory.SystemHeapFree(vertices);
-    runtime.Shutdown(); rex::FlushLogging();
+    runtime.Unload(); app.Shutdown();
     return 0;
   } catch(const std::exception& error) {std::cerr<<"FAIL "<<error.what()<<"\n";return 1;}
 }

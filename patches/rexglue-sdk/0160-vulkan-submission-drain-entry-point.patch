@@ -1,10 +1,11 @@
---- a/include/rex/ui/vulkan/functions/device_1_0.inc
-+++ b/include/rex/ui/vulkan/functions/device_1_0.inc
-@@ -79,6 +79,7 @@
- XE_UI_VULKAN_FUNCTION(vkResetFences)
- XE_UI_VULKAN_FUNCTION(vkQueueBindSparse)
- XE_UI_VULKAN_FUNCTION(vkQueueSubmit)
-+XE_UI_VULKAN_FUNCTION(vkQueueWaitIdle)
- XE_UI_VULKAN_FUNCTION(vkUnmapMemory)
- XE_UI_VULKAN_FUNCTION(vkUpdateDescriptorSets)
- XE_UI_VULKAN_FUNCTION(vkWaitForFences)
+diff --git a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+--- a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
++++ b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+@@ -88,6 +88,7 @@
+ REX_VK_FUNCTION(vkResetFences)
+ REX_VK_FUNCTION(vkQueueBindSparse)
+ REX_VK_FUNCTION(vkQueueSubmit)
++REX_VK_FUNCTION(vkQueueWaitIdle)
+ REX_VK_FUNCTION(vkUnmapMemory)
+ REX_VK_FUNCTION(vkUpdateDescriptorSets)
+ REX_VK_FUNCTION(vkWaitForFences)

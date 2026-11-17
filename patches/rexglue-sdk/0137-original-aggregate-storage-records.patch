@@ -1,0 +1,243 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -99,6 +99,7 @@
+                                                            u32 title_id = 0xFFFFFFFF) override;
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContentAllTypes(
+       u32 device_id, u64 xuid, u32 title_filter = 0);
++  std::vector<u64> ListContentOwners(u32 device_id);
+   u32 GetContentAttributes(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output);
+   u32 GetContentMetadata(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output);
+   bool HasContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) override;
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -316,6 +316,30 @@
+   if (error && error != std::errc::no_such_file_or_directory)
+     REXSYS_WARN("Content title enumeration failed: {}", error.message());
+   return result;
++}
++
++std::vector<u64> ContentManager::ListContentOwners(u32 device_id) {
++  std::vector<u64> owners;
++  const auto* device = GetPlaceholderDevice(device_id);
++  if (!device || device->device_type != DeviceType::kHDD) return owners;
++  std::error_code error;
++  std::filesystem::directory_iterator entry(root_path_, error), end;
++  if (error == std::errc::no_such_file_or_directory) return owners;
++  if (error) throw std::filesystem::filesystem_error("content owners", root_path_, error);
++  for (; entry != end; ++entry) {
++    const auto name = rex::string::PathToUTF8(entry->path().filename());
++    if (name.size() != 16 || std::filesystem::is_symlink(entry->symlink_status()) || !entry->is_directory()) continue;
++    u64 owner = 0; bool valid = true;
++    for (const char c : name) {
++      const int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
++      if (digit < 0) { valid = false; break; }
++      owner = (owner << 4) | static_cast<u64>(digit);
++    }
++    if (valid) owners.push_back(owner);
++  }
++  std::sort(owners.begin(), owners.end());
++  owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
++  return owners;
+ }
+ 
+ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
+diff --git a/src/xam/xam_content_aggregate.cpp b/src/xam/xam_content_aggregate.cpp
+--- a/src/xam/xam_content_aggregate.cpp
++++ b/src/xam/xam_content_aggregate.cpp
+@@ -9,6 +9,8 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <array>
++#include <cstring>
+ #include "xam/xam_state.h"
+ #include "xam/xam_ui.h"
+ #include <rex/filesystem/file_system.h>
+@@ -38,6 +40,29 @@
+ 
+ using namespace rex::kernel;
+ 
++// Original aggregate ABI: package bytes at 0x148 and creation FILETIME at 0x150.
++struct AggregateRecord {
++  u8 data[sizeof(kernel::XCONTENT_AGGREGATE_DATA)];
++  be_u64 size;
++  be_u64 creation_time;
++  u8 reserved[584 - 0x158];
++};
++static_assert(sizeof(AggregateRecord) == 584);
++static_assert(offsetof(AggregateRecord, size) == 0x148);
++static_assert(offsetof(AggregateRecord, creation_time) == 0x150);
++
++void AppendAggregate(StaticItemList& items, const kernel::XCONTENT_AGGREGATE_DATA& data) {
++  auto* record = items.Append<AggregateRecord>();
++  REX_ASSERT(record != nullptr);
++  *record = {};
++  std::memcpy(record->data, &data, sizeof(data));
++  std::array<u8, 36> attributes{};
++  if (CurrentXAM().GetContentManager().GetContentAttributes(data, attributes.data()) == kernel::X_ERROR_SUCCESS) {
++    record->size = memory::load_and_swap<u64>(attributes.data() + 28);
++    record->creation_time = memory::load_and_swap<u64>(attributes.data() + 4);
++  }
++}
++
+ void AddODDContent(StaticItemList& items, rex::kernel::XContentType content_type) {
+   constexpr std::string_view kRoot = "game:\\Content\\0000000000000000";
+   auto* fs = (&CurrentTitle().file_system);
+@@ -56,22 +81,20 @@
+                  "????????????????");
+     if (contents) {
+       while (auto content_entry = (*contents)->Next()) {
+-        auto item = items.Append<kernel::XCONTENT_AGGREGATE_DATA>();
+-        REX_ASSERT(item != nullptr);
+-        if (item) {
+-          item->device_id = std::to_underlying(rex::xam::DummyDeviceID::kODD);
+-          item->content_type = content_type;
+-          item->SetDisplayName(string::ToUTF16(content_entry->name));
+-          item->SetFileName(content_entry->name);
+-          item->title_id = title_id;
+-        }
++        kernel::XCONTENT_AGGREGATE_DATA item{};
++        item.device_id = std::to_underlying(rex::xam::DummyDeviceID::kODD);
++        item.content_type = content_type;
++        item.SetDisplayName(string::ToUTF16(content_entry->name));
++        item.SetFileName(content_entry->name);
++        item.title_id = title_id;
++        AppendAggregate(items, item);
+       }
+     }
+   }
+ }
+ 
+ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 content_type,
+-                                              u32 title_filter, MappedU32 handle_out) {
++                                              u32 title_filter, MappedU32 handle_out) try {
+   REX_ASSERT(handle_out != nullptr);
+ 
+   auto device_info = device_id == 0 ? nullptr : rex::xam::GetPlaceholderDevice(device_id);
+@@ -79,13 +102,17 @@
+     return kernel::X_E_INVALIDARG;
+   }
+ 
+-  StaticItemList items(1, sizeof(kernel::XCONTENT_AGGREGATE_DATA));
++  StaticItemList items(1, sizeof(AggregateRecord));
+ 
+   if (content_type == 0xFFFFFFFFu) {
+     if (!device_info || device_info->device_type != rex::xam::DeviceType::kODD) {
+-      auto contents = CurrentXAM().GetContentManager().ListContentAllTypes(
+-          std::to_underlying(rex::xam::DummyDeviceID::kHDD), xuid, title_filter);
+-      for (const auto& content : contents) *items.Append<kernel::XCONTENT_AGGREGATE_DATA>() = content;
++      auto& manager = CurrentXAM().GetContentManager();
++      const auto hdd = std::to_underlying(rex::xam::DummyDeviceID::kHDD);
++      std::vector<u64> owners{xuid == ~u64{0} ? 0 : xuid};
++      if (!xuid) owners = manager.ListContentOwners(hdd);
++      for (u64 owner : owners)
++        for (const auto& content : manager.ListContentAllTypes(hdd, owner, title_filter))
++          AppendAggregate(items, content);
+     }
+   } else {
+   auto content_type_enum = static_cast<rex::kernel::XContentType>(content_type);
+@@ -105,22 +132,14 @@
+       auto contents = CurrentXAM().GetContentManager().ListContent(
+           std::to_underlying(rex::xam::DummyDeviceID::kHDD), xuid, content_type_enum, title_id);
+       for (const auto& content_data : contents) {
+-        auto item = items.Append<kernel::XCONTENT_AGGREGATE_DATA>();
+-        REX_ASSERT(item != nullptr);
+-        if (item) {
+-          *item = content_data;
+-        }
++        AppendAggregate(items, content_data);
+       }
+ 
+       if (profile_xuid != 0) {
+         auto common_datas = CurrentXAM().GetContentManager().ListContent(
+             std::to_underlying(rex::xam::DummyDeviceID::kHDD), 0, content_type_enum, title_id);
+         for (const auto& content_data : common_datas) {
+-          auto item = items.Append<kernel::XCONTENT_AGGREGATE_DATA>();
+-          REX_ASSERT(item != nullptr);
+-          if (item) {
+-            *item = content_data;
+-          }
++          AppendAggregate(items, content_data);
+         }
+       }
+     }
+@@ -140,7 +159,7 @@
+   auto result = CreateEnumerator(
+       &handle, EnumeratorInit{0xFF, 0xFE, 0x2000E, 0x20010, 0},
+       EnumeratorObject(
+-          1, sizeof(kernel::XCONTENT_AGGREGATE_DATA),
++          1, sizeof(AggregateRecord),
+           [items = std::move(items)](u32, u8* buffer_data, u32* written_count) mutable {
+             return items.Write(buffer_data, written_count);
+           }),
+@@ -158,7 +177,7 @@
+ 
+   *handle_out = handle;
+   return kernel::X_ERROR_SUCCESS;
+-}
++} catch (const std::filesystem::filesystem_error&) { return kernel::X_ERROR_ACCESS_DENIED; }
+ 
+ }  // namespace xam
+ }  // namespace rex
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -985,32 +985,53 @@
+         "0000000000000000/584108B7/Headers/000D0000",
+         "E000000000000001/584108B7/000D0000/owned"})
+       std::filesystem::create_directories(root / path);
++    std::ofstream(root / "E000000000000001/584108B7/000D0000/owned/payload", std::ios::binary).write("seven!!", 7);
+   });
+   fixture.RunOnGuestThread([&](Caller& caller) {
+     const auto handle_ptr = caller.Alloc(4), count_ptr = caller.Alloc(4);
+-    const auto buffer = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    const auto buffer = caller.Alloc(588);
++    caller.Store32(buffer + 584, 0xCAFEBABE);
+     auto query = [&](u64 owner, u32 title, u32 device = 1) {
+       REQUIRE(caller.XAM("XamContentAggregateCreateEnumerator", {owner, device, 0xFFFFFFFF, title, handle_ptr}) == 0);
+       const auto handle = caller.Load32(handle_ptr);
+       REQUIRE(handle != 0);
+       std::set<std::pair<u32, u32>> found;
+       bool ended = false;
++      unsigned records = 0;
+       for (unsigned i = 0; i < 8; ++i) {
+-        const auto result = caller.XAM("XamEnumerate", {handle, 0, buffer, sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA), count_ptr, 0});
++        const auto result = caller.XAM("XamEnumerate", {handle, 0, buffer, 584, count_ptr, 0});
+         if (result == rex::kernel::X_ERROR_NO_MORE_FILES) { ended = true; break; }
+         REQUIRE(result == 0);
+         REQUIRE(caller.Load32(count_ptr) == 1);
++        ++records;
+         const auto* item = reinterpret_cast<const rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + buffer);
+-        CHECK(static_cast<u64>(item->xuid) == owner);
++        if (owner) CHECK(static_cast<u64>(item->xuid) == (owner == ~u64{0} ? 0 : owner));
++        CHECK(caller.Load32(buffer + 584) == 0xCAFEBABE);
++        for (u32 offset = 0x158; offset < 584; offset += 4) CHECK(caller.Load32(buffer + offset) == 0);
++        const auto attributes = caller.Alloc(36);
++        REQUIRE(caller.XAM("XamContentGetAttributesInternal", {buffer, attributes, 0}) == 0);
++        CHECK(caller.Load32(buffer + 0x148) == caller.Load32(attributes + 28));
++        CHECK(caller.Load32(buffer + 0x14C) == caller.Load32(attributes + 32));
++        CHECK(caller.Load32(buffer + 0x150) == caller.Load32(attributes + 4));
++        CHECK(caller.Load32(buffer + 0x154) == caller.Load32(attributes + 8));
++        if (static_cast<u64>(item->xuid) == 0xE000000000000001ull) {
++          CHECK(caller.Load32(buffer + 0x148) == 0);
++          CHECK(caller.Load32(buffer + 0x14C) == 7);
++        }
+         found.emplace(static_cast<u32>(item->title_id), std::to_underlying(static_cast<rex::kernel::XContentType>(item->content_type)));
+       }
+       CHECK(ended);
++      if (!title && device == 1) {
++        if (owner == 0) CHECK(records == 3);
++        if (owner == ~u64{0}) CHECK(records == 2);
++      }
+       CHECK(caller.Kernel("NtClose", {handle}) == 0);
+       return found;
+     };
+     const std::set<std::pair<u32, u32>> shared{{0x584108B7, 0xD0000}, {0x12345678, 0x80000}};
+     const std::set<std::pair<u32, u32>> single{{0x584108B7, 0xD0000}};
+     CHECK(query(0, 0) == shared);
++    CHECK(query(~u64{0}, 0) == shared);
+     CHECK(query(0, 0x584108B7) == single);
+     CHECK(query(0xE000000000000001ull, 0) == single);
+     CHECK(query(1, 0).empty());

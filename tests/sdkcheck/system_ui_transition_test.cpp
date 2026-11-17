@@ -1,8 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/xam/title_lifecycle.h>
+#include <rex/xam/system_ui.h>
 #include "../../titles/dash_17559/src/system_ui_transition.h"
 #include <vector>
 
@@ -37,14 +38,11 @@ void Compose(PPCContext& ctx, uint8_t*) {
 
 TEST_CASE("Retail 17559 closing keeps composing until the original HUD completes",
           "[sdk][guide-transition]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-  auto* memory = rt.memory();
-  const auto flags = rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit;
-  const auto rw = rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite;
+  rex::test::KernelFixture fixture;
+  auto& rt = fixture.GetRuntime();
+  auto* memory = &rex::kernel::GetAddressSpace(rt);
+  const auto flags = rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit;
+  const auto rw = rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite;
   for (const auto address : {0x815F0000u, 0x81AA0000u})
     REQUIRE(memory->LookupHeap(address)->AllocFixed(address, 0x10000, 0x10000, flags, rw));
   auto put = [&](uint32_t address, uint32_t value) {
@@ -53,8 +51,8 @@ TEST_CASE("Retail 17559 closing keeps composing until the original HUD completes
   auto read = [&](uint32_t address) {
     return rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(address));
   };
-  auto* dispatcher = rt.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x81600000, 0x300000, 0x81600000, 0x300000, true, true));
+  auto* dispatcher = &rex::kernel::GetFunctionDispatcher(rt);
+  REQUIRE(dispatcher->InitializeFunctionTable(0x81600000, 0x300000, 0x81600000, 0x300000, false, true));
   REQUIRE(dispatcher->SetFunction(0x81695880, Close));
   REQUIRE(dispatcher->SetFunction(0x81695868, Open));
   REQUIRE(dispatcher->SetFunction(0x81842110, Ready));
@@ -63,7 +61,7 @@ TEST_CASE("Retail 17559 closing keeps composing until the original HUD completes
   state.hud = memory->SystemHeapAlloc(128);
   REQUIRE(state.hud);
   probe = &state;
-  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  auto* xam = &REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI();
   REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x913E5930, 0}) == 0);
   REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
   REQUIRE(xam->SetSystemUiVisible(0x1000));
@@ -80,11 +78,10 @@ TEST_CASE("Retail 17559 closing keeps composing until the original HUD completes
   SECTION("an original failure terminates rather than waiting forever") { state.result = 0x80004005; }
   SECTION("absent or already hidden background completes immediately") { state.result = 0; }
   put(0x81AA21BC, keep_fade ? 1 : 0);
-  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      rt.kernel_state(), 128 * 1024, 0, [&] {
+  fixture.RunOnGuestThread([&](rex::test::Caller&) {
     dash17559::SystemUiCloseTransition transition;
     CHECK_FALSE(transition.started());
-    auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
+    auto* thread = rex::kernel::ThreadState::Get();
     CHECK(dash17559::BeginGuideBackground(rt, thread, state.hud) == 0x8000000A);
     CHECK(state.calls == std::vector<char>{'O'});
     CHECK(read(0x81AA21B8) == 0x3F000000);
@@ -114,11 +111,7 @@ TEST_CASE("Retail 17559 closing keeps composing until the original HUD completes
     }
     // The host may now release the app/session and publish the title frame.
     CHECK(xam->EndSystemUi(0x1000));
-    return 0;
-  }));
-  REQUIRE(caller->Create() == 0);
-  uint64_t timeout = uint64_t(-50'000'000ll);
-  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+  });
   CHECK_FALSE(xam->GetSystemUiSession().visible);
   probe = nullptr;
   memory->SystemHeapFree(state.hud);

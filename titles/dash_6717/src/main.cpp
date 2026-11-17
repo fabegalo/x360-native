@@ -4,4 +4,4 @@
 
 #include "dash_6717_app.h"
 
-REX_DEFINE_APP(dash_6717, Dash6717App::Create)
+REX_TITLE_APP(Dash6717App)

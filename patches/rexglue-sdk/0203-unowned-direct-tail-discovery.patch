@@ -1,76 +1,238 @@
+diff --git a/src/codegen/function_types.h b/src/codegen/function_types.h
+--- a/src/codegen/function_types.h
++++ b/src/codegen/function_types.h
+@@ -273,6 +273,7 @@
+   u8 index_register;        /**< Register holding the switch index */
+   std::vector<u32> targets; /**< Resolved case targets, internal labels */
+   bool dispatch_by_target = false; /**< A finite CTR domain, not a table of slots. */
++  u32 table_byte_length = 0; /**< Backing bytes actually consumed, before target filtering. */
+ };
+ 
+ /** Internal jump awaiting resolution. */
+diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
+--- a/src/codegen/function_scanner.cpp
++++ b/src/codegen/function_scanner.cpp
+@@ -661,6 +661,9 @@
+     return std::nullopt;
+   }
+ 
++  const u32 entry_size = table_type == JumpTableType::kAbsolute ? 4 :
++                         table_type == JumpTableType::kShortOffset ? 2 : 1;
++  jt.table_byte_length = static_cast<u32>(jt.targets.size()) * entry_size;
+   REXCG_TRACE("detectJumpTable: bctr=0x{:08X} table=0x{:08X} entries={} funcEnd=0x{:08X}",
+               bctr_addr, table_addr, jt.targets.size(), func_end);
+   return jt;
 diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
 --- a/src/codegen/phase_gapfill.cpp
 +++ b/src/codegen/phase_gapfill.cpp
-@@ -11,9 +11,11 @@
+@@ -11,6 +11,8 @@
  
+ #include "ppc/disasm.h"
  #include "ppc/instruction.h"
- #include "decoded_binary.h"
-+#include "codegen_flags.h"
- 
- #include <unordered_set>
- #include <map>
++#include "decoded_binary.h"
 +#include <set>
  
- #include <rex/codegen/phases.h>
- #include "phase_helpers.h"
-@@ -270,6 +272,52 @@
+ #include <algorithm>
+ #include <array>
+@@ -286,14 +288,201 @@
    }
  }
  
-+// A linear gap can start with a tail wrapper and hide later independent
-+// entries. Once gap ownership is known, only explicit unconditional external
-+// branches may seed still-unowned executable targets. Never split an existing
-+// body, a jump-table case, or a hole protected by original/declared metadata.
-+void discoverUnownedTailTargets(CodegenContext& ctx) {
-+  auto& graph = ctx.graph;
-+  std::map<uint32_t, uint32_t> declaredEnds;
-+  for (const auto& [start, size] : ctx.scan.pdataSizes) {
++std::map<u32, u32> DeclaredFunctionEnds(CodegenContext& ctx) {
++  std::map<u32, u32> declaredEnds;
++  for (const auto& [start, size] : ctx.scan.pdata_sizes) {
 +    if (size && start + size > start) declaredEnds[start] = start + size;
 +  }
-+  for (const auto& [start, config] : ctx.Config().functions) {
-+    const auto size = config.getSize(start);
++  for (const auto& [start, config] : ctx.GetConfig().functions) {
++    const auto size = config.GetSize(start);
 +    if (size && start + size > start)
 +      declaredEnds[start] = std::max(declaredEnds[start], start + size);
 +  }
-+  uint32_t end = 0;
++  u32 end = 0;
 +  for (auto& [start, limit] : declaredEnds) {
 +    end = std::max(end, limit);
 +    limit = end;
 +  }
-+  const auto maxIterations = REXCVAR_GET(max_discovery_iterations);
-+  for (uint32_t iteration = 0; iteration < maxIterations; ++iteration) {
-+    std::set<uint32_t> targets;
-+    for (const auto& [start, node] : graph.functions()) {
-+      for (const auto& jump : node->unresolvedJumps()) {
-+        if (jump.isCall || jump.isConditional || graph.isEntryPoint(jump.target) ||
-+            graph.getFunctionContaining(jump.target) ||
-+            ctx.binary().isInImportExportRange(jump.target)) continue;
-+        const auto* branch = ctx.decoded().get(jump.site);
-+        const auto* target = ctx.decoded().get(jump.target);
++  return declaredEnds;
++}
++
++void DiscoverUnownedTailTargets(CodegenContext& ctx) {
++  auto& graph = ctx.graph;
++  const auto declaredEnds = DeclaredFunctionEnds(ctx);
++  const auto maxIterations = ctx.GetLimits().max_discovery_iterations;
++  for (u32 iteration = 0; iteration < maxIterations; ++iteration) {
++    std::set<u32> targets;
++    for (const auto& [start, node] : graph.GetFunctions()) {
++      for (const auto& jump : node->GetUnresolvedJumps()) {
++        if (jump.is_call || jump.is_conditional || graph.IsEntryPoint(jump.target) ||
++            graph.GetFunctionContaining(jump.target) ||
++            ctx.GetBinary().IsInImportExportRange(jump.target)) continue;
++        const auto* branch = ctx.GetDecoded().FindInsn(jump.site);
++        const auto* target = ctx.GetDecoded().FindInsn(jump.target);
 +        if (!branch || branch->opcode != Opcode::b || !target ||
 +            target->opcode == Opcode::kUnknown ||
-+            !ctx.decoded().regionContaining(jump.target)) continue;
++            !ctx.GetDecoded().FindRegionContaining(jump.target)) continue;
 +        auto owner = declaredEnds.upper_bound(jump.target);
 +        if (owner != declaredEnds.begin() && std::prev(owner)->second > jump.target) continue;
 +        targets.insert(jump.target);
 +      }
 +    }
-+    for (uint32_t target : targets)
-+      graph.addFunction(target, 4, FunctionAuthority::DISCOVERED, true);
-+    const auto known = buildKnownFunctions(graph);
-+    const auto discovered = discoverPendingFunctions(ctx, known);
++    for (u32 target : targets)
++      graph.AddFunction(target, 4, FunctionAuthority::kDiscovered, true);
++    const auto known = BuildKnownFunctions(graph);
++    const auto discovered = DiscoverPendingFunctions(ctx, known);
 +    if (targets.empty() && !discovered) break;
++  }
++}
++
++void DiscoverReferencedEntries(CodegenContext& ctx) {
++  auto& graph = ctx.graph;
++  auto& decoded = ctx.GetDecoded();
++  const auto declaredEnds = DeclaredFunctionEnds(ctx);
++  std::set<u32> targets;
++  const u64 imageEnd = u64(ctx.GetBinary().GetBaseAddress()) + ctx.GetBinary().GetImageSize();
++  const auto terminates = [](u32 word) {
++    return word == 0x4E800020 || word == 0x4E800420 ||
++           (word & 0xFC000003) == 0x48000000;
++  };
++  // Executable sections may also contain inline switch data. A decoded
++  // pointer word can resemble lwz, and the next case can contain blr; neither
++  // turns the table itself into a callable entry. Preserve its exact byte span.
++  std::map<u32, u64> tableEnds;
++  for (const auto& [address, function] : graph.GetFunctions()) {
++    (void)address;
++    for (const auto& table : function->GetJumpTables()) {
++      if (!table.table_byte_length) continue;
++      auto& end = tableEnds[table.table_address];
++      end = std::max(end, u64(table.table_address) + table.table_byte_length);
++    }
++  }
++  u64 tableEnd = 0;
++  for (auto& [address, end] : tableEnds) {
++    (void)address;
++    tableEnd = std::max(tableEnd, end);
++    end = tableEnd;
++  }
++  const auto consider = [&](u32 target) {
++    if (!target || (target & 3) || targets.contains(target) || graph.IsEntryPoint(target) ||
++        ctx.GetBinary().IsInImportExportRange(target)) return;
++    auto table = tableEnds.upper_bound(target);
++    if (table != tableEnds.begin() && std::prev(table)->second > target) return;
++    const auto* region = decoded.FindRegionContaining(target);
++    if (!region) return;
++    const auto* containing = graph.GetFunctionContaining(target);
++    if (containing && containing->GetAuthority() != FunctionAuthority::kGapFill &&
++        containing->GetAuthority() != FunctionAuthority::kDiscovered) return;
++    auto owner = declaredEnds.upper_bound(target);
++    if (owner != declaredEnds.begin() && std::prev(owner)->second > target) return;
++    const auto previous = decoded.Read<u32>(target - 4);
++    if (!previous || (*previous != 0 && !terminates(*previous))) return;
++    // A referenced shared tail may be longer than the short linear prefix.
++    // Its existing inferred CFG already proves a block boundary reached by
++    // a direct, non-linking tail branch. Keep authoritative extents protected.
++    const auto* predecessor = decoded.FindInsn(target - 4);
++    if (containing && predecessor && predecessor->opcode == Opcode::b &&
++        predecessor->branch_target == target) {
++      for (const auto& block : containing->GetBlocks()) {
++        if (block.base == target) {
++          targets.insert(target);
++          return;
++        }
++      }
++    }
++    if (containing && containing->GetAuthority() != FunctionAuthority::kGapFill) return;
++    // The analysis table omits non-control opcodes such as lwarx/stwcx. and
++    // mfmsr/mtmsrd, and two in a row end a decoded region. Bound the prefix by
++    // its section instead; stop on padding and words the emitter cannot decode.
++    bool bounded = false;
++    for (u32 word = 0; word < 64; ++word) {
++      const u64 address = u64(target) + word * 4;
++      if (address >= imageEnd || (word && graph.IsEntryPoint(u32(address))) ||
++          ctx.GetBinary().IsInImportExportRange(u32(address))) break;
++      const auto* instruction = decoded.FindInsn(u32(address));
++      if (!instruction) break;
++      const u32 code = instruction->code;
++      if (code == 0 || code == 0xFFFFFFFF) break;
++      if (instruction->opcode == Opcode::kUnknown) break;
++      if (terminates(code)) { bounded = true; break; }
++    }
++    if (bounded) targets.insert(target);
++  };
++  for (const auto& section : ctx.GetBinary().GetSections()) {
++    if (section.executable || !section.data || section.base_address >= imageEnd) continue;
++    const u64 limit = std::min<u64>(section.size, imageEnd - section.base_address);
++    const u32 first = (4 - (section.base_address & 3)) & 3;
++    for (u64 offset = first; offset + 4 <= limit; offset += 4) {
++      const u32 target = memory::load<be_u32>(section.data + offset);
++      consider(target);
++    }
++  }
++  // Unlike the disabled broad function-pointer scan, only accept a bounded
++  // materialization inside one discovered block and an independently validated
++  // entry without authoritative ownership. Unknown instructions or source writes stop the search.
++  for (const auto& [functionAddress, function] : graph.GetFunctions()) {
++    (void)functionAddress;
++    for (const auto& block : function->GetBlocks()) {
++      for (u32 address = block.base; address < block.GetEnd(); address += 4) {
++        const auto* instruction = decoded.FindInsn(address);
++        if (!instruction) continue;
++        const u32 word = instruction->code;
++        const u32 primary = word >> 26;
++        if (primary != 14 && primary != 24) continue;  // addi or ori
++        const bool useOr = primary == 24;
++        const u32 source = useOr ? ((word >> 21) & 31) : ((word >> 16) & 31);
++        if (!useOr && !source) continue;  // li has no register input
++        for (u32 distance = 1; distance <= 8 &&
++             u64(block.base) + distance * 4 <= address; ++distance) {
++          const auto* previous = decoded.FindInsn(address - distance * 4);
++          if (!previous) break;
++          const u32 code = previous->code;
++          if ((code & 0xFC1F0000) == 0x3C000000 && ((code >> 21) & 31) == source) {
++            const u32 high = u32(i32(i16(code & 0xFFFF))) << 16;
++            consider(useOr ? high | (word & 0xFFFF) :
++                            high + u32(i32(i16(word & 0xFFFF))));
++            break;
++          }
++          bool preserved = false;
++          switch (code >> 26) {
++            case 14: case 15: case 32: case 34: case 40: case 42:
++              preserved = ((code >> 21) & 31) != source; break;
++            case 20: case 21: case 23: case 24: case 25:
++              preserved = ((code >> 16) & 31) != source; break;
++            case 10: case 11: case 36: case 38: case 44: case 48: case 50:
++              preserved = true; break;  // compares, plain stores, plain FPR loads
++            case 31:
++              preserved = (code & 0xFC0007FE) == 0x7C000378 &&
++                          ((code >> 16) & 31) != source; break;  // or / mr
++            default: break;  // branches, calls, update forms and unknown effects
++          }
++          if (!preserved) break;
++        }
++      }
++    }
++  }
++  for (u32 target : targets)
++    graph.AddFunction(target, 4, FunctionAuthority::kDiscovered, true);
++  const auto maxIterations = ctx.GetLimits().max_discovery_iterations;
++  for (u32 iteration = 0; iteration < maxIterations; ++iteration) {
++    const auto known = BuildKnownFunctions(graph);
++    if (!DiscoverPendingFunctions(ctx, known)) break;
 +  }
 +}
 +
  }  // anonymous namespace
  
- namespace phases {
-@@ -284,6 +332,7 @@
-   REXCODEGEN_TRACE("Analyze: discovered blocks for {} gap-filled functions", discovered);
+ namespace detail {
  
-   cleanupAbsorbedGapFills(ctx);
-+  discoverUnownedTailTargets(ctx);
+ [[nodiscard]] Result<void> GapFill(CodegenContext& ctx, IProgressReporter* reporter) {
+   (void)reporter;
++  DiscoverReferencedEntries(ctx);
++  DiscoverUnownedTailTargets(ctx);
+   GapFillCodeRegions(ctx);
+   CleanupAbsorbedGapFills(ctx);
++  DiscoverReferencedEntries(ctx);
++  CleanupAbsorbedGapFills(ctx);
++  DiscoverUnownedTailTargets(ctx);
  
    return Ok();
  }

@@ -6,13 +6,13 @@
 namespace x360n::native {
 class VulkanBackend final : public ScanoutBackend {
  public:
-  explicit VulkanBackend(rex::ui::vulkan::VulkanProvider& provider)
-      : provider_(provider), scanout_(provider) {
-    const auto& properties = provider.vulkan_device()->properties();
+  explicit VulkanBackend(rex::gpu::vulkan::VulkanProvider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch)
+      : provider_(provider), settings_(settings), watch_(watch), scanout_(provider) {
+    const auto& properties = provider.GetVulkanDevice()->GetProperties();
     if (!properties.fragmentShaderSampleInterlock || !properties.fragmentStoresAndAtomics)
       throw std::runtime_error("Native Vulkan: EDRAM requires fragment sample interlock and fragment storage writes");
   }
-  void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
+  void Present(rex::gpu::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
       const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect post_effect) override {
     ScanoutTexture output = texture;
     const VkBuffer scaled = FinishGuestFrame(texture, output);
@@ -33,16 +33,16 @@ class VulkanBackend final : public ScanoutBackend {
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) override {
     if (render_) render_->SyncGuestRead(address, length, opcode);
   }
-  rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type,
+  rex::gpu::Shader* LoadShader(rex::xenos::ShaderType type,
       const uint32_t* data, uint32_t count) override {
     return Render().LoadShader(type, data, count);
   }
-  void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory,
-      rex::graphics::Shader* vs, rex::graphics::Shader* ps,
-      rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) override {
+  void Draw(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory,
+      rex::gpu::Shader* vs, rex::gpu::Shader* ps,
+      rex::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) override {
     Render().Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
   }
-  void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override {
+  void Resolve(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory) override {
     Render().Resolve(regs, memory);
   }
   SampleCounts ReadSampleCounts(bool counting_after) override {
@@ -82,19 +82,21 @@ class VulkanBackend final : public ScanoutBackend {
   }
   VulkanRender& Render() {
     if (!render_) {
-      render_ = std::make_unique<VulkanRender>(provider_);
+      render_ = std::make_unique<VulkanRender>(provider_, settings_, watch_);
       render_->SetPipelineDirectory(pipeline_directory_);
     }
     return *render_;
   }
-  rex::ui::vulkan::VulkanProvider& provider_;
+  rex::gpu::vulkan::VulkanProvider& provider_;
+  const rex::gpu::XenosSettings& settings_;
+  rex::IPhysicalWriteWatch& watch_;
   VulkanScanout scanout_;
   std::unique_ptr<VulkanRender> render_;
   std::filesystem::path pipeline_directory_;
 };
-std::unique_ptr<ScanoutBackend> CreateVulkanScanout(rex::ui::GraphicsProvider& provider) {
-  auto* vulkan = dynamic_cast<rex::ui::vulkan::VulkanProvider*>(&provider);
+std::unique_ptr<ScanoutBackend> CreateVulkanScanout(rex::gpu::GraphicsProvider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch) {
+  auto* vulkan = dynamic_cast<rex::gpu::vulkan::VulkanProvider*>(&provider);
   if (!vulkan) throw std::invalid_argument("Native Vulkan requires a Vulkan provider");
-  return std::make_unique<VulkanBackend>(*vulkan);
+  return std::make_unique<VulkanBackend>(*vulkan, settings, watch);
 }
 }

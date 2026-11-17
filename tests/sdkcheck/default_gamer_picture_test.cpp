@@ -1,11 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/runtime.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/kernel/init.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/system/xam/user_profile.h>
+#include <rex/filesystem/file_system.h>
+#include <rex/xam/user_profile.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/kernel/title_runtime.h>
+#include "kernel/kernel_fixture.h"
+#include "xam/xam_state.h"
+#include "kernel/title_state.h"
 #include <chrono>
 #include <fstream>
 #include <iterator>
@@ -56,22 +57,23 @@ TEST_CASE("Catalog gamer picture writes store the dashboard default from shrdres
   { std::ofstream out(system_root / "shrdres.xzp", std::ios::binary);
     out.write(reinterpret_cast<const char*>(archive.data()), archive.size()); }
   {
-    rex::Runtime rt(root, root);
-    rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    REQUIRE(rt.Setup(std::move(config)) == 0);
-    auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\SystemRoot", system_root, true);
-    REQUIRE(device->Initialize());
-    REQUIRE(rt.file_system()->RegisterDevice(std::move(device)));
-    REQUIRE(rt.file_system()->RegisterSymbolicLink("media:", "\\SystemRoot"));
-    auto* profiles = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, root);
+    auto& fs = rex::xam::CurrentTitle().file_system;
+    rex::filesystem::MountEntry mount;
+    mount.path = "\\SystemRoot"; mount.source = system_root;
+    REQUIRE(fs.Mount(mount));
+    REQUIRE(fs.Link("media:", "\\SystemRoot"));
+    auto* profiles = &rex::xam::CurrentXAM().GetUserProfile();
     uint64_t xuid = 0;
     REQUIRE(profiles->CreateLocal("DefaultPic", &xuid) == 0);
     REQUIRE(profiles->SetLocalSession(xuid) == 0);
     const auto package = profiles->PackagePath(xuid);
-    auto* base = rt.memory()->virtual_membase();
     uint32_t stored = ~0u, missing = ~0u, invalid = ~0u, other_title = ~0u, out_of_range = ~0u;
-    auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(), 128 * 1024, 0, [&] {
+    uint32_t stored_error = 0;
+    bool retained_transaction = false;
+    std::string retained_stage;
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      auto* base = caller.GetBase();
       auto write = [&](uint32_t title, uint32_t index) {
         PPCContext ctx{};
         ctx.r3.u64 = 0; ctx.r4.u64 = title; ctx.r5.u64 = 0x20000 | index; ctx.r6.u64 = 0x10000 | index;
@@ -79,19 +81,20 @@ TEST_CASE("Catalog gamer picture writes store the dashboard default from shrdres
         return ctx.r3.u32;
       };
       stored = write(0xFFFE07D1, 3);
+      stored_error = caller.GetRuntime().GetThreadRegistry().GetCallingThread()->GetLastError();
+      retained_transaction = std::filesystem::exists(package / ".x360n-picture-update");
+      if (stored) retained_stage = picture_write_fixture::PictureStageDescription(package);
       missing = write(0xFFFE07D1, 1);
       invalid = write(0xFFFE07D1, 4);
       other_title = write(0x12345678, 3);
       out_of_range = write(0xFFFE07D1, 13);
-      return 0;
-    }));
-    REQUIRE(caller->Create() == 0); uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+    });
+    INFO("stored HRESULT=" << stored_error << "; retained transaction=" << retained_transaction << "; " << retained_stage);
     CHECK(stored == 0);
     CHECK(ReadBytes(package / "tile_64.png") == A64);
     CHECK(ReadBytes(package / "tile_32.png") == A32);
     CHECK_FALSE(std::filesystem::exists(package / "pp_64.png"));
-    const auto* key = static_cast<rex::system::xam::UserProfile::UnicodeSetting*>(profiles->GetSetting(0x4064000F));
+    const auto* key = static_cast<rex::xam::UserProfile::UnicodeSetting*>(profiles->GetSetting(0x4064000F));
     REQUIRE(key); CHECK(key->value == u"fffe07d10002000300010003");
     // Absent, corrupt, foreign and out-of-cache pictures fail and keep the stored one.
     CHECK(missing == 1627); CHECK(invalid == 1627); CHECK(other_title == 1627); CHECK(out_of_range == 1627);
@@ -106,11 +109,10 @@ extern "C" void __imp__XamBuildSharedSystemResourceLocator(PPCContext&, uint8_t*
 // locator; the guest name is big-endian and must reach the locator unchanged.
 TEST_CASE("Shared system resource locators keep the guest resource name",
           "[sdk][default-gamer-picture]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-  auto* memory = rt.memory(); auto* base = memory->virtual_membase();
-  const uint32_t block = memory->SystemHeapAlloc(1024); REQUIRE(block);
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  const auto block = caller.Alloc(1024); REQUIRE(block);
+  auto* base = caller.GetBase();
   const std::u16string name = u"64_fffe07d10002000300010003.png";
   for (size_t i = 0; i <= name.size(); ++i)
     rex::memory::store_and_swap<uint16_t>(base + block + 2 * i, i < name.size() ? name[i] : 0);
@@ -121,5 +123,5 @@ TEST_CASE("Shared system resource locators keep the guest resource name",
   for (uint32_t i = 0; uint16_t c = rex::memory::load_and_swap<uint16_t>(base + block + 256 + 2 * i); ++i)
     locator.push_back(c);
   CHECK(locator == u"file://media:/shrdres.xzp#64_fffe07d10002000300010003.png");
-  memory->SystemHeapFree(block);
+  });
 }

@@ -22,22 +22,18 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
-#include <rex/codegen/codegen.h>
-#include <rex/codegen/codegen_context.h>
-#include <rex/codegen/function_graph.h>
-#include <rex/codegen/function_node.h>
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/system/export_resolver.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xex_module.h>
+#include <format>
+#include "codegen/pipeline.h"
+#include "codegen/tool_runtime.h"
+#include <rex/kernel/export.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/object/module_object.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/title_runtime.h>
 
 #include "synthetic_xex.h"
 
-using rex::X_STATUS;  // X_STATUS_SUCCESS expands to a cast to it
+using rex::kernel::X_STATUS_SUCCESS;
 using namespace x360n::test;
 
 namespace {
@@ -54,28 +50,35 @@ constexpr const char* kGroup = "x360n_import_records_test";
 
 // The loader in tool mode, as the codegen and x360n-content use it.
 struct Loaded {
-  std::unique_ptr<rex::Runtime> runtime;
-  rex::runtime::XexModule* xex = nullptr;
+  std::unique_ptr<rex::codegen::ToolRuntime> tool;
+  rex::kernel::TitleRuntime* runtime = nullptr;
+  rex::kernel::Pinned<rex::kernel::ModuleObject> module;
+  rex::kernel::XEXModule* xex = nullptr;
 };
-Loaded Load(const Workdir& w) {
+Loaded Load(Workdir& w) {
   Loaded l;
-  l.runtime = std::make_unique<rex::Runtime>(w.dir);
-  rex::RuntimeConfig config{};
-  config.kernel_init = rex::kernel::InitializeKernel;
-  config.tool_mode = true;
-  REQUIRE(l.runtime->Setup(std::move(config)) == X_STATUS_SUCCESS);
-  REQUIRE(l.runtime->LoadXexImage("game:\\test.xex") == X_STATUS_SUCCESS);
-  auto module = l.runtime->kernel_state()->GetExecutableModule();
-  REQUIRE(module);
-  l.xex = module->xex_module();
+  auto opened = w.GetTools().Open(w.dir, "test.xex");
+  INFO((opened ? std::string{} : opened.error().GetDescription()));
+  REQUIRE(opened);
+  l.tool = std::make_unique<rex::codegen::ToolRuntime>(std::move(*opened));
+  l.runtime = &l.tool->GetRuntime();
+  auto handle = l.runtime->GetModuleRegistry().GetExecutable();
+  REQUIRE(handle);
+  l.module = l.runtime->GetObjectTable().Get<rex::kernel::ModuleObject>(*handle);
+  REQUIRE(l.module);
+  l.xex = l.module->GetXEX();
   REQUIRE(l.xex);
   return l;
 }
 
-void RequireExport(rex::Runtime* rt, uint16_t ordinal, rex::runtime::Export::Type type) {
-  auto* e = rt->export_resolver()->GetExportByOrdinal("xam.xex", ordinal);
+const rex::kernel::ExportEntry* RequireExport(uint16_t ordinal,
+    rex::kernel::ExportType type = rex::kernel::ExportType::kFunction) {
+  const auto table = rex::kernel::ModuleFromName("xam.xex");
+  REQUIRE(table);
+  auto* e = rex::kernel::FindByOrdinal(*table, ordinal);
   REQUIRE(e);
   REQUIRE(e->type == type);
+  return e;
 }
 
 // PPCFuncMappings from <project>_init.cpp, read the way Runtime::Setup reads the array:
@@ -146,12 +149,12 @@ TEST_CASE("a function import split over two library records keeps its slot and t
 
   SECTION("the loader pairs the two halves into one import") {
     auto l = Load(w);
-    RequireExport(l.runtime.get(), kFnSplit, rex::runtime::Export::Type::kFunction);
-    RequireExport(l.runtime.get(), kVar, rex::runtime::Export::Type::kVariable);
-    REQUIRE(l.xex->import_libraries()->size() == 2);  // both library records are kept
+    RequireExport(kFnSplit, rex::kernel::ExportType::kFunction);
+    RequireExport(kVar, rex::kernel::ExportType::kVariable);
+    REQUIRE(l.xex->GetImportLibraries().size() == 2);  // both library records are kept
 
     size_t entries = 0;
-    for (const auto& lib : *l.xex->import_libraries()) {
+    for (const auto& lib : l.xex->GetImportLibraries()) {
       for (const auto& imp : lib.imports) {
         if (imp.ordinal != kFnSplit) continue;
         ++entries;
@@ -162,8 +165,8 @@ TEST_CASE("a function import split over two library records keeps its slot and t
     CHECK(entries == 1);
 
     size_t symbols = 0;
-    const auto sym_name = fmt::format("xam@{}", kFnSplit);
-    for (const auto& sym : l.xex->binary_symbols()) {
+    const auto sym_name = std::format("xam@{}", kFnSplit);
+    for (const auto& sym : l.xex->GetBinarySymbols()) {
       if (sym.name != sym_name) continue;
       ++symbols;
       CHECK(sym.address == split_thunk);
@@ -173,29 +176,27 @@ TEST_CASE("a function import split over two library records keeps its slot and t
 
   SECTION("the codegen maps the import at its thunk and nothing at guest address 0") {
     WriteConfig(w);
-    auto pipeline = rex::codegen::CodegenPipeline::Create(w.dir / "test_config.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(w.dir / "test_config.toml", w.GetTools());
     REQUIRE(pipeline.has_value());
-    auto* resolver = pipeline->context().resolver();
-    REQUIRE(resolver);
-    auto* split_export = resolver->GetExportByOrdinal("xam.xex", kFnSplit);
+    auto* split_export = RequireExport(kFnSplit);
     REQUIRE(split_export);
-    const std::string split_fn = std::string("__imp__") + split_export->name;
+    const std::string split_fn = std::string("__imp__") + std::string(split_export->name);
     const std::string a_fn =
-        std::string("__imp__") + resolver->GetExportByOrdinal("xam.xex", kFnA)->name;
+        std::string("__imp__") + std::string(RequireExport(kFnA)->name);
     const std::string b_fn =
-        std::string("__imp__") + resolver->GetExportByOrdinal("xam.xex", kFnB)->name;
+        std::string("__imp__") + std::string(RequireExport(kFnB)->name);
 
     auto run = pipeline->Run(false);
     INFO((run.has_value() ? std::string() : run.error().message));
-    for (const auto& e : pipeline->context().errors.Entries()) {
-      UNSCOPED_INFO(rex::codegen::AnalysisErrors::CategoryName(e.category) << ": " << e.message);
+    for (const auto& e : pipeline->GetContext().errors.GetEntries()) {
+      UNSCOPED_INFO(rex::codegen::AnalysisErrorLog::CategoryName(e.category) << ": " << e.message);
     }
     REQUIRE(run.has_value());
-    CHECK(pipeline->context().errors.Count() == 0);
-    CHECK(pipeline->context().graph.getFunction(0) == nullptr);
-    const auto* node = pipeline->context().graph.getFunction(split_thunk);
+    CHECK(pipeline->GetContext().errors.Count() == 0);
+    CHECK(pipeline->GetContext().graph.GetFunction(0) == nullptr);
+    const auto* node = pipeline->GetContext().graph.GetFunction(split_thunk);
     REQUIRE(node);
-    CHECK(node->name() == split_fn);
+    CHECK(node->GetName() == split_fn);
 
     const auto m = ReadMappings(w.dir / "out" / "imports_init.cpp");
     REQUIRE(!m.all.empty());
@@ -218,7 +219,7 @@ TEST_CASE("two complete records of one ordinal stay two imports", "[sdk][xex]") 
   auto l = Load(w);
 
   std::vector<uint32_t> thunks;
-  for (const auto& lib : *l.xex->import_libraries()) {
+  for (const auto& lib : l.xex->GetImportLibraries()) {
     for (const auto& imp : lib.imports) {
       if (imp.ordinal != kFnA) continue;
       CHECK(imp.value_address != 0);
@@ -239,19 +240,19 @@ TEST_CASE("a function import with a value slot and no thunk is a codegen error, 
   w.write("test.xex", xex);
   WriteConfig(w);
 
-  auto pipeline = rex::codegen::CodegenPipeline::Create(w.dir / "test_config.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(w.dir / "test_config.toml", w.GetTools());
   REQUIRE(pipeline.has_value());
   auto analyzed = pipeline->RunAnalyze();
   CHECK_FALSE(analyzed.has_value());  // validation fails: the import cannot be honoured
   // By name, so that this also builds against the unpatched SDK (before/after runs).
   size_t without_thunk = 0;
-  for (const auto& e : pipeline->context().errors.Entries()) {
-    without_thunk += std::string(rex::codegen::AnalysisErrors::CategoryName(e.category)) ==
+  for (const auto& e : pipeline->GetContext().errors.GetEntries()) {
+    without_thunk += std::string(rex::codegen::AnalysisErrorLog::CategoryName(e.category)) ==
                      "ImportWithoutThunk";
   }
   CHECK(without_thunk == 1);
-  CHECK(pipeline->context().graph.getFunction(0) == nullptr);
-  CHECK(pipeline->context().graph.getFunction(placed[0].thunk) != nullptr);  // A is intact
+  CHECK(pipeline->GetContext().graph.GetFunction(0) == nullptr);
+  CHECK(pipeline->GetContext().graph.GetFunction(placed[0].thunk) != nullptr);  // A is intact
 
   // Without --force nothing is generated.
   auto written = pipeline->RunWrite(false);
@@ -282,17 +283,19 @@ TEST_CASE("Resource-only XEX modules load bounded data without pretending to be 
   SECTION("malformed resource table is rejected") { be32(0x100,21); valid=false; }
   Workdir w("x360n_resource_xex_test","load");
   w.write("resource.xex",bytes);
-  rex::Runtime rt(w.dir);
-  rex::RuntimeConfig cfg{};cfg.tool_mode=true;cfg.kernel_init=rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(cfg))==X_STATUS_SUCCESS);
-  auto module=rt.kernel_state()->LoadUserModule("game:\\resource.xex",false);
-  if (!valid) { REQUIRE_FALSE(module); return; }
+  auto opened = w.GetTools().Open(w.dir);
+  REQUIRE(opened);
+  auto& rt = opened->GetRuntime();
+  auto handle = rt.GetModuleRegistry().LoadUserModule("game:\\resource.xex", false);
+  if (!valid) { REQUIRE_FALSE(handle); return; }
+  REQUIRE(handle);
+  auto module = rt.GetObjectTable().Get<rex::kernel::ModuleObject>(*handle);
   REQUIRE(module);
-  CHECK(module->entry_point()==0);
-  CHECK(module->xex_module()->binary_symbols().empty());
+  CHECK(module->user.entry_point==0);
+  CHECK(module->GetXEX()->GetBinarySymbols().empty());
   uint32_t ptr=0,size=0;
   REQUIRE(module->GetSection("skin",&ptr,&size)==X_STATUS_SUCCESS);
   CHECK(ptr==kXexBase);CHECK(size==16);
-  CHECK(std::memcmp(rt.memory()->TranslateVirtual(ptr),"TEST_RESOURCE",13)==0);
-  rt.kernel_state()->UnloadUserModule(module,false);
+  CHECK(std::memcmp(rt.GetMembase().TranslateVirtual(ptr),"TEST_RESOURCE",13)==0);
+  rt.GetModuleRegistry().UnloadUserModule(*handle,false);
 }

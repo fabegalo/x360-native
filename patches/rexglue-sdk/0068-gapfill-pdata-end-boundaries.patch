@@ -1,18 +1,72 @@
 diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
-index f3da777..fb5972a 100644
 --- a/src/codegen/phase_gapfill.cpp
 +++ b/src/codegen/phase_gapfill.cpp
-@@ -38,11 +38,19 @@ namespace {
- // Split a code region into function segments based on terminators (blr, tail calls).
- std::vector<CodeRegion> splitRegionOnTerminators(
-     const CodeRegion& region, const BinaryView& binary,
--    const std::unordered_set<uint32_t>& knownCallables) {
-+    const std::unordered_set<uint32_t>& knownCallables,
-+    const std::unordered_set<uint32_t>& pdataEnds) {
-   std::vector<CodeRegion> segments;
-   uint32_t segmentStart = region.start;
+@@ -217,17 +217,145 @@
+   }
+ }
  
-   for (uint32_t addr = region.start; addr < region.end; addr += 4) {
++bool IsVirtualTailThunk(DecodedBinary& decoded, u32 start, u32 end) {
++  if (end - start != 12)
++    return false;
++  const auto* object = decoded.FindInsn(start);
++  const auto* slot = decoded.FindInsn(start + 4);
++  const auto* ctr = decoded.FindInsn(start + 8);
++  const auto* branch = decoded.FindInsn(end);
++  if (!object || !slot || !ctr || !branch)
++    return false;
++  const auto scratch = object->D.RT;
++  // MSVC may keep the vtable and its callable in different volatile GPRs.
++  // Match the data flow through both loads and mtctr, not register equality.
++  const auto callable = slot->D.RT;
++  return object->opcode == Opcode::lwz && object->D.RA == 3 && object->D.d == 0 &&
++         (scratch >= 10 && scratch <= 12) &&
++         slot->opcode == Opcode::lwz && slot->D.RA == scratch && (callable >= 10 && callable <= 12) &&
++         static_cast<i16>(slot->D.d) >= 0 && (slot->D.d & 3) == 0 &&
++         ctr->opcode == Opcode::mtctr && ctr->XFX.RT == callable &&
++         static_cast<u32>(branch->code) == 0x4E800420;
++}
++
++// A descriptor invoker transfers to an external callable loaded from a fixed
++// field, after constructing its this argument. Unlike a switch, this exact
++// data flow has no indexed code table or local labels. Do not split generic bctr.
++bool IsDescriptorTailThunk(DecodedBinary& decoded, u32 start, u32 end) {
++  if (end - start != 28) return false;
++  u32 words[8];
++  for (unsigned i = 0; i < 8; ++i) {
++    const auto* instruction = decoded.FindInsn(start + i * 4);
++    if (!instruction) return false;
++    words[i] = instruction->code;
++  }
++  const u32 descriptor = (words[0] >> 16) & 31;
++  const u32 object = (words[2] >> 21) & 31;
++  const u32 adjustment = (words[3] >> 21) & 31;
++  const auto scratch = [](u32 reg) { return reg >= 9 && reg <= 12; };
++  if (!scratch(descriptor) || !scratch(object) || !scratch(adjustment) ||
++      descriptor == object || descriptor == adjustment || object == adjustment) return false;
++  const auto move = [](u32 to, u32 from) {
++    return 0x7C000378u | (from << 21) | (to << 16) | (from << 11);
++  };
++  const auto load = [](u32 to, u32 from, u32 offset) {
++    return (32u << 26) | (to << 21) | (from << 16) | offset;
++  };
++  return words[0] == move(descriptor, 4) && words[1] == move(4, 3) &&
++         words[2] == load(object, descriptor, 8) &&
++         words[3] == load(adjustment, descriptor, 4) &&
++         words[4] == load(descriptor, descriptor, 0) &&
++         words[5] == (0x7C000214u | (3u << 21) | (object << 16) | (adjustment << 11)) &&
++         words[6] == (0x7C0903A6u | (descriptor << 21)) && words[7] == 0x4E800420;
++}
++
++// Split a code region into function segments based on terminators (blr, tail calls).
++std::vector<CodeRegion> SplitRegionOnTerminators(
++    const CodeRegion& region, DecodedBinary& decoded,
++    const std::unordered_set<u32>& knownCallables,
++    const std::unordered_set<u32>& pdataEnds,
++    const std::map<u32, u32>& protectedEnds) {
++  std::vector<CodeRegion> segments;
++  u32 segmentStart = region.start;
++
++  for (u32 addr = region.start; addr < region.end; addr += 4) {
 +    // An out-of-line return can end a pdata function with b to an earlier
 +    // epilogue. Do not let that trailing block hide the following leaf's
 +    // entry until its first blr. The original metadata supplies this boundary.
@@ -20,26 +74,100 @@ index f3da777..fb5972a 100644
 +      segments.push_back({segmentStart, addr});
 +      segmentStart = addr;
 +    }
-     const uint8_t* data = binary.translate(addr);
-     if (!data)
-       break;
-@@ -132,12 +140,18 @@ void gapFillCodeRegions(CodegenContext& ctx) {
-     knownCallables.insert(addr);
-   }
- 
-+  std::unordered_set<uint32_t> pdataEnds;
-+  for (const auto& [start, size] : scan.pdataSizes) {
-+    if (size != 0 && start + size > start)
-+      pdataEnds.insert(start + size);
++    const auto* insn = decoded.FindInsn(addr);
++    if (!insn)
++      break;
++
++    bool shouldSplit = false;
++    const char* reason = nullptr;
++
++    // Check for terminators
++    if (insn->IsReturn()) {
++      shouldSplit = true;
++      reason = "blr";
++    } else if (insn->opcode == Opcode::bcctr &&
++               (IsVirtualTailThunk(decoded, segmentStart, addr) ||
++                IsDescriptorTailThunk(decoded, segmentStart, addr))) {
++      const auto boundary = addr + 4;
++      auto owner = protectedEnds.upper_bound(boundary);
++      // A recognized sequence does not override original metadata or an
++      // explicit config extent, including unreachable holes in that extent.
++      if (owner == protectedEnds.begin() || std::prev(owner)->second <= boundary) {
++        shouldSplit = true;
++        reason = "indirect tail thunk";
++      }
++    } else if (insn->opcode == Opcode::b && insn->branch_target.has_value()) {
++      u32 target = insn->branch_target.value();
++      // Don't split on tail recursion (branch to own segment start)
++      if (target != segmentStart && knownCallables.contains(target)) {
++        shouldSplit = true;
++        reason = "tail call";
++      }
++    }
++
++    if (shouldSplit) {
++      u32 segmentEnd = addr + 4;
++      if (segmentEnd > segmentStart) {
++        segments.push_back({segmentStart, segmentEnd});
++        REXCG_TRACE("GapFill: split segment 0x{:08X}-0x{:08X} ({} at 0x{:08X})", segmentStart,
++                         segmentEnd, reason, addr);
++      }
++      segmentStart = segmentEnd;
++    }
 +  }
 +
-   size_t gapsFound = 0;
-   size_t segmentsCreated = 0;
++  // Handle remaining code after last terminator
++  if (segmentStart < region.end) {
++    segments.push_back({segmentStart, region.end});
++  }
++
++  return segments;
++}
++
++
++std::map<u32, u32> DeclaredFunctionEnds(CodegenContext& ctx);
++
+ void GapFillCodeRegions(CodegenContext& ctx) {
+   REXCG_TRACE("Analyze: checking for uncovered code regions...");
  
-   for (const auto& region : scan.codeRegions) {
-     // Split region on terminators (blr, tail calls), then check each segment
--    auto segments = splitRegionOnTerminators(region, binary, knownCallables);
-+    auto segments = splitRegionOnTerminators(region, binary, knownCallables, pdataEnds);
+   auto& graph = ctx.graph;
+   auto& binary = ctx.GetBinary();
  
-     for (const auto& segment : segments) {
-       // Skip if this segment's start is already a registered function entry
++  const auto protected_ends = DeclaredFunctionEnds(ctx);
++  std::unordered_set<u32> pdata_ends;
++  for (const auto& [start, size] : ctx.scan.pdata_sizes)
++    if (size && start + size > start) pdata_ends.insert(start + size);
+   Coverage coverage = BuildCoverage(graph);
+   auto known = BuildKnownFunctions(graph);
+   size_t registered = 0;
+ 
+   for (const auto& region : ctx.scan.code_regions) {
++    const auto segments = SplitRegionOnTerminators(region, ctx.GetDecoded(), known,
++                                                    pdata_ends, protected_ends);
+     u32 addr = region.start;
+     while (addr < region.end) {
+       if (u32 end = coverage.GetCoveredEnd(addr)) {
+@@ -250,6 +378,23 @@
+         coverage = BuildCoverage(graph);
+       } else if (const auto* node = graph.GetFunction(addr)) {
+         coverage.Add(addr, addr + node->GetSize());
++      }
++      // An unproven bctr does not prove a callable immediately after it.
++      // Keep that inferred suffix covered until a proven terminator or metadata boundary;
++      // explicit references can still publish independent entries on the later pass.
++      if (const auto* node = graph.GetFunction(addr);
++          node && node->GetJumpTables().empty() && !node->GetBlocks().empty()) {
++        u32 end = addr;
++        for (const auto& block : node->GetBlocks()) end = std::max(end, block.GetEnd());
++        const auto* tail = end > addr ? ctx.GetDecoded().FindInsn(end - 4) : nullptr;
++        if (tail && tail->opcode == Opcode::bcctr && !tail->IsConditional()) {
++          for (const auto& segment : segments) {
++            if (segment.start <= addr && addr < segment.end) {
++              coverage.Add(addr, std::max(end, segment.end));
++              break;
++            }
++          }
++        }
+       }
+       addr = std::max(addr + 4, coverage.GetCoveredEnd(addr));
+     }

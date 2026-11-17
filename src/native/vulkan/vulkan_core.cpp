@@ -1,6 +1,8 @@
+#include "../quality/settings.h"
 #include "vulkan_core.h"
-#include <rex/logging.h>
-#include <rex/cvar.h>
+#include <rex/logging/log_category.h>
+#include <rex/settings_registry.h>
+
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Public/ShaderLang.h>
 #include <algorithm>
@@ -13,17 +15,16 @@
 #include <stdexcept>
 #include <string>
 #include "../../supervisor/fs_io.h"
-REXCVAR_DEFINE_BOOL(native_vulkan_perf, false, "GPU/Native", "Measure Native Vulkan submission, fence, buffer and publication costs");
+
 #if defined(X360N_NATIVE_D3D12)
-REXCVAR_DECLARE(uint32_t, native_gpu_timeout_ms);
+
 #else
-REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
-    "Limit of one Native GPU fence wait before reporting a timeout (minimum 1000; software adapters may need more)");
+
 #endif
 
 namespace x360n::native {
 VulkanPerformance& NativeVulkanPerformance() {
-  thread_local VulkanPerformance counters{REXCVAR_GET(native_vulkan_perf)};
+  thread_local VulkanPerformance counters{GetNativeSettings().vulkan_perf.Get()};
   return counters;
 }
 void CheckVulkan(VkResult result, const char* operation) {
@@ -32,12 +33,12 @@ void CheckVulkan(VkResult result, const char* operation) {
                              " VkResult=" + std::to_string(int(result)));
 }
 
-VulkanBuffer::VulkanBuffer(const rex::ui::vulkan::VulkanDevice& device,
+VulkanBuffer::VulkanBuffer(const rex::gpu::vulkan::VulkanDevice& device,
                            VkDeviceSize size, VkBufferUsageFlags usage, Access access)
     : device_(device), size_(size) {
   if (!size) throw std::invalid_argument("Native Vulkan: zero buffer size");
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
   info.size = size;
   info.usage = usage;
@@ -46,7 +47,7 @@ VulkanBuffer::VulkanBuffer(const rex::ui::vulkan::VulkanDevice& device,
   try {
     VkMemoryRequirements requirements{};
     fn.vkGetBufferMemoryRequirements(vk, buffer_, &requirements);
-    const auto& types = device_.memory_types();
+    const auto& types = device_.GetMemoryTypes();
     uint32_t allowed = requirements.memoryTypeBits;
     uint32_t preferred;
     if (access == Access::kDevice) {
@@ -86,8 +87,8 @@ VulkanBuffer::VulkanBuffer(const rex::ui::vulkan::VulkanDevice& device,
 
 VulkanBuffer::~VulkanBuffer() {
   if (measured_) NativeVulkanPerformance().live_bytes -= allocation_size_;
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   if (mapped_) fn.vkUnmapMemory(vk, memory_);
   fn.vkDestroyBuffer(vk, buffer_, nullptr);
   fn.vkFreeMemory(vk, memory_, nullptr);
@@ -97,16 +98,16 @@ void VulkanBuffer::SynchronizeMapping(VkDeviceSize offset, VkDeviceSize size, bo
   if (!mapped_ || offset > size_ || size > size_ - offset)
     throw std::out_of_range("Native Vulkan: mapped buffer range is invalid");
   if (!size || coherent_) return;
-  const auto atom = device_.properties().nonCoherentAtomSize;
+  const auto atom = device_.GetProperties().nonCoherentAtomSize;
   const auto begin = offset - offset % atom;
   const auto end = std::min(allocation_size_, ((offset + size - 1) / atom + 1) * atom);
   VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
   range.memory = memory_;
   range.offset = begin;
   range.size = end - begin;
-  const auto& fn = device_.functions();
-  CheckVulkan(invalidate ? fn.vkInvalidateMappedMemoryRanges(device_.device(), 1, &range)
-                          : fn.vkFlushMappedMemoryRanges(device_.device(), 1, &range),
+  const auto& fn = device_.GetFunctions();
+  CheckVulkan(invalidate ? fn.vkInvalidateMappedMemoryRanges(device_.GetDevice(), 1, &range)
+                          : fn.vkFlushMappedMemoryRanges(device_.GetDevice(), 1, &range),
               invalidate ? "invalidate buffer mapping" : "flush buffer mapping");
 }
 void VulkanBuffer::Flush(VkDeviceSize offset, VkDeviceSize size) {
@@ -116,21 +117,21 @@ void VulkanBuffer::Invalidate(VkDeviceSize offset, VkDeviceSize size) {
   SynchronizeMapping(offset, size, true);
 }
 
-VulkanSubmissionRing::VulkanSubmissionRing(const rex::ui::vulkan::VulkanDevice& device)
+VulkanSubmissionRing::VulkanSubmissionRing(const rex::gpu::vulkan::VulkanDevice& device)
     : device_(device) {
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   try {
     if (NativeVulkanPerformance().enabled) {
       VkPhysicalDeviceProperties properties;
-      device_.vulkan_instance()->functions().vkGetPhysicalDeviceProperties(device_.physical_device(), &properties);
+      device_.GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceProperties(device_.GetPhysicalDevice(), &properties);
       timestamp_period_ = properties.limits.timestampPeriod;
       uint32_t count = 0;
-      const auto get_families = device_.vulkan_instance()->functions().vkGetPhysicalDeviceQueueFamilyProperties;
-      get_families(device_.physical_device(), &count, nullptr);
+      const auto get_families = device_.GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceQueueFamilyProperties;
+      get_families(device_.GetPhysicalDevice(), &count, nullptr);
       std::vector<VkQueueFamilyProperties> families(count);
-      get_families(device_.physical_device(), &count, families.data());
-      timestamp_bits_ = families.at(device_.queue_family_graphics_compute()).timestampValidBits;
+      get_families(device_.GetPhysicalDevice(), &count, families.data());
+      timestamp_bits_ = families.at(device_.GetQueueFamilyGraphicsCompute()).timestampValidBits;
       if (timestamp_bits_) {
         VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         query.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -142,7 +143,7 @@ VulkanSubmissionRing::VulkanSubmissionRing(const rex::ui::vulkan::VulkanDevice& 
     for (auto& slot : slots_) {
       VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
       pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-      pool.queueFamilyIndex = device_.queue_family_graphics_compute();
+      pool.queueFamilyIndex = device_.GetQueueFamilyGraphicsCompute();
       CheckVulkan(fn.vkCreateCommandPool(vk, &pool, nullptr, &slot.pool), "create command pool");
       VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
       allocate.commandPool = slot.pool;
@@ -162,14 +163,14 @@ VulkanSubmissionRing::~VulkanSubmissionRing() {
   Destroy();
 }
 void VulkanSubmissionRing::Destroy() {
-  const auto& fn = device_.functions();
+  const auto& fn = device_.GetFunctions();
   if (timestamps_) LoadNativeVulkanFunction<PFN_vkDestroyQueryPool>(device_, "vkDestroyQueryPool")(
-      device_.device(), timestamps_, nullptr);
+      device_.GetDevice(), timestamps_, nullptr);
   timestamps_ = VK_NULL_HANDLE;
   for (auto& slot : slots_) {
     slot.retained.clear();
-    if (slot.pool) fn.vkDestroyCommandPool(device_.device(), slot.pool, nullptr);
-    if (slot.fence) fn.vkDestroyFence(device_.device(), slot.fence, nullptr);
+    if (slot.pool) fn.vkDestroyCommandPool(device_.GetDevice(), slot.pool, nullptr);
+    if (slot.fence) fn.vkDestroyFence(device_.GetDevice(), slot.fence, nullptr);
     slot.pool = VK_NULL_HANDLE;
     slot.fence = VK_NULL_HANDLE;
   }
@@ -179,8 +180,8 @@ VkCommandBuffer VulkanSubmissionRing::Begin() {
   auto& slot = slots_[current_slot()];
   Wait(slot.serial);
   slot.retained.clear();
-  const auto& fn = device_.functions();
-  CheckVulkan(fn.vkResetCommandPool(device_.device(), slot.pool, 0), "reset command pool");
+  const auto& fn = device_.GetFunctions();
+  CheckVulkan(fn.vkResetCommandPool(device_.GetDevice(), slot.pool, 0), "reset command pool");
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   CheckVulkan(fn.vkBeginCommandBuffer(slot.commands, &begin), "begin command buffer");
@@ -204,19 +205,19 @@ uint64_t VulkanSubmissionRing::Submit() {
   if (serial_ == std::numeric_limits<uint64_t>::max())
     throw std::overflow_error("Native Vulkan: submission serial overflow");
   auto& slot = slots_[current_slot()];
-  const auto& fn = device_.functions();
+  const auto& fn = device_.GetFunctions();
   if (timestamps_) LoadNativeVulkanFunction<PFN_vkCmdWriteTimestamp>(device_, "vkCmdWriteTimestamp")(
       slot.commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps_, uint32_t(current_slot() * 2 + 1));
   CheckVulkan(fn.vkEndCommandBuffer(slot.commands), "end command buffer");
-  CheckVulkan(fn.vkResetFences(device_.device(), 1, &slot.fence), "reset submission fence");
+  CheckVulkan(fn.vkResetFences(device_.GetDevice(), 1, &slot.fence), "reset submission fence");
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &slot.commands;
   {
     // Presenter uses queue 0 too. The provider owns its external-synchronization
     // lock so Native submissions cannot race window painting or capture.
-    auto queue = device_.AcquireQueue(device_.queue_family_graphics_compute(), 0);
-    CheckVulkan(fn.vkQueueSubmit(queue.queue(), 1, &submit, slot.fence), "submit queue");
+    auto queue = device_.AcquireQueue(device_.GetQueueFamilyGraphicsCompute(), 0);
+    CheckVulkan(fn.vkQueueSubmit(queue.GetQueue(), 1, &submit, slot.fence), "submit queue");
   }
   recording_ = false;
   slot.serial = ++serial_;
@@ -234,13 +235,13 @@ void VulkanSubmissionRing::Wait(uint64_t serial) {
   VulkanPerformanceTimer timer(perf.wait_ns);
   if (perf.enabled) {
     ++perf.waits;
-    const auto status = device_.functions().vkGetFenceStatus(device_.device(), slot.fence);
+    const auto status = device_.GetFunctions().vkGetFenceStatus(device_.GetDevice(), slot.fence);
     if (status == VK_NOT_READY) ++perf.blocked_waits;
     else CheckVulkan(status, "measure submission fence");
   }
-  const uint32_t limit_ms = std::max(1000u, REXCVAR_GET(native_gpu_timeout_ms));
-  const auto result = device_.functions().vkWaitForFences(
-      device_.device(), 1, &slot.fence, VK_TRUE, uint64_t(limit_ms) * 1'000'000);
+  const uint32_t limit_ms = std::max(1000u, GetNativeSettings().gpu_timeout_ms.Get());
+  const auto result = device_.GetFunctions().vkWaitForFences(
+      device_.GetDevice(), 1, &slot.fence, VK_TRUE, uint64_t(limit_ms) * 1'000'000);
   if (result != VK_SUCCESS) {
     const auto operation = "GPU fence (" + std::to_string(limit_ms) + " ms limit)";
     CheckVulkan(result, operation.c_str());
@@ -256,7 +257,7 @@ void VulkanSubmissionRing::MeasureCompleted() {
     if (!slot.timed || !slot.serial || slot.serial > completed_) continue;
     uint64_t ticks[2];
     CheckVulkan(LoadNativeVulkanFunction<PFN_vkGetQueryPoolResults>(device_, "vkGetQueryPoolResults")(
-        device_.device(), timestamps_, uint32_t(i * 2), 2, sizeof(ticks), ticks, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT),
+        device_.GetDevice(), timestamps_, uint32_t(i * 2), 2, sizeof(ticks), ticks, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT),
         "read performance timestamps");
     const uint64_t mask = timestamp_bits_ == 64 ? UINT64_MAX : (uint64_t(1) << timestamp_bits_) - 1;
     perf.gpu_ns += uint64_t(double((ticks[1] - ticks[0]) & mask) * timestamp_period_);
@@ -267,7 +268,7 @@ void VulkanSubmissionRing::MeasureCompleted() {
 void VulkanSubmissionRing::Poll() {
   for (uint64_t serial = serial_; serial > completed_; --serial) {
     const auto& slot = slots_[size_t((serial - 1) % kSlots)];
-    const auto status = device_.functions().vkGetFenceStatus(device_.device(), slot.fence);
+    const auto status = device_.GetFunctions().vkGetFenceStatus(device_.GetDevice(), slot.fence);
     if (status == VK_NOT_READY) continue;
     CheckVulkan(status, "poll submission fence");
     completed_ = serial;
@@ -349,11 +350,12 @@ std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string
   if (spirv.empty()) throw std::runtime_error("Native Vulkan: empty host shader SPIR-V");
   return spirv;
 }
-VkShaderModule CreateNativeShaderModule(const rex::ui::vulkan::VulkanDevice& device,
+VkShaderModule CreateNativeShaderModule(const rex::gpu::vulkan::VulkanDevice& device,
                                         std::span<const uint32_t> spirv) {
   if (spirv.size() < 5 || spirv[0] != 0x07230203u)
     throw std::invalid_argument("Native Vulkan: invalid SPIR-V module");
-  const auto dump_directory = rex::cvar::GetFlagByName("dump_shaders");
+  const auto dump_setting = REX_SETTINGS().Find("gpu.xenos.dump_shaders");
+  const auto dump_directory = dump_setting ? (*dump_setting)->GetText() : std::string{};
   uint64_t diagnostic_id = 0;
   if (!dump_directory.empty()) {
     static std::atomic<uint64_t> sequence{0};
@@ -371,7 +373,7 @@ VkShaderModule CreateNativeShaderModule(const rex::ui::vulkan::VulkanDevice& dev
   info.codeSize = spirv.size_bytes();
   info.pCode = spirv.data();
   VkShaderModule result = VK_NULL_HANDLE;
-  CheckVulkan(device.functions().vkCreateShaderModule(device.device(), &info, nullptr, &result),
+  CheckVulkan(device.GetFunctions().vkCreateShaderModule(device.GetDevice(), &info, nullptr, &result),
               "create shader module");
   if (diagnostic_id) REXLOG_INFO("Native Vulkan module end id={} module={:016X}", diagnostic_id, uint64_t(result));
   return result;

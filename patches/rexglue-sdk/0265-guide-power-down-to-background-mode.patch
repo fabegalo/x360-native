@@ -1,0 +1,44 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+@@ -43,6 +43,10 @@
+   kernel::GetCurrentState().ExitTitle(rex::kernel::TitleExitReason::kHardExit);
+ }
+ 
++void HalPowerDownToBackgroundMode_entry() {
++  HalReturnToFirmware_entry(5);
++}
++
+ }  // namespace rex::kernel::xboxkrnl
+ 
+ REX_EXPORT(__imp__HalReturnToFirmware, rex::kernel::xboxkrnl::HalReturnToFirmware_entry)
+@@ -60,7 +64,7 @@
+ REX_EXPORT_STUB(__imp__HalRegisterPowerDownCallback);
+ REX_EXPORT_STUB(__imp__HalRegisterBackgroundModeTransitionCallback);
+ REX_EXPORT_STUB(__imp__HalClampUnclampOutputDACs);
+-REX_EXPORT_STUB(__imp__HalPowerDownToBackgroundMode);
++REX_EXPORT(__imp__HalPowerDownToBackgroundMode, rex::kernel::xboxkrnl::HalPowerDownToBackgroundMode_entry)
+ REX_EXPORT_STUB(__imp__HalNotifyAddRemoveBackgroundTask);
+ REX_EXPORT_STUB(__imp__HalCallBackgroundModeNotificationRoutines);
+ REX_EXPORT_STUB(__imp__HalGetMemoryInformation);
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1327,3 +1327,17 @@
+     CHECK_FALSE(loader.launch_data_present); CHECK(loader.launch_data.empty());
+   }
+ }
++
++
++REX_TEST_CASE("Guide background power down uses the existing firmware shutdown lifecycle", "[kernel][xam][firmware-exit]") {
++  KernelFixture fixture;
++  bool returned = false;
++  fixture.RunUntilGuestThreadEnds([&](Caller& c) {
++    c.Kernel("HalPowerDownToBackgroundMode");
++    returned = true;
++  });
++  CHECK_FALSE(returned);
++  const auto& loader = rex::xam::CurrentXAM().GetLoaderState();
++  CHECK(loader.exit_request == rex::xam::XAMLoaderState::ExitRequest::Firmware);
++  CHECK(loader.firmware_routine == 5);
++}

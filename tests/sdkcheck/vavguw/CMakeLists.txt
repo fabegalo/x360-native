@@ -12,7 +12,7 @@ add_custom_command(OUTPUT "${vavguw_gen}/ppc_test_functions.cpp" "${vavguw_gen}/
   DEPENDS "${vavguw_bin}/vavguw.bin" "${vavguw_bin}/vavguw.map" rexglue VERBATIM)
 add_executable(x360n_vavguw_checks main.cpp "${vavguw_gen}/ppc_test_functions.cpp")
 target_include_directories(x360n_vavguw_checks PRIVATE "${vavguw_gen}")
-target_link_libraries(x360n_vavguw_checks PRIVATE rexruntime simde fmt::fmt x360n_ppc_options)
+target_link_libraries(x360n_vavguw_checks PRIVATE ${X360N_SDK_LIBRARIES} simde x360n_ppc_options)
 target_compile_options(x360n_vavguw_checks PRIVATE -fno-char8_t -msse4.1 -mssse3 -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 x360n_stage_runtime_dlls(x360n_vavguw_checks)
 add_test(NAME sdkcheck.Vavguw COMMAND x360n_vavguw_checks)

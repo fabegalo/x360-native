@@ -1,16 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/system/xio.h>
-#include <rex/kernel/xam/task_context.h>
+#include "kernel/kernel_fixture.h"
+#include <rex/kernel/title_runtime.h>
+#include "kernel/test_access.h"
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/types/io.h>
+#include <rex/ppc/recompiled_code.h>
+#include <rex/xam/task_context.h>
 #include <cstring>
 
 extern "C" REX_FUNC(__imp__XamPngEncode);
 extern "C" REX_FUNC(__imp__XamPngEncodeEx);
-namespace rex::kernel::xam { uint32_t XamTaskCloseHandle_entry(uint32_t); }
+namespace rex::xam { uint32_t XamTaskCloseHandle_entry(uint32_t); }
 namespace {
 uint32_t png_block, png_flags, png_overlap, png_error;
 unsigned png_calls;
@@ -21,9 +21,9 @@ void PngEngine(PPCContext& ctx, uint8_t* base) {
   CHECK(word(12) == 12); CHECK(word(16) == png_block + 4096);
   CHECK(word(20) == png_block + 64); CHECK(word(24) == png_flags);
   CHECK(word(28) == png_overlap);
-  const auto task = rex::kernel::xam::CurrentSystemTask();
+  const auto task = rex::xam::CurrentSystemTask();
   CHECK(task != 0);
-  if (task) rex::kernel::xam::XamTaskCloseHandle_entry(task);
+  if (task) rex::xam::XamTaskCloseHandle_entry(task);
   // Only ABI/bounds are mocked here; the original-code probe separately
   // verifies the real PNG stream and independent decoded pixels.
   if (!png_error) rex::memory::store_and_swap<uint32_t>(base + word(16), 0x89504E47);
@@ -35,21 +35,20 @@ void PngEngine(PPCContext& ctx, uint8_t* base) {
 
 TEST_CASE("17559 PNG service preserves original ABI HRESULT completion and buffer bounds",
           "[sdk][original-png-service]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{}; config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-  auto* memory = rt.memory(); auto* base = memory->virtual_membase();
+  rex::test::KernelFixture fixture;
+  auto& runtime = fixture.GetRuntime();
+  auto* memory = &rex::kernel::GetAddressSpace(runtime);
+  auto* base = runtime.GetMembase().GetBase();
+  auto* dispatcher = &rex::kernel::GetFunctionDispatcher(runtime);
   png_block = memory->SystemHeapAlloc(32768); REQUIRE(png_block);
-  REQUIRE(rt.function_dispatcher()->InitializeFunctionTable(0x816B0000,0x10000,0x816B0000,0x10000,true,true));
+  REQUIRE(dispatcher->InitializeFunctionTable(0x816B0000,0x10000,0x816B0000,0x10000,false,true));
   png_calls = 0; png_error = 0;
-  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      rt.kernel_state(), 128 * 1024, 0, [&] {
-    auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    auto* ctx = &caller.GetContext();
     auto prepare = [&](bool ex, bool async) {
       std::memset(base + png_block, 0xCD, 32768);
       png_flags = ex ? 1 : 0; png_overlap = async ? png_block + 8192 : 0;
-      if (png_overlap) std::memset(base + png_overlap, 0, sizeof(rex::system::XAM_OVERLAPPED));
+      if (png_overlap) std::memset(base + png_overlap, 0, sizeof(rex::kernel::XOVERLAPPED));
       rex::memory::store_and_swap<uint32_t>(base + png_block + 64, 4096);
       ctx->r3.u64 = png_block + 256; ctx->r4.u64 = 2; ctx->r5.u64 = 2;
       ctx->r6.u64 = 12; ctx->r7.u64 = png_block + 4096; ctx->r8.u64 = png_block + 64;
@@ -57,7 +56,7 @@ TEST_CASE("17559 PNG service preserves original ABI HRESULT completion and buffe
     };
     prepare(false, false); __imp__XamPngEncode(*ctx, base);
     CHECK(ctx->r3.u32 == 0x80004001); CHECK(png_calls == 0);
-    REQUIRE(rt.function_dispatcher()->SetFunction(0x816B0BA8, PngEngine));
+    REQUIRE(dispatcher->SetFunction(0x816B0BA8, PngEngine));
     for (bool ex : {false, true}) for (bool async : {false, true}) {
       prepare(ex, async);
       const auto before = png_calls;
@@ -67,14 +66,14 @@ TEST_CASE("17559 PNG service preserves original ABI HRESULT completion and buffe
       CHECK(rex::memory::load_and_swap<uint32_t>(base + png_block + 4096) == 0x89504E47);
       CHECK(base[png_block + 4095] == 0xCD); CHECK(base[png_block + 4100] == 0xCD);
       if (async) {
-        auto* io = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(png_overlap);
+        auto* io = memory->TranslateVirtual<rex::kernel::XOVERLAPPED*>(png_overlap);
         CHECK(io->result == 0); CHECK(io->extended_error == 0); CHECK(io->length == 4);
       }
     }
     png_error = 0x8007007A;
     prepare(true, true); __imp__XamPngEncodeEx(*ctx, base);
     CHECK(ctx->r3.u32 == 0x800703E5);
-    auto* io = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(png_overlap);
+    auto* io = memory->TranslateVirtual<rex::kernel::XOVERLAPPED*>(png_overlap);
     CHECK(io->result == 1627); CHECK(io->extended_error == png_error); CHECK(io->length == 0);
     png_error = 0;
     for (unsigned invalid = 0; invalid < 7; ++invalid) {
@@ -92,9 +91,6 @@ TEST_CASE("17559 PNG service preserves original ABI HRESULT completion and buffe
       CHECK(ctx->r3.u32 == 0x80070057); CHECK(png_calls == before);
       CHECK(base[png_block + 4096] == 0xCD);
     }
-    return 0;
-  }));
-  REQUIRE(caller->Create() == 0); uint64_t timeout = uint64_t(-50'000'000ll);
-  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+  });
   memory->SystemHeapFree(png_block);
 }

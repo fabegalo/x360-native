@@ -1,0 +1,24 @@
+diff --git a/include/rex/kernel/function_dispatcher.h b/include/rex/kernel/function_dispatcher.h
+--- a/include/rex/kernel/function_dispatcher.h
++++ b/include/rex/kernel/function_dispatcher.h
+@@ -62,6 +62,12 @@
+    * @return The value in r3 when the call returns, or 0xDEADBABE when no function is set there.
+    */
+   u64 Execute(ThreadState* thread_state, u32 address, u64 args[], size_t arg_count);
++  /** Runs recompiled code with the canonical guest call frame, leaving return registers visible.
++   * The caller owns register preservation; use Execute or ExecuteTrap when outputs are scalar.
++   * This is the same operation those methods use, including thread binding and stack arguments.
++   */
++  bool Run(ThreadState* thread_state, u32 address, std::span<const u64> args);
++
+   /**
+    * Runs recompiled code as a DPC level interrupt, then queued DPCs when the outermost ends.
+    *
+@@ -150,7 +156,6 @@
+   std::optional<std::pair<u32, u32>> UnregisterModule(const std::string& module_id);
+ 
+  private:
+-  bool Run(ThreadState* thread_state, u32 address, std::span<const u64> args);
+   u64 RunInterrupt(ThreadState* thread_state, u32 address, u64 args[], size_t arg_count);
+ 
+   struct ModuleTable {

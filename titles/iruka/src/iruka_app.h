@@ -1,31 +1,7 @@
-// iruka - ReXGlue Recompiled Project
-//
-// Customize your app by overriding virtual hooks from rex::ReXApp.
-
 #pragma once
+#include "../../common/session_title_app.h"
 
-#include <rex/rex_app.h>
-
-class IrukaApp : public rex::ReXApp {
+class IrukaApp : public x360n::SessionTitleApp {
  public:
-  using rex::ReXApp::ReXApp;
-
-  static std::unique_ptr<rex::ui::WindowedApp> Create(
-      rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<IrukaApp>(new IrukaApp(ctx, "iruka",
-        PPCImageConfig));
-  }
-
-  // Override virtual hooks for customization:
-  // void OnPostInitLogging() override {}
-  // void OnPreSetup(rex::RuntimeConfig& config) override {}
-  // void OnLoadXexImage(std::string& xex_image) override {}
-  // void OnPostLoadXexImage() override {}
-  // void OnPostSetup() override {}
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
-  // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
-  // std::unique_ptr<rex::ui::AchievementNotificationDialog>
-  // CreateAchievementNotificationDialog() override;
-  // void OnShutdown() override {}
-  // void OnConfigurePaths(rex::PathConfig& paths) override {}
+  IrukaApp() : SessionTitleApp("iruka", kPPCImageConfig) {}
 };

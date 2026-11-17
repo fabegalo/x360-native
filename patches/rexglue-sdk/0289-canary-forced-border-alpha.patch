@@ -1,29 +1,18 @@
-diff --git a/include/rex/graphics/d3d12/texture_cache.h b/include/rex/graphics/d3d12/texture_cache.h
---- a/include/rex/graphics/d3d12/texture_cache.h
-+++ b/include/rex/graphics/d3d12/texture_cache.h
-@@ -58,6 +58,7 @@
-       xenos::AnisoFilter aniso_filter : 3;  // 17
-       uint32_t mip_min_level : 4;           // 21
-       uint32_t mip_base_map : 1;            // 22
-+      uint32_t force_bc_w_to_max : 1;       // 23
-       // Maximum mip level is in the texture resource itself, but mip_base_map
-       // can be used to limit fetching to mip_min_level.
+diff --git a/src/gpu/xenos/d3d12/texture_cache.h b/src/gpu/xenos/d3d12/texture_cache.h
+--- a/src/gpu/xenos/d3d12/texture_cache.h
++++ b/src/gpu/xenos/d3d12/texture_cache.h
+@@ -67,6 +67,7 @@
+       /** mip_base_map limits fetching to mip_min_level, the maximum level is in the texture. */
+       u32 mip_min_level : 4;
+       u32 mip_base_map : 1;
++      u32 force_bc_w_to_max : 1;
      };
-diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
---- a/include/rex/graphics/vulkan/texture_cache.h
-+++ b/include/rex/graphics/vulkan/texture_cache.h
-@@ -43,6 +43,7 @@
-       xenos::AnisoFilter aniso_filter : 3;  // 17
-       uint32_t mip_min_level : 4;           // 21
-       uint32_t mip_base_map : 1;            // 22
-+      uint32_t force_bc_w_to_max : 1;       // 23
-       // Maximum mip level is in the texture resource itself, but mip_base_map
-       // can be used to limit fetching to mip_min_level.
-     };
-diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
---- a/src/graphics/d3d12/texture_cache.cpp
-+++ b/src/graphics/d3d12/texture_cache.cpp
-@@ -941,6 +941,7 @@
+ 
+     SamplerParameters() : value(0) { REX_STATIC_ASSERT_SIZE(*this, sizeof(value)); }
+diff --git a/src/gpu/xenos/d3d12/texture_cache.cpp b/src/gpu/xenos/d3d12/texture_cache.cpp
+--- a/src/gpu/xenos/d3d12/texture_cache.cpp
++++ b/src/gpu/xenos/d3d12/texture_cache.cpp
+@@ -894,6 +894,7 @@
        xenos::ClampModeUsesBorder(parameters.clamp_y) ||
        xenos::ClampModeUsesBorder(parameters.clamp_z)) {
      parameters.border_color = fetch.border_color;
@@ -31,20 +20,29 @@ diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_c
    } else {
      parameters.border_color = xenos::BorderColor::k_ABGR_Black;
    }
-@@ -1060,6 +1061,9 @@
+@@ -1007,6 +1008,7 @@
        desc.BorderColor[3] = 0.0f;
        break;
    }
-+  if (parameters.force_bc_w_to_max) {
-+    desc.BorderColor[3] = 1.0f;
-+  }
-   desc.MinLOD = float(parameters.mip_min_level);
++  if (parameters.force_bc_w_to_max) desc.BorderColor[3] = 1.0f;
+   desc.MinLOD = static_cast<f32>(parameters.mip_min_level);
    if (parameters.mip_base_map) {
-     // "It is undefined whether LOD clamping based on MinLOD and MaxLOD Sampler
-diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
---- a/src/graphics/vulkan/texture_cache.cpp
-+++ b/src/graphics/vulkan/texture_cache.cpp
-@@ -693,6 +693,7 @@
+     desc.MaxLOD = desc.MinLOD;
+diff --git a/src/gpu/xenos/vulkan/texture_cache.h b/src/gpu/xenos/vulkan/texture_cache.h
+--- a/src/gpu/xenos/vulkan/texture_cache.h
++++ b/src/gpu/xenos/vulkan/texture_cache.h
+@@ -50,6 +50,7 @@
+       xenos::AnisoFilter aniso_filter : 3;
+       u32 mip_min_level : 4;
+       u32 mip_base_map : 1; /**< True when fetching is limited to mip_min_level. */
++      u32 force_bc_w_to_max : 1;
+     };
+ 
+     SamplerParameters() : value(0) { REX_STATIC_ASSERT_SIZE(*this, sizeof(value)); }
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -636,6 +636,7 @@
        xenos::ClampModeUsesBorder(parameters.clamp_y) ||
        xenos::ClampModeUsesBorder(parameters.clamp_z)) {
      parameters.border_color = fetch.border_color;
@@ -52,7 +50,7 @@ diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture
    } else {
      parameters.border_color = xenos::BorderColor::k_ABGR_Black;
    }
-@@ -909,7 +910,8 @@
+@@ -842,7 +843,8 @@
          sampler_custom_border_color_create_info.customBorderColor.float32[1] =
              parameters.border_color == xenos::BorderColor::k_ACBYCR_Black ? 0.0f : 0.5f;
          sampler_custom_border_color_create_info.customBorderColor.float32[2] = 0.5f;
@@ -60,23 +58,23 @@ diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture
 +        sampler_custom_border_color_create_info.customBorderColor.float32[3] =
 +            parameters.force_bc_w_to_max ? 1.0f : 0.0f;
          sampler_custom_border_color_create_info.format =
-             vulkan_device->properties().customBorderColorWithoutFormat
+             vulkan_device->GetProperties().customBorderColorWithoutFormat
                  ? VK_FORMAT_UNDEFINED
-@@ -931,11 +933,15 @@
-                 vulkan_device->properties().maxCustomBorderColorSamplers);
+@@ -864,11 +866,15 @@
+                 vulkan_device->GetProperties().maxCustomBorderColorSamplers);
            }
          }
 -        sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 +        sampler_create_info.borderColor = parameters.force_bc_w_to_max
-+                                              ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
-+                                              : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
++                                          ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
++                                          : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
        }
        break;
      default:
 -      sampler_create_info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 +      sampler_create_info.borderColor = parameters.force_bc_w_to_max
-+                                            ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
-+                                            : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
++                                          ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
++                                          : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
        break;
    }
    VkSampler vulkan_sampler;

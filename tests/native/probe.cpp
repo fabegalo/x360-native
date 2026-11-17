@@ -1,20 +1,20 @@
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/kernel/init.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/system/mmio_handler.h>
-#include <rex/graphics/xenos.h>
-#include <rex/graphics/registers.h>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/flags.h>
-#include <rex/graphics/format/ucode.h>
-#include <rex/graphics/graphics_system.h>
-#include <rex/cvar.h>
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/ui/presenter.h>
-#include <rex/ui/d3d12/d3d12_provider.h>
-#if REX_HAS_VULKAN
-#include <rex/ui/vulkan/provider.h>
+#include "../../src/gpu_probe_app.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/heap.h>
+#include <rex/ppc/image.h>
+#include <rex/logging/log_category.h>
+#include <rex/string/text.h>
+#include <rex/xenos/texture.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/packet.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/fetch.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
+#include <gpu/xenos/command_processor.h>
+#include <gpu/xenos/host/d3d12/d3d12_provider.h>
+#if X360N_PROBE_HAS_VULKAN
+#include <gpu/xenos/host/vulkan/vulkan_provider.h>
 #endif
 #include <chrono>
 #include <atomic>
@@ -27,12 +27,13 @@
 #include <cmath>
 #include <wincodec.h>
 #include <wrl/client.h>
-using namespace rex::graphics;
-using rex::X_STATUS;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using namespace rex::xenos;
+namespace xenos=rex::xenos;
+namespace texture_util=rex::xenos;
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
 // The real driver still compiles every requested pipeline. Observe only the
 // cache argument, after setup and before any guest commands are submitted.
 struct DriverCacheProbe {
@@ -50,9 +51,9 @@ struct DriverCacheProbe {
     }
     return original(device, cache, count, info, allocator, pipelines);
   }
-  static void Install(rex::graphics::GraphicsSystem& gpu) {
-    auto& device = *static_cast<rex::ui::vulkan::VulkanProvider*>(gpu.provider())->vulkan_device();
-    auto& functions = const_cast<rex::ui::vulkan::VulkanDevice::Functions&>(device.functions());
+  static void Install(rex::gpu::XenosGraphicsDriverBase& gpu) {
+    auto& device = *static_cast<rex::gpu::vulkan::VulkanProvider*>(gpu.GetProvider())->GetVulkanDevice();
+    auto& functions = const_cast<rex::gpu::vulkan::VulkanDevice::Functions&>(device.GetFunctions());
     original = functions.vkCreateGraphicsPipelines;
     calls = 0; uncached = 0;
     functions.vkCreateGraphicsPipelines = Create;
@@ -60,7 +61,7 @@ struct DriverCacheProbe {
 };
 #endif
 uint32_t Packet(uint32_t op, uint32_t count) { return 0xc0000000 | ((count - 1) << 16) | (op << 8); }
-void WritePNG(const std::filesystem::path& path, const rex::ui::RawImage& image) {
+void WritePNG(const std::filesystem::path& path, const rex::gpu::RawImage& image) {
   using Microsoft::WRL::ComPtr;
   auto check = [](HRESULT hr) { Require(SUCCEEDED(hr), "WIC PNG encoding"); };
   ComPtr<IWICImagingFactory> factory;
@@ -94,33 +95,38 @@ double ThreadCpuMs() {
 }
 // CPU of every thread but this one, which only polls the completion marker.
 double WorkerCpuMs() { return ProcessCpuMs() - ThreadCpuMs(); }
-// Holds the cvar registry lock from another thread (ListModifiedFlags calls this
-// flag's getter while locked) so a draw path that looks a cvar up by name blocks.
+// Holds the settings registry lock while an owner serializes its retiring value,
+// so a draw path that still looks settings up by name blocks.
 struct RegistryGate {
   std::mutex mutex;
   std::condition_variable changed;
   bool armed = false, held = false, released = false;
   std::thread holder;
-  std::optional<rex::cvar::FlagRegistrar> flag;
-  void Register() {
-    rex::cvar::FlagEntry entry;
-    entry.name = "x360n_probe_registry_gate"; entry.type = rex::cvar::FlagType::String;
-    entry.category = "Probe"; entry.description = "Diagnostic registry lock holder";
-    entry.setter = [](std::string_view) { return false; };
-    entry.getter = [this] {
-      std::unique_lock lock(mutex);
-      if (armed) {
-        held = true; changed.notify_all();
-        changed.wait_for(lock, std::chrono::seconds(6), [&] { return released; });
+  rex::SettingOwner owner{"x360n_probe"};
+  struct GateSetting final : rex::SettingBase {
+    RegistryGate& gate;
+    GateSetting(rex::SettingOwner& owner, RegistryGate& gate)
+        : SettingBase(owner,"registry_gate",rex::SettingType::kString,"Diagnostic registry lock holder"),gate(gate) {}
+    bool Store(std::string_view) override { return true; }
+    void Publish() override {}
+    void Notify() override {}
+    std::string RenderDefault() const override { return {}; }
+    std::string Render() const override {
+      std::unique_lock lock(gate.mutex);
+      if(gate.armed) {
+        gate.held=true;gate.changed.notify_all();
+        gate.changed.wait_for(lock,std::chrono::seconds(6),[&]{return gate.released;});
       }
-      return std::string();
-    };
-    entry.command_callback = [](std::string_view) {};
-    flag.emplace(std::move(entry));
+      return "armed";
+    }
+  } flag{owner,*this};
+  void Register() {
+    Require(bool(REX_SETTINGS().Register(owner)),"register diagnostic setting");
+    Require(bool(flag.SetText(rex::SettingLayer::kRuntime,"armed")),"arm diagnostic setting");
   }
   void Hold() {
     { std::lock_guard lock(mutex); armed = true; }
-    holder = std::thread([] { rex::cvar::ListModifiedFlags(); });
+    holder = std::thread([this] { REX_SETTINGS().Unregister(owner); });
     std::unique_lock lock(mutex);
     Require(changed.wait_for(lock, std::chrono::seconds(5), [&] { return held; }), "registry gate held");
   }
@@ -140,7 +146,7 @@ struct QueueTimestamps {
   Ptr<ID3D12QueryHeap> heap; Ptr<ID3D12Resource> readback; Ptr<ID3D12Fence> fence;
   Ptr<ID3D12CommandAllocator> allocators[2]; Ptr<ID3D12GraphicsCommandList> lists[2];
   uint64_t frequency = 0;
-  explicit QueueTimestamps(rex::ui::d3d12::D3D12Provider& provider) : queue(provider.GetDirectQueue()) {
+  explicit QueueTimestamps(rex::gpu::d3d12::D3D12Provider& provider) : queue(provider.GetDirectQueue()) {
     auto check = [](HRESULT hr) { Require(SUCCEEDED(hr), "queue timestamp setup"); };
     auto* device = provider.GetDevice();
     D3D12_QUERY_HEAP_DESC qd{D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 2, 0};
@@ -181,7 +187,7 @@ struct QueueTimestamps {
   }
 };
 enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked, kInterleaved, kSystemResolve };
-void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+void ReplayDraw(rex::gpu::XenosGraphicsDriverBase& gpu, rex::kernel::GuestAddressSpace& memory,
                 const std::filesystem::path& input, const std::filesystem::path& output,
                 ReplayMode replay, RegistryGate* gate = nullptr, QueueTimestamps* queue_timestamps = nullptr) {
   const unsigned repetitions = replay == ReplayMode::kStress ? 4096 : 1;
@@ -214,17 +220,17 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     unsigned end = p + 1; while (end < pages.size() && pages[end]) ++end;
     const uint32_t address = 0xA0000000u + (p << 16);
     Require(memory.LookupHeap(address)->AllocFixed(address, (end - p) << 16, 65536,
-        rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-        rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite), "snapshot allocation");
+        rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+        rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite), "snapshot allocation");
     p = end;
   }
   for (const auto& [address, bytes] : ranges)
     std::memcpy(memory.TranslatePhysical(address), bytes.data(), bytes.size());
   constexpr unsigned width = 1280, height = 720;
-  const auto image = memory.SystemHeapAlloc(width * 736 * 4, 4096, rex::memory::kSystemHeapPhysical);
-  const auto ring = memory.SystemHeapAlloc(262144, 4096, rex::memory::kSystemHeapPhysical);
-  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto image = memory.SystemHeapAlloc(width * 736 * 4, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto ring = memory.SystemHeapAlloc(262144, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(image && ring && done && vertices, "replay allocations");
   std::vector<uint32_t> words;
   auto set = [&](unsigned index, uint32_t value) { words.insert(words.end(), {index, value}); };
@@ -255,17 +261,17 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
   auto resolve_into = [&](std::vector<uint32_t>& out, uint32_t dest, uint32_t copy_control) {
     auto put = [&](unsigned index, uint32_t value) { out.insert(out.end(), {index, value}); };
-    xe_gpu_vertex_fetch_t vf{}; vf.type = FetchConstantType::kVertex;
+    VertexFetch vf{}; vf.type = FetchConstantType::kVertex;
     vf.address = memory.GetPhysicalAddress(vertices) >> 2; vf.size = 6; vf.endian = Endian::kNone;
-    put(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, vf.dword_0);
-    put(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, vf.dword_1);
-    reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kCopy; put(XE_GPU_REG_RB_MODECONTROL, mode.value);
-    put(XE_GPU_REG_PA_SC_WINDOW_OFFSET, 0); put(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000);
-    put(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, width | (height << 16));
-    put(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(dest));
-    put(XE_GPU_REG_RB_COPY_DEST_PITCH, width | (height << 16));
-    put(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_2_10_10_10) << 7);
-    put(XE_GPU_REG_RB_COPY_CONTROL, copy_control);
+    put(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0), vf.dword_0);
+    put(uint32_t(Register::SHADER_CONSTANT_FETCH_00_1), vf.dword_1);
+    reg::RB_MODECONTROL mode{}; mode.edram_mode = EDRAMMode::kCopy; put(uint32_t(Register::RB_MODECONTROL), mode.value);
+    put(uint32_t(Register::PA_SC_WINDOW_OFFSET), 0); put(uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL), 0x80000000);
+    put(uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR), width | (height << 16));
+    put(uint32_t(Register::RB_COPY_DEST_BASE), memory.GetPhysicalAddress(dest));
+    put(uint32_t(Register::RB_COPY_DEST_PITCH), width | (height << 16));
+    put(uint32_t(Register::RB_COPY_DEST_INFO), uint32_t(TextureFormat::k_2_10_10_10) << 7);
+    put(uint32_t(Register::RB_COPY_CONTROL), copy_control);
     reg::VGT_DRAW_INITIATOR rect = draw; rect.prim_type = PrimitiveType::kRectangleList; rect.num_indices = 3;
     out.insert(out.end(), {Packet(PM4_DRAW_INDX_2, 1), rect.value});
   };
@@ -281,30 +287,30 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   } else if (replay == ReplayMode::kInterleaved) {
     // ROV draws around a resolve that clears the color target and around a
     // render target base moved over half of the same EDRAM range.
-    const auto aux = memory.SystemHeapAlloc(width * 736 * 4, 4096, rex::memory::kSystemHeapPhysical);
+    const auto aux = memory.SystemHeapAlloc(width * 736 * 4, 4096, rex::kernel::kSystemHeapPhysical);
     Require(aux != 0, "interleaved resolve allocation");
     add_draws(1); end_kick(1);
     add_draws(kInterleavedDraws);
-    set(XE_GPU_REG_RB_COLOR_CLEAR, 0);
+    set(uint32_t(Register::RB_COLOR_CLEAR), 0);
     reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1); copy.color_clear_enable = 1;
     resolve(aux, copy.value);
-    for (unsigned index : {XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1,
-        XE_GPU_REG_RB_MODECONTROL, XE_GPU_REG_PA_SC_WINDOW_OFFSET, XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL,
-        XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR}) set(index, regs[index]);
+    for (unsigned index : {uint32_t(Register::SHADER_CONSTANT_FETCH_00_0), uint32_t(Register::SHADER_CONSTANT_FETCH_00_1),
+        uint32_t(Register::RB_MODECONTROL), uint32_t(Register::PA_SC_WINDOW_OFFSET), uint32_t(Register::PA_SC_WINDOW_SCISSOR_TL),
+        uint32_t(Register::PA_SC_WINDOW_SCISSOR_BR)}) set(index, regs[index]);
     add_draws(kInterleavedDraws);
-    reg::RB_COLOR_INFO moved; moved.value = regs[XE_GPU_REG_RB_COLOR_INFO];
+    reg::RB_COLOR_INFO moved; moved.value = regs[uint32_t(Register::RB_COLOR_INFO)];
     moved.color_base = (moved.color_base + 360) % 2048;
-    set(XE_GPU_REG_RB_COLOR_INFO, moved.value);
+    set(uint32_t(Register::RB_COLOR_INFO), moved.value);
     add_draws(kInterleavedDraws);
-    set(XE_GPU_REG_RB_COLOR_INFO, regs[XE_GPU_REG_RB_COLOR_INFO]);
+    set(uint32_t(Register::RB_COLOR_INFO), regs[uint32_t(Register::RB_COLOR_INFO)]);
     add_draws(kInterleavedDraws);
   } else if (replay == ReplayMode::kSystemResolve) {
     // A system command buffer resolves the title's target, then title draws keep
     // the command processor busy: its completion fence must not become visible
     // before that resolve is in guest memory.
-    system_dest = memory.SystemHeapAlloc(frame_bytes, 4096, rex::memory::kSystemHeapPhysical);
-    system_fence = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-    const auto list_buffer = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
+    system_dest = memory.SystemHeapAlloc(frame_bytes, 4096, rex::kernel::kSystemHeapPhysical);
+    system_fence = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
+    const auto list_buffer = memory.SystemHeapAlloc(65536, 4096, rex::kernel::kSystemHeapPhysical);
     Require(system_dest && system_fence && list_buffer, "system resolve allocations");
     add_draws(1); end_kick(1);
     std::vector<uint32_t> list;
@@ -318,21 +324,20 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     add_draws(repetitions);
   }
   resolve(image, 0x100000);
-  xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+  TextureFetch fetch{}; fetch.type = FetchConstantType::kTexture;
   fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_2_10_10_10;
   fetch.base_address = memory.GetPhysicalAddress(image) >> 12; fetch.pitch = width / 32;
   fetch.size_2d.width = width - 1; fetch.size_2d.height = height - 1; fetch.swizzle = 0x688; fetch.tiled = true;
   const auto* raw_fetch = reinterpret_cast<const uint32_t*>(&fetch);
-  for (unsigned i = 0; i < 6; ++i) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0+i, raw_fetch[i]);
-  set(XE_GPU_REG_DC_LUT_RW_MODE, 1); set(XE_GPU_REG_DC_LUT_WRITE_EN_MASK, 7); set(XE_GPU_REG_DC_LUT_RW_INDEX, 0);
-  for (unsigned i = 0; i < 128; ++i) for (unsigned c = 0; c < 3; ++c) set(XE_GPU_REG_DC_LUT_PWL_DATA, (i*512) | (512u<<16));
+  for (unsigned i = 0; i < 6; ++i) set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)+i, raw_fetch[i]);
+  set(uint32_t(Register::DC_LUT_RW_MODE), 1); set(uint32_t(Register::DC_LUT_WRITE_EN_MASK), 7); set(uint32_t(Register::DC_LUT_RW_INDEX), 0);
+  for (unsigned i = 0; i < 128; ++i) for (unsigned c = 0; c < 3; ++c) set(uint32_t(Register::DC_LUT_PWL_DATA), (i*512) | (512u<<16));
   words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, memory.GetPhysicalAddress(image), width, height});
   end_kick(0);
   Require(words.size()*4 <= 262144, "replay ring capacity");
   for (size_t i = 0; i < words.size(); ++i)
     rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring+uint32_t(i*4)), words[i]);
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 15);
-  auto* mmio = memory.LookupVirtualMappedRange(0x7fc80714);
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   using clock = std::chrono::steady_clock;
   auto wait = [&](uint32_t value, clock::duration limit, bool spin) {
@@ -355,7 +360,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       timed_start = start; timed_worker_cpu = cpu_before;
       if (queue_timestamps) queue_timestamps->Mark(0);
     }
-    mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kick.end));
+    gpu.WriteRegister(uint32_t(Register::CP_RB_WPTR), uint32_t(kick.end));
     if (replay == ReplayMode::kSystemResolve && k == 1) {
       // Read the resolve destination the moment the guest could see the fence.
       auto* fence = memory.TranslateVirtual<volatile uint32_t*>(system_fence);
@@ -374,7 +379,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       gate->Release();
       std::cout << "registry_locked draws=" << kick.draws << " retired_while_locked=" << retired
                 << " wall_ms=" << wall_ms << '\n';
-      Require(retired, "non-memexport draws waited for the cvar registry lock");
+      Require(retired, "non-memexport draws waited for the settings registry lock");
     }
     if (replay == ReplayMode::kTiming && k > 0 && kick.draws)
       std::cout << "segment=" << k << " draws=" << kick.draws << " wall_ms=" << wall_ms
@@ -391,7 +396,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     Require(fence_seen_first, "system command fence was not observed while title draws were pending");
     Require(matches, "system command fence became visible before its resolve reached guest memory");
   }
-  rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
+  rex::gpu::RawImage capture; Require(gpu.CaptureGuestOutput(capture), "isolated draw capture");
   if (replay == ReplayMode::kTiming) {
     // The capture needs the resolve, hence every timed draw, done on the GPU:
     // unlike the segment marker, this interval includes work still in flight.
@@ -402,7 +407,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     constexpr unsigned kQueries = 1000000;
     unsigned modified = 0;
     const auto start = clock::now();
-    for (unsigned i = 0; i < kQueries; ++i) modified += rex::cvar::HasNonDefaultValue("vulkan_readback_memexport");
+    for (unsigned i = 0; i < kQueries; ++i) modified += ([] { const auto setting=REX_SETTINGS().Find("gpu.xenos.readback_memexport"); return setting && (*setting)->GetLayer()!=rex::SettingLayer::kDefault; })();
     std::cout << "registry_query_ns=" << std::chrono::duration<double, std::nano>(clock::now() - start).count() / kQueries
               << " modified=" << modified << '\n';
   }
@@ -414,9 +419,9 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
 // not be rejected; the same draw with c127.x = 1 must still be, which proves
 // that it reached the descriptor check and that no proof is cached across a
 // constant update. Verdicts come from the backend's own log lines.
-void PredicatedFetchDraws(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+void PredicatedFetchDraws(rex::gpu::XenosGraphicsDriverBase& gpu, rex::kernel::GuestAddressSpace& memory,
                           const std::filesystem::path& output) {
-  using namespace rex::graphics::ucode;
+  using namespace rex::xenos::ucode;
   auto exec = [](ControlFlowOpcode opcode, uint32_t address, uint32_t sequence, bool condition = false) {
     return address | (uint64_t(1) << 12) | (uint64_t(sequence) << 16) | (uint64_t(condition) << 42) |
            (uint64_t(opcode) << 44);
@@ -435,24 +440,24 @@ void PredicatedFetchDraws(rex::system::IGraphicsSystem& gpu, rex::memory::Memory
                        0xFF8u | (uint32_t(VertexFormat::k_32_FLOAT) << 16) | (1u << 31), 1});
   // max oPos, c0, c0.
   vs.insert(vs.end(), {62u | (1u << 15) | (0xFu << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24});
-  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
-  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
   Require(ring && done, "predicated fetch allocations");
   std::vector<uint32_t> words;
   auto set = [&](unsigned index, uint32_t value) { words.insert(words.end(), {index, value}); };
-  reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kDepthOnly; set(XE_GPU_REG_RB_MODECONTROL, mode.value);
-  reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 1280; set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
-  reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
-  set(XE_GPU_REG_SHADER_CONSTANT_000_X + 3, 0x3F800000);
-  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + 90 * 2, 0x00000001);
-  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + 90 * 2 + 1, 0);
+  reg::RB_MODECONTROL mode{}; mode.edram_mode = EDRAMMode::kDepthOnly; set(uint32_t(Register::RB_MODECONTROL), mode.value);
+  reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 1280; set(uint32_t(Register::RB_SURFACE_INFO), surface.value);
+  reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3; set(uint32_t(Register::SQ_PROGRAM_CNTL), program.value);
+  set(uint32_t(Register::SHADER_CONSTANT_000_X) + 3, 0x3F800000);
+  set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + 90 * 2, 0x00000001);
+  set(uint32_t(Register::SHADER_CONSTANT_FETCH_00_0) + 90 * 2 + 1, 0);
   words.insert(words.end(), {Packet(PM4_IM_LOAD_IMMEDIATE, unsigned(vs.size() + 2)), 0, uint32_t(vs.size())});
   words.insert(words.end(), vs.begin(), vs.end());
   reg::VGT_DRAW_INITIATOR draw{};
   draw.prim_type = PrimitiveType::kTriangleList; draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = 3;
   std::vector<size_t> kicks;
   for (uint32_t c127 : {0u, 0x3F800000u}) {
-    set(XE_GPU_REG_SHADER_CONSTANT_000_X + 4 * 127, c127);
+    set(uint32_t(Register::SHADER_CONSTANT_000_X) + 4 * 127, c127);
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value,
                                Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), uint32_t(kicks.size() + 1)});
     kicks.push_back(words.size());
@@ -461,21 +466,24 @@ void PredicatedFetchDraws(rex::system::IGraphicsSystem& gpu, rex::memory::Memory
   for (size_t i = 0; i < words.size(); ++i)
     rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t(i * 4)), words[i]);
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 13);
-  auto* mmio = memory.LookupVirtualMappedRange(0x7fc80714);
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   auto count_log = [&](const char* text) {
-    rex::FlushLogging();
+    rex::log::Flush();
     std::ifstream log(output / "runtime.log");
     unsigned n = 0;
-    for (std::string line; std::getline(log, line);) n += line.find(text) != std::string::npos;
+    for (std::string line; std::getline(log, line);) {
+      const bool matching_draw = std::string_view(text) != "failed in the driver" ||
+          line.find("PM4_DRAW_INDX_2(") != std::string::npos;
+      n += matching_draw && line.find(text) != std::string::npos;
+    }
     return n;
   };
   const char* const kRejected = "Vertex fetch constant 90 (";
-  const char* const kFailed = "Failed in backend";
+  const char* const kFailed = "failed in the driver";
   // runtime.log is appended to across runs into the same directory.
   const unsigned rejected_before = count_log(kRejected), failed_before = count_log(kFailed);
   for (size_t k = 0; k < kicks.size(); ++k) {
-    mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kicks[k]));
+    gpu.WriteRegister(uint32_t(Register::CP_RB_WPTR), uint32_t(kicks[k]));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     while (*marker != k + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -498,16 +506,12 @@ int wmain(int argc, wchar_t** argv) {
       backend = plugin.substr(colon + 1); plugin.resize(colon);
     }
     std::filesystem::create_directories(output);
-    rex::InitLogging((output / "runtime.log").string().c_str());
-    rex::Runtime rt(output, output / "user");
-    rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-    Require(rt.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    auto gpu = rex::system::LoadGpuPlugin(plugin, backend);
-    Require(bool(gpu), "load plugin ABI");
-    const auto implementation = static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->name();
-    if (backend == "vulkan") Require(implementation == (plugin == "native" ? "Native (Experimental) Vulkan" : "Vulkan"), "requested actual Vulkan graphics system");
-    if (backend == "d3d12" && plugin == "xenos") Require(implementation == "Direct3D 12", "requested actual D3D12 graphics system");
-    std::cout << "API selected: " << backend << "; implementation: " << implementation << '\n';
+    std::vector<std::string> options{
+        "--app.user_root="+rex::string::PathToUTF8(output/"user"),
+        "--log.file_name="+rex::string::PathToUTF8(std::filesystem::absolute(output/"runtime.log"))};
+    auto setting=[&](std::string_view name,std::string_view value) {
+      options.emplace_back("--"+std::string(name)+"="+std::string(value));
+    };
     const std::wstring_view replay_flag = argc == 5 ? std::wstring_view(argv[3]) : std::wstring_view();
     const bool stress = replay_flag == L"--draw-stress";
     const ReplayMode replay_mode = stress ? ReplayMode::kStress
@@ -517,82 +521,92 @@ int wmain(int argc, wchar_t** argv) {
         : replay_flag == L"--draw-system-resolve" ? ReplayMode::kSystemResolve : ReplayMode::kSingle;
     const bool draw_replay = replay_flag == L"--draw-replay" || replay_mode != ReplayMode::kSingle;
     RegistryGate registry_gate;
-    if (replay_mode == ReplayMode::kRegistryLocked) registry_gate.Register();
-    if (plugin == "native" && draw_replay) rex::cvar::SetFlagByName("native_stats", "true");
-    if (stress) rex::cvar::SetFlagByName("d3d12_debug", "true");
+    if (plugin == "native" && draw_replay) setting("native_stats", "true");
+    if (stress) setting("gpu.d3d12.debug", "true");
     if (draw_replay) {
       std::filesystem::create_directories(output / "shaders");
-      rex::cvar::SetFlagByName("dump_shaders", (output / "shaders").string());
-      rex::cvar::SetFlagByName("d3d12_dxbc_disasm", "true");
+      setting("gpu.xenos.dump_shaders", (output / "shaders").string());
+      setting("gpu.d3d12.dxbc_disasm", "true");
     }
     if (draw_replay && plugin == "xenos") {
       // ROV matches Native; X360N_PROBE_XENOS_RT_PATH=rtv measures host render targets.
       char rt_path[8]{};
       const DWORD rt_length = GetEnvironmentVariableA("X360N_PROBE_XENOS_RT_PATH", rt_path, sizeof(rt_path));
-      rex::cvar::SetFlagByName("render_target_path_d3d12", rt_length && rt_length < sizeof(rt_path) ? rt_path : "rov");
-      rex::cvar::SetFlagByName("d3d12_bindless", "true");
-      rex::cvar::SetFlagByName("async_shader_compilation", "false");
-      rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "0");
+      setting("gpu.d3d12.render_target_path", rt_length && rt_length < sizeof(rt_path) ? rt_path : "rov");
+      setting("gpu.d3d12.bindless", "true");
+      setting("gpu.xenos.async_shader_compilation", "false");
+      setting("gpu.d3d12.pipeline_creation_threads", "0");
     }
     const bool driver_cache = argc == 4 && std::wstring_view(argv[3]) == L"--pipeline-driver-cache";
     const bool predicated_fetch = driver_cache || (argc == 4 && std::wstring_view(argv[3]) == L"--predicated-fetch");
     if (predicated_fetch) {
       // An async placeholder pipeline would skip the draw before the check.
-      rex::cvar::SetFlagByName("async_shader_compilation", "false");
+      setting("gpu.xenos.async_shader_compilation", "false");
       std::filesystem::create_directories(output / "shaders");
-      rex::cvar::SetFlagByName("dump_shaders", (output / "shaders").string());
+      setting("gpu.xenos.dump_shaders", (output / "shaders").string());
     }
-    if (argc == 4 && std::wstring_view(argv[3]) == L"--abi") {
-      using namespace rex::system;
-      Require(plugin == "native", "ABI rejection test requires Native");
-      HMODULE module = nullptr;
-      for (const auto* name : {L"rexgpu-native.dll", L"rexgpu-natived.dll", L"rexgpu-nativerd.dll"})
-        if (auto loaded = GetModuleHandleW(name)) module = loaded;
-      Require(module != nullptr, "Native module loaded");
-      const auto create = reinterpret_cast<GpuCreateFn>(GetProcAddress(module, kGpuCreateSymbol));
-      const auto version = reinterpret_cast<GpuAbiVersionFn>(GetProcAddress(module, kGpuAbiVersionSymbol));
-      Require(create && version && version() == kGpuPluginAbiVersion, "versioned exports");
-      GpuCreateInfo info{sizeof(GpuCreateInfo), "d3d12"};
-      Require(create(kGpuPluginAbiVersion + 1, &info) == nullptr, "reject wrong ABI");
-      Require(create(kGpuPluginAbiVersion, nullptr) == nullptr, "reject null create info");
-      info.struct_size = sizeof(GpuCreateInfo) - 1;
-      Require(create(kGpuPluginAbiVersion, &info) == nullptr, "reject short create info");
-      Require(!LoadGpuPlugin("native", "invalid-api"), "reject unsupported API without fallback");
-#if REX_HAS_VULKAN
-      auto vulkan = LoadGpuPlugin("native", "vulkan");
-      Require(bool(vulkan), "load enabled Native Vulkan API");
-      Require(static_cast<rex::graphics::GraphicsSystem*>(vulkan.get())->name() ==
-                  "Native (Experimental) Vulkan", "Vulkan must not fall back to D3D12");
-      vulkan.reset();
+    const auto selected=plugin=="native" ? "native-"+backend : backend;
+    x360n::GPUProbeApp app(output,plugin=="native" ? "rexgpu-native" : "rexgpu-xenos-"+backend,selected);
+    const auto initialized=app.Init(rex::CLIArgList::Parse(options));
+    if(!initialized)throw std::runtime_error(initialized.error().GetDescription());
+    Require(app.GetProbeDriver().GetName()==selected,"selected driver must not fall back");
+    std::cout<<"API selected: "<<backend<<"; implementation: "<<app.GetProbeDriver().GetName()<<'\n';
+    if(replay_mode==ReplayMode::kRegistryLocked)registry_gate.Register();
+    if(argc==4 && std::wstring_view(argv[3])==L"--abi") {
+      Require(plugin=="native","ABI rejection test requires Native");
+      auto module=GetModuleHandleW(L"rexgpu-native.dll");Require(module!=nullptr,"Native module loaded");
+      using Create=rex::IInterface*(*)(const char*,rex::u32);
+      using Enumerate=rex::u32(*)(rex::InterfaceType*,rex::u32);
+      const auto create=reinterpret_cast<Create>(GetProcAddress(module,"ReXCreateInterface"));
+      const auto enumerate=reinterpret_cast<Enumerate>(GetProcAddress(module,"ReXEnumerateInterfaces"));
+      Require(create && enumerate && GetProcAddress(module,"ReXBuildIdentity"),"official versioned module exports");
+      Require(create(rex::IModule::kInterface.name,rex::IModule::kInterface.version+1)==nullptr,"reject wrong interface ABI");
+      Require(create("unsupported-interface",1)==nullptr,"reject unknown interface");
+      auto* provider=static_cast<rex::IDriverModule*>(create(rex::IDriverModule::kInterface.name,rex::IDriverModule::kInterface.version));
+      Require(provider!=nullptr,"official graphics provider interface");
+      Require(!static_cast<rex::IModule*>(create(rex::IModule::kInterface.name,rex::IModule::kInterface.version))->QueryInterface(rex::IDriverModule::kInterface.name,rex::IDriverModule::kInterface.version+1),"reject wrong provider ABI");
+      Require(enumerate(nullptr,0)>=2,"module lists its interfaces without an output buffer");
+      const auto drivers=provider->GetDrivers();
+      Require(std::none_of(drivers.begin(),drivers.end(),[](const auto& driver){return driver.name=="invalid-api";}),"reject unsupported API without fallback");
+#if X360N_PROBE_HAS_VULKAN
+      Require(std::any_of(drivers.begin(),drivers.end(),[](const auto& driver){return driver.name=="native-vulkan";}),"enabled Vulkan driver is registered");
 #else
-      Require(!LoadGpuPlugin("native", "vulkan"), "reject disabled Vulkan without fallback");
+      Require(std::none_of(drivers.begin(),drivers.end(),[](const auto& driver){return driver.name=="native-vulkan";}),"disabled Vulkan is unavailable");
 #endif
-      for (const auto* name : {L"rexgpu-xenos.dll", L"rexgpu-xenosd.dll", L"rexgpu-xenosrd.dll"})
-        Require(GetModuleHandleW(name) == nullptr, "Native must not load Xenos plugin");
-      gpu.reset(); rt.Shutdown(); rex::FlushLogging();
-      std::cout << "PASS ABI1, invalid ABI/info/API rejected, configured Vulkan contract, no Xenos loaded\n";
-      return 0;
+      for(const auto* name:{L"rexgpu-xenos.dll",L"rexgpu-xenos-d3d12.dll",L"rexgpu-xenos-vulkan.dll"})
+        Require(GetModuleHandleW(name)==nullptr,"Native must not load Xenos plugin");
+      app.Shutdown();std::cout<<"PASS official module ABI, invalid interface/API rejection, configured Vulkan, no Xenos loaded\n";return 0;
     }
-    Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
-    Require(gpu->SetupGuestGpu(rt.function_dispatcher(), rt.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
-    struct ShutdownGuard {
-      rex::system::IGraphicsSystem* gpu;
-      ~ShutdownGuard() { if (gpu) gpu->Shutdown(); }
-    } shutdown{gpu.get()};
-    auto* memory = rt.memory();
+    auto& graphics = static_cast<rex::gpu::IGraphicsDriver&>(app.GetProbeDriver());
+    auto* gpu = static_cast<rex::gpu::XenosGraphicsDriverBase*>(graphics.AsXenos());
+    Require(gpu != nullptr, "GPU probe requires a Xenos-family driver");
+    const auto surface = graphics.SetSurface({});
+    if (!surface) throw std::runtime_error(surface.error().GetDescription());
+    rex::kernel::TitleRuntime runtime(rex::ppc::PPCImage{});
+    const auto game = runtime.GetTitlePaths().game_root.Set(output);
+    const auto entry = runtime.GetTitlePaths().entry.Set(std::string{});
+    Require(bool(game) && bool(entry), "GPU probe paths unavailable");
+    const auto loaded = runtime.Load();
+    if (!loaded) throw std::runtime_error(loaded.error().GetDescription());
+    auto* memory = dynamic_cast<rex::kernel::GuestAddressSpace*>(&runtime.GetGuestHeap());
+    Require(memory != nullptr, "GPU probe requires the canonical address space");
+    const auto attached = graphics.AttachTitle(rex::TitleInfo{}, runtime.GetPhysicalMemory(),
+        runtime.GetPhysicalWriteWatch(), runtime.GetGuestInterrupts());
+    if (!attached) throw std::runtime_error(attached.error().GetDescription());
+    rex::ScopeGuard detach([&] { graphics.DetachTitle(); });
     if (predicated_fetch) {
       Require(plugin == "xenos", "predicated fetch probe requires Xenos");
-#if REX_HAS_VULKAN
+#if X360N_PROBE_HAS_VULKAN
       if (driver_cache) {
         Require(backend == "vulkan", "driver cache probe requires Vulkan");
-        DriverCacheProbe::Install(*static_cast<rex::graphics::GraphicsSystem*>(gpu.get()));
+        DriverCacheProbe::Install(*static_cast<rex::gpu::XenosGraphicsDriverBase*>(gpu));
       }
 #else
       Require(!driver_cache, "driver cache probe requires Vulkan build");
 #endif
       PredicatedFetchDraws(*gpu, *memory, output);
-      gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
-#if REX_HAS_VULKAN
+      detach.Reset(); runtime.Unload(); app.Shutdown();
+#if X360N_PROBE_HAS_VULKAN
       if (driver_cache) {
         Require(DriverCacheProbe::calls.load() != 0, "no graphics pipelines observed");
         Require(DriverCacheProbe::uncached.load() == 0, "Xenos Vulkan guest pipelines bypass the driver cache");
@@ -602,15 +616,15 @@ int wmain(int argc, wchar_t** argv) {
       std::cout << "PASS predicated-out invalid vertex fetch\n"; return 0;
     }
     if (draw_replay) {
-      if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
+      if (plugin == "native") gpu->GetCommandProcessor()->InitializeShaderStorage(output / "pipeline-cache", 0, true);
       std::optional<QueueTimestamps> queue_timestamps;
       if (replay_mode == ReplayMode::kTiming && backend == "d3d12")
-        queue_timestamps.emplace(*static_cast<rex::ui::d3d12::D3D12Provider*>(
-            static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->provider()));
+        queue_timestamps.emplace(*static_cast<rex::gpu::d3d12::D3D12Provider*>(
+            static_cast<rex::gpu::XenosGraphicsDriverBase*>(gpu)->GetProvider()));
       ReplayDraw(*gpu, *memory, argv[4], output, replay_mode, &registry_gate,
                  queue_timestamps ? &*queue_timestamps : nullptr);
       queue_timestamps.reset();  // Its D3D12 objects go before the provider's device.
-      gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
+      detach.Reset(); runtime.Unload(); app.Shutdown();
       std::cout << "PASS isolated draw capture\n"; return 0;
     }
     const bool replay = argc == 5 && std::wstring_view(argv[3]) == L"--replay";
@@ -629,24 +643,22 @@ int wmain(int argc, wchar_t** argv) {
       Require(bool(lut), "replay gamma ramp");
     }
     const unsigned image_bytes = pitch * ((height + 31) & ~31u) * 4;
-    const auto image = memory->SystemHeapAlloc(image_bytes, 4096, rex::memory::kSystemHeapPhysical);
-    const auto ring = memory->SystemHeapAlloc(8192, 4096, rex::memory::kSystemHeapPhysical);
-    const auto done = memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+    const auto image = memory->SystemHeapAlloc(image_bytes, 4096, rex::kernel::kSystemHeapPhysical);
+    const auto ring = memory->SystemHeapAlloc(8192, 4096, rex::kernel::kSystemHeapPhysical);
+    const auto done = memory->SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical);
     Require(image && ring && done, "guest allocations");
     const auto physical_image = memory->GetPhysicalAddress(image);
     const auto physical_ring = memory->GetPhysicalAddress(ring);
     const auto physical_done = memory->GetPhysicalAddress(done);
     Require(physical_image != UINT32_MAX && physical_ring != UINT32_MAX && physical_done != UINT32_MAX, "physical allocation translation");
-    auto* mmio = memory->LookupVirtualMappedRange(0x7fc80714);
-    Require(mmio != nullptr, "GPU MMIO registration");
     // --overlay-system programs the plane through VdSwap's system command buffer
     // (PM4_XE_SYSTEM_COMMANDS), which also clobbers the title's scanout fetch.
     const bool overlay_system = argc == 4 && std::wstring_view(argv[3]) == L"--overlay-system";
     const bool overlay_test = overlay_system || (argc == 4 && std::wstring_view(argv[3]) == L"--overlay");
-    const auto overlay_image = overlay_test ? memory->SystemHeapAlloc(64 * 64 * 4, 4096, rex::memory::kSystemHeapPhysical) : 0;
+    const auto overlay_image = overlay_test ? memory->SystemHeapAlloc(64 * 64 * 4, 4096, rex::kernel::kSystemHeapPhysical) : 0;
     if (overlay_test) Require(overlay_image != 0, "overlay allocation");
-    const auto system_list = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
-    const auto system_fence = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
+    const auto system_list = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical) : 0;
+    const auto system_fence = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::kernel::kSystemHeapPhysical) : 0;
     if (overlay_system) Require(system_list && system_fence, "system command allocation");
     if (argc == 4 && !overlay_test) {
       std::vector<uint32_t> words;
@@ -662,7 +674,7 @@ int wmain(int argc, wchar_t** argv) {
       for (unsigned i = 0; i < words.size(); ++i)
         rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(ring + i * 4), words[i]);
       gpu->InitializeRingBuffer(physical_ring, 10);
-      mmio->write(nullptr, mmio->callback_context, 0x7fc80714, unsigned(words.size()));
+      gpu->WriteRegister(uint32_t(Register::CP_RB_WPTR), unsigned(words.size()));
       auto* marker = memory->TranslateVirtual<volatile uint32_t*>(done);
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       while (*marker != 1 && std::chrono::steady_clock::now() < deadline)
@@ -677,7 +689,7 @@ int wmain(int argc, wchar_t** argv) {
     for (unsigned frame = replay ? 24 : 0; frame < (replay ? 25u : 48u); ++frame) {
       if (overlay_test) width = (frame & 1) ? 192 : 256; // Resize every frame.
       const bool pwl = frame >= 24;
-      xe_gpu_texture_fetch_t fetch{};
+      TextureFetch fetch{};
       fetch.type = FetchConstantType::kTexture; fetch.dimension = DataDimension::k2DOrStacked;
       fetch.format = TextureFormat::k_8_8_8_8; fetch.pitch = pitch / 32;
       if (pwl) fetch.format = frame & 2 ? TextureFormat::k_2_10_10_10 : TextureFormat::k_2_10_10_10_AS_16_16_16_16;
@@ -692,7 +704,7 @@ int wmain(int argc, wchar_t** argv) {
         uint32_t color = x | ((y * 2) << 8) | (((x ^ y ^ frame) & 255) << 16) | 0xff000000;
         if (pwl) color = (x * 4 + (y & 3)) | ((y * 8 + (x & 7)) << 10) |
             (((x ^ y ^ frame) * 4 + (y & 3)) << 20) | 0xc0000000;
-        color = GpuSwap(color, fetch.endianness);
+        color = GPUSwap(color, fetch.endianness);
         const auto offset = fetch.tiled ? texture_util::GetTiledOffset2D(x, y, pitch, 2) : (y * pitch + x) * 4;
         std::memcpy(data + offset, &color, 4);
       }
@@ -706,7 +718,7 @@ int wmain(int argc, wchar_t** argv) {
       // The same ABI system-frame path used by original dashboard transitions.
       if (!pwl) Require(gpu->PresentSystemFrame(reinterpret_cast<const uint32_t*>(&fetch), gamma), "system frame");
       // Then a real guest ring: TYPE0 fetch, XE_SWAP from VdSwap, MEM_WRITE completion.
-      std::vector<uint32_t> words{(5u << 16) | XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0};
+      std::vector<uint32_t> words{(5u << 16) | uint32_t(Register::SHADER_CONSTANT_FETCH_00_0)};
       const auto* raw = reinterpret_cast<const uint32_t*>(&fetch);
       words.insert(words.end(), raw, raw + 6);
       if (overlay_test) {
@@ -718,19 +730,19 @@ int wmain(int argc, wchar_t** argv) {
         std::vector<uint32_t> list;
         auto& target = overlay_system ? list : words;
         auto set = [&](unsigned index, uint32_t value) { target.insert(target.end(), {index, value}); };
-        set(XE_GPU_REG_D1OVL_ENABLE, frame % 4 != 3);
-        set(XE_GPU_REG_D1OVL_CONTROL1, 0);
-        set(XE_GPU_REG_D1OVL_SURFACE_ADDRESS, memory->GetPhysicalAddress(overlay_image));
-        set(XE_GPU_REG_D1OVL_PITCH, 64);
+        set(uint32_t(Register::D1OVL_ENABLE), frame % 4 != 3);
+        set(uint32_t(Register::D1OVL_CONTROL1), 0);
+        set(uint32_t(Register::D1OVL_SURFACE_ADDRESS), memory->GetPhysicalAddress(overlay_image));
+        set(uint32_t(Register::D1OVL_PITCH), 64);
         // Probe uses display coordinates from VdQueryVideoMode (1280x720).
-        set(XE_GPU_REG_D1OVL_START, (32 << 16) | 16);
-        set(XE_GPU_REG_D1OVL_END, (96 << 16) | 80);
-        set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_X, 32);
-        set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_Y, 16);
+        set(uint32_t(Register::D1OVL_START), (32 << 16) | 16);
+        set(uint32_t(Register::D1OVL_END), (96 << 16) | 80);
+        set(uint32_t(Register::D1OVL_SURFACE_OFFSET_X), 32);
+        set(uint32_t(Register::D1OVL_SURFACE_OFFSET_Y), 16);
         if (overlay_system) {
           // The title's state must be restored after the system buffer: a wrong
           // scanout fetch would fail the swap or the pixel comparison below.
-          target.push_back((5u << 16) | XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0);
+          target.push_back((5u << 16) | uint32_t(Register::SHADER_CONSTANT_FETCH_00_0));
           target.insert(target.end(), 6, 0);
           for (unsigned i = 0; i < list.size(); ++i)
             rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(system_list + i * 4), list[i]);
@@ -741,13 +753,13 @@ int wmain(int argc, wchar_t** argv) {
       }
       if (pwl) {
         // Exercise actual guest PWL programming, with independent RGB slopes.
-        words.insert(words.end(), {XE_GPU_REG_DC_LUT_RW_MODE, 1,
-            XE_GPU_REG_DC_LUT_WRITE_EN_MASK, 7, XE_GPU_REG_DC_LUT_RW_INDEX, 0});
+        words.insert(words.end(), {uint32_t(Register::DC_LUT_RW_MODE), 1,
+            uint32_t(Register::DC_LUT_WRITE_EN_MASK), 7, uint32_t(Register::DC_LUT_RW_INDEX), 0});
         for (unsigned i = 0; i < 128; ++i) for (unsigned c = 0; c < 3; ++c) {
           const unsigned shift = frame >= 40 ? c : 0;
           const unsigned base = ((i * 512) >> shift) & ~63u;
           const unsigned delta = 512 >> shift;
-          words.insert(words.end(), {XE_GPU_REG_DC_LUT_PWL_DATA, replay ? replay_lut[i * 3 + c] : base | (delta << 16)});
+          words.insert(words.end(), {uint32_t(Register::DC_LUT_PWL_DATA), replay ? replay_lut[i * 3 + c] : base | (delta << 16)});
         }
       }
       words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 7, 0, 0, 0, 0});
@@ -756,7 +768,7 @@ int wmain(int argc, wchar_t** argv) {
       for (unsigned i = 0; i < words.size(); ++i)
         rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(ring + i * 4), words[i]);
       gpu->InitializeRingBuffer(physical_ring, 10);
-      mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(words.size()));
+      gpu->WriteRegister(uint32_t(Register::CP_RB_WPTR), uint32_t(words.size()));
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       auto* marker = memory->TranslateVirtual<volatile uint32_t*>(done);
       while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
@@ -765,8 +777,8 @@ int wmain(int argc, wchar_t** argv) {
       if (overlay_system)
         Require(rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(system_fence)) == frame + 1,
                 "system command buffer completion fence");
-      rex::ui::RawImage capture;
-      Require(gpu->presenter()->CaptureGuestOutput(capture), "GPU capture");
+      rex::gpu::RawImage capture;
+      Require(gpu->CaptureGuestOutput(capture), "GPU capture");
       Require(capture.width == width && capture.height == height, "capture size");
       unsigned max_error = 0;
       for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
@@ -781,7 +793,7 @@ int wmain(int argc, wchar_t** argv) {
           uint32_t packed;
           const auto offset = fetch.tiled ? texture_util::GetTiledOffset2D(x, y, pitch, 2) : (y * pitch + x) * 4;
           std::memcpy(&packed, replay_pixels.data() + offset, 4);
-          packed = GpuSwap(packed, fetch.endianness);
+          packed = GPUSwap(packed, fetch.endianness);
           const unsigned channels[]{packed & 1023, (packed >> 10) & 1023, (packed >> 20) & 1023, (packed >> 30) * 341, 0, 1023};
           for (unsigned c = 0; c < 3; ++c) expected[c] = channels[(fetch.swizzle >> (c * 3)) & 7];
         }
@@ -822,12 +834,11 @@ int wmain(int argc, wchar_t** argv) {
                 << " max_channel_error=" << max_error << '\n';
       Require(max_error <= 1, "GPU pixel comparison exceeds one 8-bit level");
     }
-    gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset();
+    detach.Reset();
     memory->SystemHeapFree(image); memory->SystemHeapFree(ring); memory->SystemHeapFree(done);
     if (overlay_image) memory->SystemHeapFree(overlay_image);
     if (system_list) { memory->SystemHeapFree(system_list); memory->SystemHeapFree(system_fence); }
-    rt.Shutdown();
-    rex::FlushLogging();
+    runtime.Unload(); app.Shutdown();
     std::cout << "PASS plugin=" << plugin << " frames=" << (replay ? 1 : 48) << " checked_channels=" << tested
               << " elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count()
               << " shutdown=clean (diagnostic, not an FPS benchmark)\n";

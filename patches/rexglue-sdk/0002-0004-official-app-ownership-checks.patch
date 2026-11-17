@@ -1,0 +1,112 @@
+diff --git a/tests/unit/kernel/title_fakes.h b/tests/unit/kernel/title_fakes.h
+--- a/tests/unit/kernel/title_fakes.h
++++ b/tests/unit/kernel/title_fakes.h
+@@ -44,10 +44,14 @@
+ struct Counts {
+   std::atomic<int> graphics_attach{0};
+   std::atomic<int> graphics_detach{0};
++  std::atomic<int> graphics_shutdown{0}, input_shutdown{0}, ui_close{0};
++  std::atomic<bool> ui_closed_with_runtime{false}, fail_graphics_attach{false};
+   std::atomic<rex::u32> audio_channels{0};
+ 
+   void Reset() {
+     graphics_attach = graphics_detach = 0;
++    graphics_shutdown = input_shutdown = ui_close = 0;
++    ui_closed_with_runtime = fail_graphics_attach = false;
+     audio_channels = 0;
+   }
+ };
+@@ -68,7 +72,7 @@
+  public:
+   std::string_view GetName() const override { return "count"; }
+   rex::Result<void> Initialize(rex::IDriverContext&) override { return {}; }
+-  void Shutdown() override {}
++  void Shutdown() override { ++g_counts.input_shutdown; }
+   rex::u64 GetDeviceRevision() const override { return g_pad_revision; }
+   void EnumerateDevices(std::vector<rex::hid::PadDevice>& out) override { out = g_pads; }
+   rex::Result<rex::hid::PadState> GetDeviceState(rex::hid::PadDeviceID) override {
+@@ -102,10 +106,11 @@
+  public:
+   std::string_view GetName() const override { return "count"; }
+   rex::Result<void> Initialize(rex::IDriverContext&) override { return {}; }
+-  void Shutdown() override {}
++  void Shutdown() override { ++g_counts.graphics_shutdown; }
+   rex::Result<void> AttachTitle(const rex::TitleInfo&, rex::IPhysicalMemory&,
+                                 rex::IPhysicalWriteWatch&, rex::IGuestInterrupts&) override {
+     ++g_counts.graphics_attach;
++    if (g_counts.fail_graphics_attach) return rex::Err<void>(rex::ErrorCategory::kRuntime, "injected graphics attach failure");
+     return {};
+   }
+   void DetachTitle() override { ++g_counts.graphics_detach; }
+@@ -123,8 +128,17 @@
+   void WriteRegister(rex::u32, rex::u32) override {}
+ };
+ 
++class CountingUI final : public rex::test_ui::FakeUIDriver {
++ public:
++  void CloseUIWindow() override {
++    ++g_counts.ui_close;
++    if (REX_RUNTIME()) g_counts.ui_closed_with_runtime = true;
++    rex::test_ui::FakeUIDriver::CloseUIWindow();
++  }
++};
++
+ inline std::unique_ptr<rex::IDriver> CreateUI() {
+-  return std::make_unique<rex::test_ui::FakeUIDriver>();
++  return std::make_unique<CountingUI>();
+ }
+ inline std::unique_ptr<rex::IDriver> CreateInput() {
+   return std::make_unique<CountingInput>();
+diff --git a/tests/unit/ui/title_app_test.cpp b/tests/unit/ui/title_app_test.cpp
+--- a/tests/unit/ui/title_app_test.cpp
++++ b/tests/unit/ui/title_app_test.cpp
+@@ -27,6 +27,7 @@
+ #include <vector>
+ 
+ #include <rex/app/app.h>
++#include <rex/gpu/graphics_system.h>
+ #include <rex/path_settings.h>
+ #include <rex/cli.h>
+ #include <rex/platform/thread.h>
+@@ -439,6 +440,41 @@
+   CHECK(rex::test::g_counts.graphics_detach == 1);
+ }
+ 
++REX_TEST_CASE_METHOD(StepFixture, "setup and launch failures preserve app drivers and window until shutdown", "[ui][title_app][setup-ownership]") {
++  rex::ScopeGuard reset_attach([] { rex::test::g_counts.fail_graphics_attach = false; });
++  const auto invalid_host = +[](PPCContext&, rex::u8*) {};
++  const PPCFuncMapping invalid_mappings[] = {{0x00010000, invalid_host}, {0, nullptr}};
++  for (const unsigned failure : {0u, 1u, 2u}) {
++    CAPTURE(failure);
++    rex::test::g_counts.Reset();
++    auto image = rex::test::MakeTitleImage();
++    if (failure == 1) image.func_mappings = invalid_mappings;
++    else if (failure == 0) image.code_base = 0xFFFF0000;
++    StepApp app(image);
++    rex::test::g_counts.fail_graphics_attach = failure == 2;
++    REQUIRE(app.Start());
++    REQUIRE(app.GetUI().HasWindow());
++    REQUIRE(app.GetGraphics().HasDriver());
++    CHECK_FALSE(app.LaunchTitle());
++    // Official setup validates image tables before graphics attachment; failed attach owns no title state.
++    CHECK(rex::test::g_counts.graphics_attach == (failure == 2 ? 1 : 0));
++    CHECK(rex::test::g_counts.graphics_detach == 0);
++    CHECK(rex::test::g_counts.graphics_shutdown == 0);
++    CHECK(rex::test::g_counts.input_shutdown == 0);
++    CHECK(app.GetGraphics().HasDriver());
++    CHECK(app.GetUI().HasWindow());
++    CHECK(REX_RUNTIME() == nullptr);
++    CHECK(app.Shutdown() == 1);
++    CHECK(rex::test::g_counts.graphics_shutdown == 1);
++    CHECK(rex::test::g_counts.input_shutdown == 1);
++    CHECK(rex::test::g_counts.ui_close == 1);
++    CHECK_FALSE(rex::test::g_counts.ui_closed_with_runtime.load());
++    CHECK_FALSE(app.GetUI().HasWindow());
++    CHECK(app.Shutdown() == 1);
++    CHECK(rex::test::g_counts.graphics_shutdown == 1);
++  }
++}
++
+ REX_TEST_CASE_METHOD(StepFixture, "restart relaunches in process", "[ui][title_app]") {
+   StepApp app(rex::test::MakeTitleImage(rex::test::kDelayingEntry));
+   REQUIRE(app.Start());

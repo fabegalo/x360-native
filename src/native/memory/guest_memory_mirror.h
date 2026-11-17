@@ -5,23 +5,24 @@
 // watches retired before their callback, readback restricted to pages still
 // valid. See THIRD_PARTY_NOTICES.md.
 #include <rex/memory.h>
+#include <rex/guest.h>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <span>
 #include <vector>
 namespace x360n::native {
-class GuestMemoryMirror {
+class GuestMemoryMirror final : private rex::IPhysicalWriteListener {
  public:
   static constexpr uint32_t kSize = 1u << 29;
   // Records a copy of guest bytes [start, start + length) into the mirror.
   using Upload = std::function<void(uint32_t start, uint32_t length)>;
-  GuestMemoryMirror(rex::memory::Memory&, Upload);
+  GuestMemoryMirror(rex::IPhysicalMemory&, rex::IPhysicalWriteWatch&, Upload);
   ~GuestMemoryMirror();
   GuestMemoryMirror(const GuestMemoryMirror&) = delete;
   GuestMemoryMirror& operator=(const GuestMemoryMirror&) = delete;
-  // The process-wide region guest invalidations hold (recursive).
-  static std::unique_lock<std::recursive_mutex> Lock();
+  // The canonical write-watch lock held by guest invalidations.
+  rex::ScopeGuard Lock();
   // One-shot: called under Lock() when a CPU write or a GPU write (resolve)
   // touches the range, after the watch is retired. Must not watch/unwatch.
   using WatchCallback = void (*)(void* context, void* data, uint64_t argument, bool by_gpu);
@@ -60,16 +61,17 @@ class GuestMemoryMirror {
   };
   static constexpr uint32_t kBucketLog2 = 22;
   static constexpr uint32_t kBuckets = kSize >> kBucketLog2;
-  static std::pair<uint32_t, uint32_t> InvalidationThunk(void*, uint32_t, uint32_t, bool);
+  rex::PhysicalRange OnPhysicalWrite(rex::PhysicalRange, bool) override;
   std::pair<uint32_t, uint32_t> Invalidate(uint32_t start, uint32_t length, bool exact);
   void MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations = nullptr,
                  std::span<const uint64_t> snapshot_generations = {});
   void Fire(uint32_t page_first, uint32_t page_last, bool by_gpu);
   void Release(WatchRange*);
-  rex::memory::Memory& memory_;
+  rex::IPhysicalMemory& memory_;
+  rex::IPhysicalWriteWatch& watch_;
   Upload upload_;
   uint32_t page_log2_;
-  void* invalidation_handle_ = nullptr;
+  rex::ScopeGuard invalidation_handle_;
   // Writers hold Lock(); all live accesses to valid_ use atomic_ref because
   // RequestRange also reads it without the lock. Storage is fixed after ctor.
   std::vector<uint64_t> valid_, gpu_written_;

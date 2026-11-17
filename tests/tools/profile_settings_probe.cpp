@@ -1,13 +1,8 @@
+#include "tool_sdk.h"
 // Explicit CPU diagnostic. Loads authenticated XEX data, never its entrypoint,
 // and reads settings only from a new copy of the supplied console profile.
 #include "sha256.h"
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/offline_achievement_helpers.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xthread.h>
-#include <rex/ppc/func.h>
+#include "xam/offline_achievement_helpers.h"
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -44,29 +39,21 @@ int main(int argc, char** argv) {
           name == "console" || name == "offline-achievements-v1"))
         fs::copy(entry.path(), console / name, fs::copy_options::recursive);
     }
-    rex::Runtime runtime(game, console, {}, output / "cache", output / "metadata");
-    rex::RuntimeConfig config{};
-    config.tool_mode = true;
-    config.kernel_init = rex::kernel::InitializeKernel;
-    if (runtime.Setup(std::move(config))) return 5;
-    auto* state = runtime.kernel_state();
-    auto module = rex::system::object_ref<rex::system::UserModule>(new rex::system::UserModule(state));
-    auto guest_path = std::string("game:\\") + relative.generic_string();
-    const auto loaded = module->LoadFromFile(guest_path.c_str());
-    std::cout << "load=" << std::hex << loaded << std::endl;
-    if (loaded) return 6;
-    state->SetExecutableModule(module);
-    auto* memory = runtime.memory();
-    if (!rex::kernel::xam::AchievementGuestSpan(memory, ids, count * 4,
-                                               rex::memory::kMemoryProtectRead)) return 7;
-    auto* base = memory->virtual_membase();
-    auto* profile = state->user_profile();
-    std::cout << "title=" << std::hex << state->title_id() << " signed-in=" << profile->signin_state() << std::endl;
-    rex::system::OfflineAchievementTotals totals{}, title_totals{};
-    auto totals_result = state->offline_achievements().Totals(profile->identity().xuid, totals,
-                                                             state->title_id(), &title_totals);
+    x360n::DiagnosticToolApp app("profile_settings_probe",console);
+    if(!app.Start())return 5;
+    auto tool=app.Open(game,relative.generic_string());if(!tool)return 6;
+    auto& runtime=tool->GetRuntime();
+    auto* memory = (&rex::kernel::GetAddressSpace(runtime));
+    if (!memory->IsGuestRangeAccessible(ids, count * 4,
+                                               rex::kernel::kMemoryProtectRead)) return 7;
+    auto* base = memory->GetVirtualMembase();
+    auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
+    std::cout << "title=" << std::hex << REX_INTERFACE(rex::xam::IXAMTitleServices)->GetTitleID() << " signed-in=" << profile->GetSigninState() << std::endl;
+    rex::xam::OfflineAchievementTotals totals{}, title_totals{};
+    auto totals_result = REX_INTERFACE(rex::xam::IXAMTitleServices)->GetOfflineAchievements().Totals(profile->GetXUID(), totals,
+                                                             REX_INTERFACE(rex::xam::IXAMTitleServices)->GetTitleID(), &title_totals);
     std::cout << "totals-result=" << unsigned(totals_result) << " win32="
-              << rex::kernel::xam::OfflineAchievementError(totals_result) << std::endl;
+              << rex::xam::OfflineAchievementError(totals_result) << std::endl;
     for (uint32_t i = 0; i < count; ++i) {
       auto id = rex::memory::load_and_swap<uint32_t>(base + ids + i * 4);
       auto setting = profile->GetSetting(id);
@@ -80,9 +67,8 @@ int main(int argc, char** argv) {
     auto put = [&](uint32_t address, uint32_t value) { rex::memory::store_and_swap<uint32_t>(base + address, value); };
     auto get = [&](uint32_t address) { return rex::memory::load_and_swap<uint32_t>(base + address); };
     bool complete = false;
-    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        state, 128 * 1024, 0, [&] {
-      auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    auto thread = runtime.GetThreadRegistry().LaunchHostThread("profile_settings probe", 128 * 1024, [&] {
+      auto& ctx = *rex::kernel::KernelThread::GetCallingThread()->GetThreadState()->GetContext();
       ctx.r1.u64 = block + 14336;
       auto call = [&](uint32_t buffer, uint32_t overlapped) {
         ctx.r3.u64 = 0; ctx.r4.u64 = 0; ctx.r5.u64 = 0; ctx.r6.u64 = 0;
@@ -105,10 +91,11 @@ int main(int argc, char** argv) {
                 << " extended=" << get(io + 24) << " header=" << get(buffer) << "," << get(buffer + 4) << std::endl;
       complete = true;
       return 0;
-    }));
-    if (thread->Create()) return 10;
+    });
+    if (!thread) return 10;
     uint64_t timeout = uint64_t(-100'000'000ll);
-    if (thread->Wait(0, 0, 0, &timeout)) ExitProcess(11);
+    if (runtime.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*thread, 0, 0, 0, &timeout)) ExitProcess(11);
+    rex::kernel::CloseOwned(runtime.GetObjectTable(),*thread);
     memory->SystemHeapFree(block);
     return complete ? 0 : 12;
   } catch (const std::exception& error) {

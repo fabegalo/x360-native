@@ -1,126 +1,126 @@
-diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
---- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
-+++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
-@@ -108,7 +108,7 @@
-     // If anything in this is structure is changed in a way not compatible with
-     // the previous layout, invalidate the pipeline storages by increasing this
-     // version number (0xYYYYMMDD)!
--    static constexpr uint32_t kVersion = 0x20261124;
-+    static constexpr uint32_t kVersion = 0x20261125;
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.h b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.h
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+@@ -70,7 +70,7 @@
+      * Layout version in 0xYYYYMMDD form, increased on incompatible changes to invalidate pipeline
+      * storage.
+      */
+-    static constexpr u32 kVersion = 0x20261125;
++    static constexpr u32 kVersion = 0x20261126;
  
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
      // Opt-in for backends that make every possible destination resident and
-     // synchronize writes when eA is computed rather than a known stream MAD.
-diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
---- a/include/rex/graphics/pipeline/shader/spirv_translator.h
-+++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
-@@ -34,7 +34,7 @@
-     // prototyping stage (easier to do small granular updates with an
-     // incremental counter).
-     // Also invalidate stored translations when emitted control-flow changes.
--    static constexpr uint32_t kVersion = 0x20261124;
-+    static constexpr uint32_t kVersion = 0x20261125;
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -32,7 +32,7 @@
+  public:
+   union Modification {
+     /** Pipeline storage version, incremented when the layout changes incompatibly. */
+-    static constexpr u32 kVersion = 0x20261126;
++    static constexpr u32 kVersion = 0x20261127;
  
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
      // Opt-in for backends that make every possible destination resident and
-     // synchronize writes when eA is computed rather than a known stream MAD.
-diff --git a/src/graphics/pipeline/shader/spirv_translator_alu.cpp b/src/graphics/pipeline/shader/spirv_translator_alu.cpp
---- a/src/graphics/pipeline/shader/spirv_translator_alu.cpp
-+++ b/src/graphics/pipeline/shader/spirv_translator_alu.cpp
-@@ -1322,31 +1322,78 @@
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
+@@ -1221,31 +1221,78 @@
        // vertex explosions with the default round-to-nearest behavior.
        // Real hardware rounding behavior needs to be verified.
-       if (REXCVAR_GET(mulsc_round_toward_zero)) {
+       if (static_cast<bool>(GetSPIRVShaderModification().value & Modification::kMulscRTZ)) {
 -        // Keep the Fma as one operation so it can recover the product error.
--        spv::Id error = builder_->createTriBuiltinCall(
--            type_float_, ext_inst_glsl_std_450_, GLSLstd450Fma, operand_0,
+-        spv::Id error = builder_->CreateTriBuiltinCall(
+-            type_float, ext_inst_glsl_std_450_, GLSLstd450Fma, operand_0,
 -            operand_1,
--            builder_->createUnaryOp(spv::OpFNegate, type_float_, result));
+-            builder_->createUnaryOp(spv::OpFNegate, type_float, result));
 -        builder_->addDecoration(error, spv::DecorationNoContraction);
 +        // GLSL Fma need not retain the product error on every Vulkan driver.
 +        // Compare the exact 24x24-bit product with the rounded float instead.
 +        spv::Id values[3] = {operand_0, operand_1, result};
 +        spv::Id bits[3], exponents[3], mantissas[3];
 +        spv::Id finite = builder_->makeBoolConstant(true);
-+        for (uint32_t i = 0; i < 3; ++i) {
-+          bits[i] = builder_->createUnaryOp(spv::OpBitcast, type_uint_, values[i]);
++        for (u32 i = 0; i < 3; ++i) {
++          bits[i] = builder_->createUnaryOp(spv::OpBitcast, type_uint, values[i]);
 +          spv::Id exponent = builder_->createBinOp(
-+              spv::OpBitwiseAnd, type_uint_,
-+              builder_->createBinOp(spv::OpShiftRightLogical, type_uint_, bits[i],
++              spv::OpBitwiseAnd, type_uint,
++              builder_->createBinOp(spv::OpShiftRightLogical, type_uint, bits[i],
 +                                    builder_->makeUintConstant(23)),
 +              builder_->makeUintConstant(255));
 +          finite = builder_->createBinOp(
-+              spv::OpLogicalAnd, type_bool_, finite,
-+              builder_->createBinOp(spv::OpULessThan, type_bool_, exponent,
++              spv::OpLogicalAnd, type_bool, finite,
++              builder_->createBinOp(spv::OpULessThan, type_bool, exponent,
 +                                    builder_->makeUintConstant(255)));
 +          spv::Id normal = builder_->createBinOp(
-+              spv::OpINotEqual, type_bool_, exponent, const_uint_0_);
++              spv::OpINotEqual, type_bool, exponent, const_uint_0_);
 +          exponents[i] = builder_->createTriOp(
-+              spv::OpSelect, type_uint_, normal, exponent, builder_->makeUintConstant(1));
++              spv::OpSelect, type_uint, normal, exponent, builder_->makeUintConstant(1));
 +          mantissas[i] = builder_->createBinOp(
-+              spv::OpBitwiseOr, type_uint_,
-+              builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, bits[i],
++              spv::OpBitwiseOr, type_uint,
++              builder_->createBinOp(spv::OpBitwiseAnd, type_uint, bits[i],
 +                                    builder_->makeUintConstant(0x7FFFFF)),
-+              builder_->createTriOp(spv::OpSelect, type_uint_, normal,
++              builder_->createTriOp(spv::OpSelect, type_uint, normal,
 +                                    builder_->makeUintConstant(0x800000), const_uint_0_));
 +        }
-+        std::vector<spv::Id> product_members{type_uint_, type_uint_};
++        std::vector<spv::Id> product_members{type_uint, type_uint};
 +        spv::Id product = builder_->createBinOp(
 +            spv::OpUMulExtended, builder_->makeStructType(product_members, "XeMulscProduct"),
 +            mantissas[0], mantissas[1]);
-+        spv::Id product_low = builder_->createCompositeExtract(product, type_uint_, 0);
-+        spv::Id product_high = builder_->createCompositeExtract(product, type_uint_, 1);
++        spv::Id product_low = builder_->createCompositeExtract(product, type_uint, 0);
++        spv::Id product_high = builder_->createCompositeExtract(product, type_uint, 1);
 +        spv::Id shift = builder_->createBinOp(
-+            spv::OpISub, type_uint_,
-+            builder_->createBinOp(spv::OpIAdd, type_uint_, exponents[2], builder_->makeUintConstant(150)),
-+            builder_->createBinOp(spv::OpIAdd, type_uint_, exponents[0], exponents[1]));
++            spv::OpISub, type_uint,
++            builder_->createBinOp(spv::OpIAdd, type_uint, exponents[2], builder_->makeUintConstant(150)),
++            builder_->createBinOp(spv::OpIAdd, type_uint, exponents[0], exponents[1]));
 +        spv::Id low_shift = builder_->createBinOp(
-+            spv::OpULessThan, type_bool_, shift, builder_->makeUintConstant(32));
++            spv::OpULessThan, type_bool, shift, builder_->makeUintConstant(32));
 +        auto shift_bits = [&](spv::Id amount) {
-+          return builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, amount,
++          return builder_->createBinOp(spv::OpBitwiseAnd, type_uint, amount,
 +                                        builder_->makeUintConstant(31));
 +        };
 +        spv::Id rounded_low = builder_->createTriOp(
-+            spv::OpSelect, type_uint_, low_shift,
-+            builder_->createBinOp(spv::OpShiftLeftLogical, type_uint_, mantissas[2], shift_bits(shift)),
++            spv::OpSelect, type_uint, low_shift,
++            builder_->createBinOp(spv::OpShiftLeftLogical, type_uint, mantissas[2], shift_bits(shift)),
 +            const_uint_0_);
 +        spv::Id rounded_high = builder_->createTriOp(
-+            spv::OpSelect, type_uint_, low_shift,
-+            builder_->createBinOp(spv::OpShiftRightLogical, type_uint_,
-+                builder_->createBinOp(spv::OpShiftRightLogical, type_uint_, mantissas[2], builder_->makeUintConstant(1)),
-+                builder_->createBinOp(spv::OpISub, type_uint_, builder_->makeUintConstant(31), shift_bits(shift))),
-+            builder_->createBinOp(spv::OpShiftLeftLogical, type_uint_, mantissas[2],
-+                shift_bits(builder_->createBinOp(spv::OpISub, type_uint_, shift, builder_->makeUintConstant(32)))));
++            spv::OpSelect, type_uint, low_shift,
++            builder_->createBinOp(spv::OpShiftRightLogical, type_uint,
++                builder_->createBinOp(spv::OpShiftRightLogical, type_uint, mantissas[2], builder_->makeUintConstant(1)),
++                builder_->createBinOp(spv::OpISub, type_uint, builder_->makeUintConstant(31), shift_bits(shift))),
++            builder_->createBinOp(spv::OpShiftLeftLogical, type_uint, mantissas[2],
++                shift_bits(builder_->createBinOp(spv::OpISub, type_uint, shift, builder_->makeUintConstant(32)))));
          spv::Id rounded_away = builder_->createBinOp(
--            spv::OpLogicalNotEqual, type_bool_,
--            builder_->createBinOp(spv::OpFOrdLessThan, type_bool_, error,
--                                  const_float_0_),
--            builder_->createBinOp(spv::OpFOrdLessThan, type_bool_, result,
--                                  const_float_0_));
-+            spv::OpLogicalOr, type_bool_,
-+            builder_->createBinOp(spv::OpULessThan, type_bool_, product_high, rounded_high),
-+            builder_->createBinOp(spv::OpLogicalAnd, type_bool_,
-+                builder_->createBinOp(spv::OpIEqual, type_bool_, product_high, rounded_high),
-+                builder_->createBinOp(spv::OpULessThan, type_bool_, product_low, rounded_low)));
+-            spv::OpLogicalNotEqual, type_bool,
+-            builder_->createBinOp(spv::OpFOrdLessThan, type_bool, error,
+-                                  const_float_0),
+-            builder_->createBinOp(spv::OpFOrdLessThan, type_bool, result,
+-                                  const_float_0));
++            spv::OpLogicalOr, type_bool,
++            builder_->createBinOp(spv::OpULessThan, type_bool, product_high, rounded_high),
++            builder_->createBinOp(spv::OpLogicalAnd, type_bool,
++                builder_->createBinOp(spv::OpIEqual, type_bool, product_high, rounded_high),
++                builder_->createBinOp(spv::OpULessThan, type_bool, product_low, rounded_low)));
 +        rounded_away = builder_->createBinOp(
-+            spv::OpLogicalOr, type_bool_, rounded_away,
-+            builder_->createBinOp(spv::OpUGreaterThanEqual, type_bool_, shift, builder_->makeUintConstant(48)));
++            spv::OpLogicalOr, type_bool, rounded_away,
++            builder_->createBinOp(spv::OpUGreaterThanEqual, type_bool, shift, builder_->makeUintConstant(48)));
          rounded_away = builder_->createBinOp(
-             spv::OpLogicalAnd, type_bool_, rounded_away,
--            builder_->createBinOp(spv::OpFOrdNotEqual, type_bool_, error,
--                                  const_float_0_));
+             spv::OpLogicalAnd, type_bool, rounded_away,
+-            builder_->createBinOp(spv::OpFOrdNotEqual, type_bool, error,
+-                                  const_float_0));
 -        // Opposite signs mean the product rounded away from zero.
 -        spv::Id result_toward_zero = builder_->createUnaryOp(
-+            builder_->createBinOp(spv::OpLogicalAnd, type_bool_, finite,
-+                builder_->createBinOp(spv::OpINotEqual, type_bool_, mantissas[2], const_uint_0_)));
++            builder_->createBinOp(spv::OpLogicalAnd, type_bool, finite,
++                builder_->createBinOp(spv::OpINotEqual, type_bool, mantissas[2], const_uint_0_)));
 +        result = builder_->createUnaryOp(
-             spv::OpBitcast, type_float_,
+             spv::OpBitcast, type_float,
 -            builder_->createBinOp(
--                spv::OpISub, type_uint_,
--                builder_->createUnaryOp(spv::OpBitcast, type_uint_, result),
+-                spv::OpISub, type_uint,
+-                builder_->createUnaryOp(spv::OpBitcast, type_uint, result),
 -                builder_->makeUintConstant(1)));
--        result = builder_->createTriOp(spv::OpSelect, type_float_, rounded_away,
+-        result = builder_->createTriOp(spv::OpSelect, type_float, rounded_away,
 -                                       result_toward_zero, result);
-+            builder_->createBinOp(spv::OpISub, type_uint_, bits[2],
-+                builder_->createTriOp(spv::OpSelect, type_uint_, rounded_away,
++            builder_->createBinOp(spv::OpISub, type_uint, bits[2],
++                builder_->createTriOp(spv::OpSelect, type_uint, rounded_away,
 +                                      builder_->makeUintConstant(1), const_uint_0_)));
        }
        if (!(instr.scalar_operands[0].GetIdenticalComponents(

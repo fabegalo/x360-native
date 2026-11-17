@@ -4,4 +4,4 @@
 
 #include "motocross_madness_app.h"
 
-REX_DEFINE_APP(motocross_madness, MotocrossMadnessApp::Create)
+REX_TITLE_APP(MotocrossMadnessApp)

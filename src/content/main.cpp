@@ -1,3 +1,4 @@
+#include <print>
 // x360n-content: reads Xbox 360 content packages (STFS: CON/LIVE/PIRS) with the
 // SDK's StfsContainerDevice and disc images (GDFX/XDVDFS .iso) with its
 // DiscImageDevice, and extracts them safely.
@@ -35,23 +36,20 @@
 #include <vector>
 
 #include <dis-asm.h>
-#include <fmt/format.h>
+#include <format>
 #include <ppc.h>
-#include <rex/filesystem.h>
-#include <rex/filesystem/devices/disc_image_device.h>
-#include <rex/filesystem/devices/disc_image_entry.h>
-#include <rex/filesystem/devices/stfs_container_device.h>
-#include <rex/filesystem/entry.h>
-#include <rex/filesystem/file.h>
-#include <rex/kernel/init.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xcontent.h>
-#include <rex/system/xex_module.h>
-#include <rex/system/xmemory.h>
-
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/filesystem/stfs.h>
+#include <rex/filesystem/xex.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/guest_memory.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/export.h>
+#include <rex/kernel/object/module_object.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/path_settings.h>
+#include "codegen/tool_runtime.h"
+#include <chrono>
 #include "paths.h"
 #include "xex_patch.h"
 #include "sha256.h"
@@ -60,11 +58,6 @@
 namespace io = x360n::io;
 
 namespace fs = std::filesystem;
-using rex::X_STATUS;  // X_STATUS_SUCCESS expands to a cast to it
-using rex::filesystem::DiscImageDevice;
-using rex::filesystem::DiscImageEntry;
-using rex::filesystem::StfsContainerDevice;
-
 namespace {
 
 fs::path Utf8Path(const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); }
@@ -106,56 +99,81 @@ const char* MagicName(rex::filesystem::XContentPackageType m) {
 
 
 int Info(const fs::path& package) {
-  auto header = StfsContainerDevice::ReadPackageHeader(package);
+  auto header = x360n::content::FileSystem().ReadPackageHeader(package);
   if (!header) {
-    fmt::print(stderr, "info: not a readable STFS package: {}\n", package.string());
+    std::print(stderr, "info: not a readable STFS package: {}\n", package.string());
     return 1;
   }
   const auto& md = header->metadata;
   const auto& ei = md.execution_info;
   std::string content_id;
-  for (uint8_t b : header->header.content_id) content_id += fmt::format("{:02X}", b);
-  fmt::print("magic         {}\n", MagicName(header->header.magic));
-  fmt::print("content_type  0x{:08X}\n", uint32_t(md.content_type.get()));
-  fmt::print("content_id    {}\n", content_id);
-  fmt::print("title_id      {:08X}\n", uint32_t(ei.title_id));
-  fmt::print("media_id      {:08X}\n", uint32_t(ei.media_id));
-  fmt::print("version       0x{:08X} (base 0x{:08X})\n", uint32_t(ei.version_value),
+  for (uint8_t b : header->header.content_id) content_id += std::format("{:02X}", b);
+  std::print("magic         {}\n", MagicName(header->header.magic));
+  std::print("content_type  0x{:08X}\n", uint32_t(md.content_type.Get()));
+  std::print("content_id    {}\n", content_id);
+  std::print("title_id      {:08X}\n", uint32_t(ei.title_id));
+  std::print("media_id      {:08X}\n", uint32_t(ei.media_id));
+  std::print("version       0x{:08X} (base 0x{:08X})\n", uint32_t(ei.version_value),
              uint32_t(ei.base_version_value));
-  fmt::print("volume_type   {}\n", uint32_t(md.volume_type.get()));
-  fmt::print("display_name  {}\n", Utf16ToUtf8(md.display_name(rex::system::XLanguage::kEnglish)));
-  fmt::print("title_name    {}\n", Utf16ToUtf8(md.title_name()));
+  std::print("volume_type   {}\n", uint32_t(md.volume_type.Get()));
+  std::print("display_name  {}\n", Utf16ToUtf8(md.GetDisplayName(rex::kernel::XLanguage::kEnglish)));
+  std::print("title_name    {}\n", Utf16ToUtf8(md.GetTitleName()));
   return 0;
 }
 
-// Loads an XEX the way `rexglue codegen` does (project_recompiler.cpp: Runtime in
-// tool_mode + LoadXexImage). Returns null after printing why it failed.
-std::unique_ptr<rex::Runtime> LoadXex(const char* cmd, const fs::path& game_root,
-                                      const std::string& xex_rel, rex::runtime::XexModule** xex) {
-  auto runtime = std::make_unique<rex::Runtime>(game_root);
-  rex::RuntimeConfig config{};
-  config.kernel_init = rex::kernel::InitializeKernel;
-  config.tool_mode = true;
-  auto status = runtime->Setup(std::move(config));
-  if (status != X_STATUS_SUCCESS) {
-    fmt::print(stderr, "{}: Runtime::Setup failed: {:#x}\n", cmd, status);
+// Keep diagnostic state outside the read-only original, using the official tool host.
+class ContentToolApp final : public rex::codegen::ToolApp {
+ public:
+  explicit ContentToolApp(const fs::path& scratch) : ToolApp("x360n-content", scratch) {}
+  static void RemoveScratch(const fs::path& scratch) {
+    std::error_code ec;
+    const auto resolved = fs::weakly_canonical(scratch, ec);
+    if (ec || resolved.parent_path() != fs::weakly_canonical(scratch.parent_path(), ec) || ec ||
+        resolved.filename() != scratch.filename() || io::is_redirect(scratch)) return;
+    unsigned entries = 0;
+    fs::recursive_directory_iterator entry(resolved, ec), end;
+    if (ec) return;
+    for (; entry != end; entry.increment(ec)) {
+      if (ec || ++entries > 200 || io::is_redirect(entry->path())) return;
+    }
+    if (ec) return;
+    fs::remove_all(resolved, ec);
+  }
+ protected:
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(ToolApp::OnConfigure(settings));
+    return REX_PATHS().user_root.SetText(rex::SettingLayer::kTitle, "{app.root}/user");
+  }
+};
+std::unique_ptr<rex::codegen::ToolRuntime> LoadXex(const char* cmd, const fs::path& game_root,
+    const std::string& xex_rel, rex::kernel::XEXModule** xex) {
+  static const fs::path scratch = [] {
+    const auto project = x360n::FindProjectRoot(x360n::CurrentExecutablePath().parent_path());
+    const auto parent = project ? project->local() / "tmp" : fs::temp_directory_path();
+    io::create_directories(parent);
+    const auto scratch = parent / ("content-inspection-" + std::to_string(x360n::CurrentProcessId()) + "-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    if (!io::create_directory(scratch)) throw std::runtime_error("Content tool scratch collision");
+    return scratch;
+  }();
+  // App destruction closes its SDK logger before the scratch directory is removed.
+  static rex::ScopeGuard cleanup([] { ContentToolApp::RemoveScratch(scratch); });
+  static ContentToolApp app(scratch);
+  auto opened = app.Open(game_root, xex_rel);
+  if (!opened) {
+    std::print(stderr, "{}: LoadXEX failed: {}\n", cmd, opened.error().GetDescription());
     return nullptr;
   }
-  std::string vfs = xex_rel;
-  for (auto& c : vfs)
-    if (c == '/') c = '\\';
-  status = runtime->LoadXexImage("game:\\" + vfs);
-  if (status != X_STATUS_SUCCESS) {
-    fmt::print(stderr, "{}: LoadXexImage(game:\\{}) failed: {:#x}\n", cmd, vfs, status);
-    return nullptr;
-  }
-  auto module = runtime->kernel_state()->GetExecutableModule();
-  *xex = module ? module->xex_module() : nullptr;
+  auto loaded = std::make_unique<rex::codegen::ToolRuntime>(std::move(*opened));
+  auto& runtime = loaded->GetRuntime();
+  const auto handle = runtime.GetModuleRegistry().GetExecutable();
+  auto module = runtime.GetObjectTable().Get<rex::kernel::ModuleObject>(handle.value_or(0));
+  *xex = module ? module->GetXEX() : nullptr;
   if (!*xex) {
-    fmt::print(stderr, "{}: no executable XexModule after load\n", cmd);
+    std::print(stderr, "{}: no executable XEX module after load\n", cmd);
     return nullptr;
   }
-  return runtime;
+  return loaded;
 }
 
 // Writes the loaded image (decrypted and decompressed) for disassembly/inspection.
@@ -163,16 +181,16 @@ std::unique_ptr<rex::Runtime> LoadXex(const char* cmd, const fs::path& game_root
 int DumpImage(const fs::path& game_root, const std::string& xex_rel, const fs::path& out) {
   std::error_code ec;
   if (io::exists(out, ec)) {
-    fmt::print(stderr, "dump-image: output already exists: {}\n", out.string());
+    std::print(stderr, "dump-image: output already exists: {}\n", out.string());
     return 3;
   }
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("dump-image", game_root, xex_rel, &xex);
   if (!runtime) return 1;
-  uint32_t base = xex->base_address(), size = xex->image_size();
-  auto* data = runtime->memory()->TranslateVirtual<const uint8_t*>(base);
+  uint32_t base = xex->GetBaseAddress(), size = xex->GetImageSize();
+  auto* data = runtime->GetRuntime().GetMembase().TranslateVirtual<const uint8_t*>(base);
   io::ofstream(out, std::ios::binary).write(reinterpret_cast<const char*>(data), std::streamsize(size));
-  fmt::print("image base 0x{:08X} size 0x{:X} sha256 {} -> {}\n", base, size,
+  std::print("image base 0x{:08X} size 0x{:X} sha256 {} -> {}\n", base, size,
              x360n::Sha256Hex({data, size}), out.string());
   return 0;
 }
@@ -181,18 +199,18 @@ int DumpImage(const fs::path& game_root, const std::string& xex_rel, const fs::p
 // pairs the records by ordinal; a thunk address means a function import) next to
 // the SDK export table entry for the same ordinal. CSV on stdout.
 int Imports(const fs::path& game_root, const std::string& xex_rel) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("imports", game_root, xex_rel, &xex);
   if (!runtime) return 1;
-  auto* resolver = runtime->export_resolver();
-  fmt::print("library,library_version,ordinal,kind,value_address,thunk_address,sdk_name,sdk_type\n");
-  for (const auto& lib : *xex->import_libraries()) {
+  std::print("library,library_version,ordinal,kind,value_address,thunk_address,sdk_name,sdk_type\n");
+  for (const auto& lib : xex->GetImportLibraries()) {
     for (const auto& imp : lib.imports) {
-      auto* e = resolver->GetExportByOrdinal(lib.name, uint16_t(imp.ordinal));
+      const auto module = rex::kernel::ModuleFromName(lib.name);
+      const auto* e = module ? rex::kernel::FindByOrdinal(*module, uint16_t(imp.ordinal)) : nullptr;
       const char* sdk_type = !e ? "absent"
-                             : e->type == rex::runtime::Export::Type::kVariable ? "variable"
+                             : e->type == rex::kernel::ExportType::kVariable ? "variable"
                                                                                 : "function";
-      fmt::print("{},{}.{}.{}.{},0x{:03X},{},0x{:08X},0x{:08X},{},{}\n", lib.name,
+      std::print("{},{}.{}.{}.{},0x{:03X},{},0x{:08X},0x{:08X},{},{}\n", lib.name,
                  uint32_t(lib.version.major), uint32_t(lib.version.minor),
                  uint32_t(lib.version.build), uint32_t(lib.version.qfe), imp.ordinal,
                  imp.thunk_address ? "function" : "variable", imp.value_address,
@@ -204,19 +222,27 @@ int Imports(const fs::path& game_root, const std::string& xex_rel) {
 
 uint32_t ParseHex(const std::string& s) { return uint32_t(std::stoul(s, nullptr, 16)); }
 
-uint32_t GuestWord(rex::Runtime* rt, uint32_t a) {
-  auto* p = rt->memory()->TranslateVirtual<const uint8_t*>(a);
-  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
+uint32_t GuestWord(rex::codegen::ToolRuntime* rt, uint32_t address) {
+  const auto word = rt->GetRuntime().GetGuestMemory().Load<rex::be_u32>(address);
+  if (!word) throw std::runtime_error(word.error().GetDescription());
+  return *word;
 }
 
 // .pdata entries as IMAGE_CE_RUNTIME_FUNCTION (phase_register.cpp:43-55):
 // start address -> length in bytes (FunctionLength counts instructions).
-std::map<uint32_t, uint32_t> PdataEntries(rex::Runtime* rt, rex::runtime::XexModule* xex) {
+std::map<uint32_t, uint32_t> PdataEntries(rex::codegen::ToolRuntime* rt, rex::kernel::XEXModule* xex) {
   std::map<uint32_t, uint32_t> out;
-  auto* sec = xex->GetPESection(".pdata");
-  if (!sec) return out;
-  for (uint32_t a = sec->address; a + 8 <= sec->address + sec->size; a += 8) {
-    uint32_t start = GuestWord(rt, a), packed = GuestWord(rt, a + 4);
+  const auto& sections = xex->GetPE().sections;
+  const auto sec = std::find_if(sections.begin(), sections.end(), [](const auto& s) {
+    return std::string_view(s.name) == ".pdata";
+  });
+  if (sec == sections.end()) return out;
+  const uint64_t begin = uint64_t(xex->GetBaseAddress()) + sec->address;
+  const uint64_t end = begin + sec->size;
+  if (end > uint64_t(xex->GetBaseAddress()) + xex->GetImageSize())
+    throw std::runtime_error("PDATA lies outside the loaded image");
+  for (uint64_t a = begin; a + 8 <= end; a += 8) {
+    uint32_t start = GuestWord(rt, uint32_t(a)), packed = GuestWord(rt, uint32_t(a + 4));
     if (start) out[start] = ((packed >> 8) & 0x3FFFFF) * 4;
   }
   return out;
@@ -227,11 +253,11 @@ std::string PdataContext(const std::map<uint32_t, uint32_t>& pdata, uint32_t a) 
   if (next != pdata.begin()) {
     auto prev = std::prev(next);
     if (a < prev->first + prev->second)
-      return fmt::format("inside .pdata function 0x{:08X}-0x{:08X}", prev->first,
+      return std::format("inside .pdata function 0x{:08X}-0x{:08X}", prev->first,
                          prev->first + prev->second);
-    std::string s = fmt::format("not in any .pdata function; previous 0x{:08X}-0x{:08X}",
+    std::string s = std::format("not in any .pdata function; previous 0x{:08X}-0x{:08X}",
                                 prev->first, prev->first + prev->second);
-    if (next != pdata.end()) s += fmt::format(", next starts 0x{:08X}", next->first);
+    if (next != pdata.end()) s += std::format(", next starts 0x{:08X}", next->first);
     return s;
   }
   return "before the first .pdata function";
@@ -241,32 +267,32 @@ std::string PdataContext(const std::map<uint32_t, uint32_t>& pdata, uint32_t a) 
 // (src/codegen/ppc/disasm.cpp: Xenon dialect, VMX128 included).
 int Disasm(const fs::path& game_root, const std::string& xex_rel, uint32_t addr, int before,
            int count) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("disasm", game_root, xex_rel, &xex);
   if (!runtime) return 1;
   auto pdata = PdataEntries(runtime.get(), xex);
-  uint32_t lo = xex->base_address(), hi = lo + xex->image_size();
+  uint32_t lo = xex->GetBaseAddress(), hi = lo + xex->GetImageSize();
   disassemble_info info{};
   INIT_DISASSEMBLE_INFO(info, stdout, fprintf);
   info.arch = bfd_arch_powerpc;
   info.endian = BFD_ENDIAN_BIG;
   info.private_data = reinterpret_cast<void*>(uintptr_t(0x1 | 0x4 | 0x4000 | 0x8000000 | 0x200 |
                                                        0x1000000 | 0x10000));
-  fmt::print("0x{:08X}: {}\n", addr, PdataContext(pdata, addr));
+  std::print("0x{:08X}: {}\n", addr, PdataContext(pdata, addr));
   for (int i = -before; i < count; ++i) {
     uint32_t a = addr + uint32_t(int64_t(i) * 4);
     if (a < lo || a + 4 > hi) continue;
-    auto* p = runtime->memory()->TranslateVirtual<uint8_t*>(a);
+    auto* p = runtime->GetRuntime().GetMembase().TranslateVirtual<uint8_t*>(a);
     ppc_insn insn{};
     info.buffer = p;
     info.buffer_vma = a;
     info.buffer_length = 4;
     int n = decode_insn_ppc(a, &info, &insn);
-    std::string text = (n == 4 && insn.opcode) ? fmt::format("{} {}", insn.opcode->name, insn.op_str)
+    std::string text = (n == 4 && insn.opcode) ? std::format("{} {}", insn.opcode->name, insn.op_str)
                                                : std::string(".long");
     auto it = pdata.find(a);
-    std::string note = it != pdata.end() ? fmt::format("   <.pdata start, len 0x{:X}>", it->second) : "";
-    fmt::print("{} {:08X}  {:08X}  {}{}\n", a == addr ? '>' : ' ', a, GuestWord(runtime.get(), a),
+    std::string note = it != pdata.end() ? std::format("   <.pdata start, len 0x{:X}>", it->second) : "";
+    std::print("{} {:08X}  {:08X}  {}{}\n", a == addr ? '>' : ' ', a, GuestWord(runtime.get(), a),
                text, note);
   }
   return 0;
@@ -277,31 +303,32 @@ int Disasm(const fs::path& game_root, const std::string& xex_rel, uint32_t addr,
 // values are tracked only along straight-line code (reset at branches, aged out
 // after 64 instructions); a miss is possible, a hit is checked by disassembly.
 int Xref(const fs::path& game_root, const std::string& xex_rel, uint32_t lo, uint32_t hi) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("xref", game_root, xex_rel, &xex);
   if (!runtime) return 1;
   auto pdata = PdataEntries(runtime.get(), xex);
   auto in = [&](uint64_t v) { return v >= lo && v <= hi; };
   // A PE section can extend past the loaded image (Motocross Madness: .reloc ends
   // at 0x83341560, the image at 0x83330000); only the mapped part is scanned.
-  const uint64_t img_lo = xex->base_address(), img_hi = img_lo + xex->image_size();
-  for (auto sec : xex->pe_sections()) {
+  const uint64_t img_lo = xex->GetBaseAddress(), img_hi = img_lo + xex->GetImageSize();
+  for (auto sec : xex->GetPE().sections) {
+    sec.address += xex->GetBaseAddress();
     const uint64_t sec_end = std::min<uint64_t>(uint64_t(sec.address) + sec.size, img_hi);
     if (sec.address < img_lo || sec.address >= sec_end) {
-      fmt::print(stderr, "xref: section {} at 0x{:08X} is outside the loaded image; skipped\n",
+      std::print(stderr, "xref: section {} at 0x{:08X} is outside the loaded image; skipped\n",
                  sec.name, sec.address);
       continue;
     }
     if (uint64_t(sec.address) + sec.size > img_hi) {
-      fmt::print(stderr, "xref: section {} truncated to the loaded image (ends 0x{:08X})\n",
+      std::print(stderr, "xref: section {} truncated to the loaded image (ends 0x{:08X})\n",
                  sec.name, uint32_t(img_hi));
       sec.size = uint32_t(sec_end - sec.address);
     }
-    bool code = (sec.flags & kXEPESectionMemoryExecute) != 0;
+    bool code = (sec.flags & rex::filesystem::kPESectionMemoryExecute) != 0;
     if (!code) {
       for (uint32_t a = sec.address; a + 4 <= sec.address + sec.size; a += 4) {
         uint32_t w = GuestWord(runtime.get(), a);
-        if (in(w)) fmt::print("data  {:08X} [{}] holds 0x{:08X}\n", a, sec.name, w);
+        if (in(w)) std::print("data  {:08X} [{}] holds 0x{:08X}\n", a, sec.name, w);
       }
       continue;
     }
@@ -317,7 +344,7 @@ int Xref(const fs::path& game_root, const std::string& xex_rel, uint32_t lo, uin
         if (g >= 0 && ++g > 64) g = -1;
       auto known = [&](int r) { return age[r] >= 0; };
       auto report = [&](const char* kind, uint32_t ea) {
-        fmt::print("{:<5} {:08X}  {:08X}  ea 0x{:08X}  {}\n", kind, a, w, ea, PdataContext(pdata, a));
+        std::print("{:<5} {:08X}  {:08X}  ea 0x{:08X}  {}\n", kind, a, w, ea, PdataContext(pdata, a));
       };
       switch (op) {
         case 15:  // addis / lis
@@ -389,12 +416,13 @@ int Xref(const fs::path& game_root, const std::string& xex_rel, uint32_t lo, uin
 // Lists every direct branch (b/bl/bc, absolute or relative) in executable
 // sections whose target is <target>, e.g. the thunk address of an import.
 int Callers(const fs::path& game_root, const std::string& xex_rel, uint32_t target) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("callers", game_root, xex_rel, &xex);
   if (!runtime) return 1;
   auto pdata = PdataEntries(runtime.get(), xex);
-  for (const auto& sec : xex->pe_sections()) {
-    if (!(sec.flags & kXEPESectionMemoryExecute)) continue;
+  for (auto sec : xex->GetPE().sections) {
+    sec.address += xex->GetBaseAddress();
+    if (!(sec.flags & rex::filesystem::kPESectionMemoryExecute)) continue;
     for (uint32_t a = sec.address; a + 4 <= sec.address + sec.size; a += 4) {
       uint32_t w = GuestWord(runtime.get(), a), op = w >> 26, t = 0;
       if (op == 18) {
@@ -408,7 +436,7 @@ int Callers(const fs::path& game_root, const std::string& xex_rel, uint32_t targ
         continue;
       }
       if (t == target)
-        fmt::print("{:<3} {:08X}  {:08X}  {}\n", (w & 1) ? "bl" : (op == 16 ? "bc" : "b"), a, w,
+        std::print("{:<3} {:08X}  {:08X}  {}\n", (w & 1) ? "bl" : (op == 16 ? "bc" : "b"), a, w,
                    PdataContext(pdata, a));
     }
   }
@@ -421,50 +449,50 @@ int Callers(const fs::path& game_root, const std::string& xex_rel, uint32_t targ
 // The module's XEX2 export table (xex2_export_table), resolved with the SDK's own
 // XexModule::GetProcAddress: one line per ordinal with a nonzero address.
 int Exports(const fs::path& game_root, const std::string& xex_rel) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("exports", game_root, xex_rel, &xex);
   if (!runtime) return 1;
-  const uint32_t table = xex->export_table_address();
+  const uint32_t table = xex->GetExportTableAddress();
   if (!table) {
-    fmt::print(stderr, "exports: {} has no XEX export table\n", xex_rel);
+    std::print(stderr, "exports: {} has no XEX export table\n", xex_rel);
     return 1;
   }
   const uint32_t count = GuestWord(runtime.get(), table + 0x24);
   const uint32_t base = GuestWord(runtime.get(), table + 0x28);
   auto pdata = PdataEntries(runtime.get(), xex);
-  fmt::print("export table 0x{:08X}: base {} count {}\n", table, base, count);
+  std::print("export table 0x{:08X}: base {} count {}\n", table, base, count);
   for (uint32_t i = 0; i < count && base + i <= 0xFFFF; ++i) {
-    const uint32_t addr = xex->GetProcAddress(uint16_t(base + i));
-    if (addr) fmt::print("{:04X} 0x{:08X}  {}\n", base + i, addr, PdataContext(pdata, addr));
+    const uint32_t addr = xex->GetExportAddress(uint16_t(base + i));
+    if (addr) std::print("{:04X} 0x{:08X}  {}\n", base + i, addr, PdataContext(pdata, addr));
   }
   return 0;
 }
 
 int Resources(const fs::path& game_root, const std::string& xex_rel) {
-  rex::runtime::XexModule* xex = nullptr;
+  rex::kernel::XEXModule* xex = nullptr;
   auto runtime = LoadXex("resources", game_root, xex_rel, &xex);
   if (!runtime) return 1;
-  rex::xex2_opt_resource_info* info = nullptr;
-  if (!xex->GetOptHeader(rex::XEX_HEADER_RESOURCE_INFO, &info) || !info) {
-    fmt::print("no resource info header\n");
+  const auto* info = xex->GetImage().GetOptHeader<rex::kernel::XEXOptResourceInfo>(rex::kernel::kXEXHeaderResourceInfo);
+  if (!info) {
+    std::print("no resource info header\n");
     return 0;
   }
-  uint32_t count = (uint32_t(info->size) - 4) / sizeof(rex::xex2_resource);
-  uint32_t lo = xex->base_address(), hi = lo + xex->image_size();
-  fmt::print("name,address,size,magic,sha256\n");
+  uint32_t count = (uint32_t(info->size) - 4) / sizeof(rex::kernel::XEXResource);
+  uint32_t lo = xex->GetBaseAddress(), hi = lo + xex->GetImageSize();
+  std::print("name,address,size,magic,sha256\n");
   for (uint32_t i = 0; i < count; ++i) {
     const auto& r = info->resources[i];
     std::string name(r.name, strnlen(r.name, sizeof(r.name)));
     uint32_t addr = r.address, size = r.size;
-    if (addr < lo || size > hi - addr) {
-      fmt::print("{},0x{:08X},0x{:X},outside image,\n", name, addr, size);
+    if (addr < lo || addr > hi || size > hi - addr) {
+      std::print("{},0x{:08X},0x{:X},outside image,\n", name, addr, size);
       continue;
     }
-    auto* p = runtime->memory()->TranslateVirtual<const uint8_t*>(addr);
+    auto* p = runtime->GetRuntime().GetMembase().TranslateVirtual<const uint8_t*>(addr);
     std::string magic;
     for (uint32_t k = 0; k < 4 && k < size; ++k)
       magic += (p[k] >= 0x20 && p[k] < 0x7F) ? char(p[k]) : '.';
-    fmt::print("{},0x{:08X},0x{:X},{},{}\n", name, addr, size, magic,
+    std::print("{},0x{:08X},0x{:X},{},{}\n", name, addr, size, magic,
                x360n::Sha256Hex({p, size}));
   }
   return 0;
@@ -472,34 +500,27 @@ int Resources(const fs::path& game_root, const std::string& xex_rel) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
   if (argc == 5 && std::string(argv[1]) == "dump-image") {
-    rex::InitLoggingEarly();
     return DumpImage(Utf8Path(argv[2]), argv[3], Utf8Path(argv[4]));
   }
   if (argc == 4 && std::string(argv[1]) == "imports") {
-    rex::InitLoggingEarly();
     return Imports(Utf8Path(argv[2]), argv[3]);
   }
   if (argc == 4 && std::string(argv[1]) == "resources") {
-    rex::InitLoggingEarly();
     return Resources(Utf8Path(argv[2]), argv[3]);
   }
   if ((argc == 6 || argc == 7) && std::string(argv[1]) == "disasm") {
-    rex::InitLoggingEarly();
     return Disasm(Utf8Path(argv[2]), argv[3], ParseHex(argv[4]), argc == 7 ? std::stoi(argv[6]) : 0,
                   std::stoi(argv[5]));
   }
   if (argc == 5 && std::string(argv[1]) == "callers") {
-    rex::InitLoggingEarly();
     return Callers(Utf8Path(argv[2]), argv[3], ParseHex(argv[4]));
   }
   if (argc == 6 && std::string(argv[1]) == "xref") {
-    rex::InitLoggingEarly();
     return Xref(Utf8Path(argv[2]), argv[3], ParseHex(argv[4]), ParseHex(argv[5]));
   }
   if (argc == 4 && std::string(argv[1]) == "exports") {
-    rex::InitLoggingEarly();
     return Exports(Utf8Path(argv[2]), argv[3]);
   }
   if ((argc == 5 || (argc == 7 && std::string(argv[5]) == "--keys")) &&
@@ -507,13 +528,12 @@ int main(int argc, char** argv) {
     return x360n::content::ApplyXexPatch(
         Utf8Path(argv[2]), Utf8Path(argv[3]), Utf8Path(argv[4]),
         argc == 7 ? Utf8Path(argv[6]) : x360n::content::DefaultXexKeyFile());
-  rex::InitLoggingEarly();
   if (argc == 3 && std::string(argv[1]) == "info") return Info(Utf8Path(argv[2]));
   if (argc == 4 && std::string(argv[1]) == "extract")
     return x360n::content::Extract(Utf8Path(argv[2]), Utf8Path(argv[3]));
   if (argc == 4 && std::string(argv[1]) == "extract-disc")
     return x360n::content::ExtractDisc(Utf8Path(argv[2]), Utf8Path(argv[3]));
-  fmt::print(stderr,
+  std::print(stderr,
              "usage: x360n-content info <package>\n"
              "       x360n-content extract <package> <dest>\n"
              "       x360n-content extract-disc <image.iso> <dest>\n"
@@ -527,4 +547,7 @@ int main(int argc, char** argv) {
              "       x360n-content apply-patch <base.xex> <patch.xexp> <out_dir> [--keys <file>]\n"
              "         keys: local file, default $X360N_XEX_KEYS or .local\\keys\\xex-keys.txt\n");
   return 3;
+} catch (const std::exception& error) {
+  std::print(stderr, "x360n-content: {}\n", error.what());
+  return 1;
 }

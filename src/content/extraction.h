@@ -1,7 +1,10 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+namespace rex::filesystem { class IFileSystemFactory; }
 namespace x360n::content {
+// Uses the filesystem provider only; no title runtime or guest execution.
+rex::filesystem::IFileSystemFactory& FileSystem();
 int Extract(const std::filesystem::path& package, const std::filesystem::path& destination);
 int ExtractDisc(const std::filesystem::path& image, const std::filesystem::path& destination);
 // Whether one more container entry of `size` bytes fits one extraction, after

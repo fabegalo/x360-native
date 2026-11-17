@@ -1,0 +1,212 @@
+diff --git a/include/rex/gpu/guest_capture.h b/include/rex/gpu/guest_capture.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/gpu/guest_capture.h
+@@ -0,0 +1,16 @@
++// Copyright (c) 2026 x360-native contributors. BSD-3-Clause.
++#pragma once
++
++#include <cstddef>
++#include <vector>
++#include <rex/types.h>
++
++namespace rex::gpu {
++/** Composed guest output in RGBX8; the final row need not carry stride padding. */
++struct RawImage {
++  u32 width = 0;
++  u32 height = 0;
++  size_t stride = 0;
++  std::vector<u8> data;
++};
++}
+diff --git a/src/gpu/xenos/host/presenter.h b/src/gpu/xenos/host/presenter.h
+--- a/src/gpu/xenos/host/presenter.h
++++ b/src/gpu/xenos/host/presenter.h
+@@ -10,6 +10,8 @@
+  */
+ 
+ #pragma once
++
++#include <rex/gpu/guest_capture.h>
+ 
+ #include <algorithm>
+ #include <bit>
+@@ -69,14 +71,6 @@
+  * Only the UI thread manages the painting connection to the Surface. The refreshing thread may
+  * mark the connection outdated and request painting, but must never reconnect itself.
+  */
+-/** Composed guest output in RGBX8; the final row need not carry stride padding. */
+-struct RawImage {
+-  u32 width = 0;
+-  u32 height = 0;
+-  size_t stride = 0;
+-  std::vector<u8> data;
+-};
+-
+ class REX_GPU_XENOS_API Presenter : public gpu::IPresenter {
+  public:
+   /** Reads back the composed guest output after its queued work completes. */
+diff --git a/include/rex/gpu/graphics_system.h b/include/rex/gpu/graphics_system.h
+--- a/include/rex/gpu/graphics_system.h
++++ b/include/rex/gpu/graphics_system.h
+@@ -13,6 +13,7 @@
+ #include <string>
+ 
+ #include <rex/module.h>
++#include <rex/gpu/guest_capture.h>
+ #include <rex/platform.h>
+ #include <rex/setting.h>
+ #include <rex/settings_registry.h>
+@@ -51,7 +52,7 @@
+  * Vd calls and GPU register accesses to a Xenos driver. With no driver a project that presents
+  * itself calls ReportFrame and UISystem::DrawOverlays from its own present.
+  */
+-REX_DECLARE_INTERFACE(IGraphicsSystem, 6)
++REX_DECLARE_INTERFACE(IGraphicsSystem, 7)
+   virtual GraphicsSettings& GetSettings() = 0;
+ 
+   /** Presents an original system texture with its RGB16 LUT; false when unavailable. */
+@@ -59,6 +60,11 @@
+   /** Waits for the existing guest VBlank source, never fabricating a completion. */
+   virtual bool WaitForGuestVblank() = 0;
+   virtual bool HasDriver() const = 0;
++
++  /** Reads back actual composed output. False if unavailable. A caller must join its capture
++   * workers before the app stops graphics; no driver or presenter pointer escapes this call.
++   */
++  virtual bool CaptureGuestOutput(RawImage& image) = 0;
+ 
+   /** Returns the name of the selected driver, with any resolved to d3d12 or vulkan, or none. */
+   virtual std::string GetDriverName() const = 0;
+diff --git a/include/rex/gpu/graphics_driver.h b/include/rex/gpu/graphics_driver.h
+--- a/include/rex/gpu/graphics_driver.h
++++ b/include/rex/gpu/graphics_driver.h
+@@ -11,6 +11,7 @@
+ #pragma once
+ 
+ #include <rex/driver.h>
++#include <rex/gpu/guest_capture.h>
+ #include <rex/platform/native_window.h>
+ #include <rex/overlay_renderer.h>
+ #include <rex/guest.h>
+@@ -91,6 +92,9 @@
+ 
+   /** Finishes the present started by a BeginPresent that returned true. */
+   virtual void EndPresent() = 0;
++
++  /** Optional actual-output readback. Called before shutdown and never fabricates an image. */
++  virtual bool CaptureGuestOutput(RawImage&) { return false; }
+ };
+ 
+ }  // namespace rex::gpu
+diff --git a/src/gpu/graphics_system.h b/src/gpu/graphics_system.h
+--- a/src/gpu/graphics_system.h
++++ b/src/gpu/graphics_system.h
+@@ -37,6 +37,7 @@
+   bool PresentSystemFrame(const u32* fetch, const u16* gamma) override;
+   bool WaitForGuestVblank() override;
+   bool HasDriver() const override;
++  bool CaptureGuestOutput(RawImage& image) override;
+   std::string GetDriverName() const override;
+   void ReportFrame() override;
+   rex::gpu::FrameStats GetFrameStats() const override;
+diff --git a/src/gpu/graphics_system.cpp b/src/gpu/graphics_system.cpp
+--- a/src/gpu/graphics_system.cpp
++++ b/src/gpu/graphics_system.cpp
+@@ -32,6 +32,10 @@
+ 
+ bool GraphicsSystem::WaitForGuestVblank() {
+   return state_->xenos && state_->xenos->WaitForGuestVblank();
++}
++
++bool GraphicsSystem::CaptureGuestOutput(RawImage& image) {
++  return state_->driver && state_->driver->CaptureGuestOutput(image);
+ }
+ 
+ bool GraphicsSystem::HasDriver() const {
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.h b/src/gpu/xenos/xenos_graphics_driver_base.h
+--- a/src/gpu/xenos/xenos_graphics_driver_base.h
++++ b/src/gpu/xenos/xenos_graphics_driver_base.h
+@@ -79,6 +79,7 @@
+   void ResizeSurface(u32 width, u32 height) override;
+   [[nodiscard]] bool BeginPresent() override;
+   void EndPresent() override;
++  bool CaptureGuestOutput(RawImage& image) override;
+   void RenderOverlays(ImDrawData& draw_data) override;
+   bool PresentSystemFrame(const u32* fetch, const u16* gamma) override;
+   bool WaitForGuestVblank() override;
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.cpp b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+--- a/src/gpu/xenos/xenos_graphics_driver_base.cpp
++++ b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+@@ -53,6 +53,12 @@
+ }  // namespace
+ 
+ namespace rex::gpu {
++
++bool XenosGraphicsDriverBase::CaptureGuestOutput(RawImage& image) {
++  auto* presenter = GetHostPresenter();
++  return presenter && presenter->CaptureGuestOutput(image);
++}
++
+ 
+ XenosGraphicsDriverBase::XenosGraphicsDriverBase() : vsync_worker_running_(false) {}
+ 
+diff --git a/tests/unit/gpu/graphics_system_test.cpp b/tests/unit/gpu/graphics_system_test.cpp
+--- a/tests/unit/gpu/graphics_system_test.cpp
++++ b/tests/unit/gpu/graphics_system_test.cpp
+@@ -60,6 +60,7 @@
+   std::atomic<bool> every_wait_is_new_frame{true};
+   std::atomic<rex::u32> new_frames{0};
+   std::atomic<rex::u32> presents{0};
++  std::atomic<bool> capture_available{false};
+   std::atomic<rex::u32> ring_calls{0};
+   std::atomic<rex::u32> write_back_calls{0};
+   std::atomic<rex::u32> last_write_index{0};
+@@ -85,6 +86,7 @@
+     every_wait_is_new_frame = true;
+     new_frames = 0;
+     presents = 0;
++    capture_available = false;
+     ring_calls = 0;
+     write_back_calls = 0;
+     last_write_index = 0;
+@@ -135,6 +137,12 @@
+   void EndPresent() override {
+     g_fake.Log("end");
+     ++g_fake.presents;
++  }
++
++  bool CaptureGuestOutput(rex::gpu::RawImage& image) override {
++    if (!g_fake.capture_available) return false;
++    image = {2, 1, 12, {1, 2, 3, 255, 4, 5, 6, 255}};
++    return true;
+   }
+ 
+   void InitializeRingBuffer(rex::u32, rex::u32) override { ++g_fake.ring_calls; }
+@@ -463,3 +471,26 @@
+ }
+ 
+ }  // namespace settings_scope_tests
++
++REX_TEST_CASE("guest capture routes the selected driver and preserves unavailable output", "[gpu][presenter-capture]") {
++  rex::gpu::RawImage image{1, 1, 4, {9, 8, 7, 255}};
++  PlainDriver unsupported;
++  CHECK_FALSE(unsupported.CaptureGuestOutput(image));
++  CHECK(image.data == std::vector<rex::u8>{9, 8, 7, 255});
++  GraphicsApp app("fake");
++  REQUIRE(app.StartApp());
++  auto& graphics = app.GetGraphics();
++  CHECK_FALSE(graphics.CaptureGuestOutput(image));
++  CHECK(image.width == 1);
++  g_fake.capture_available = true;
++  REQUIRE(graphics.CaptureGuestOutput(image));
++  CHECK(image.width == 2);
++  CHECK(image.height == 1);
++  CHECK(image.stride == 12);
++  CHECK(image.data == std::vector<rex::u8>{1, 2, 3, 255, 4, 5, 6, 255});
++  g_fake.capture_available = false;
++  CHECK_FALSE(graphics.CaptureGuestOutput(image));
++  CHECK(image.width == 2);
++  CHECK(image.data == std::vector<rex::u8>{1, 2, 3, 255, 4, 5, 6, 255});
++  app.Shutdown();
++}

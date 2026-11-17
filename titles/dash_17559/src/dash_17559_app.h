@@ -1,125 +1,90 @@
-// dash_17559 - ReXGlue Recompiled Project
-//
-// Customize your app by overriding virtual hooks from rex::ReXApp.
-
 #pragma once
-
-#include <memory>
-
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/logging.h>
-#include <rex/rex_app.h>
-#include <rex/runtime.h>
-#include <rex/cvar.h>
-#include <rex/logging/assert.h>
+#include <rex/filesystem/file_system.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/kernel/object/module_object.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/platform/process.h>
+#include <rex/logging/logger.h>
+#include <utility>
+#include "../../common/session_title_app.h"
+#include "../../common/dashboard_paths.h"
 #include "experimental_region.h"
 #include "boot_intro.h"
 #include "launch_context.h"
 #include "display_transition.h"
 #include "system_ui.h"
 #include "system_ext_partition.h"
-#include "../../common/launch_handoff.h"
-#include "../../common/dashboard_paths.h"
-#include "../../common/guest_capture.h"
-#include "../../common/guest_fault_context.h"
-#include <rex/dbg.h>
 #include "original_assets.h"
 
-REXCVAR_DECLARE(bool, dash17559_experimental_region);
-REXCVAR_DECLARE(bool, dash17559_boot_intro);
-REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (thirty seconds by default)");
-REXCVAR_DEFINE_UINT32(x360n_guest_capture_seconds, 30, "Diagnostics", "GPU capture duration, limited to 300 seconds");
-
-class Dash17559App : public rex::ReXApp {
+class Dash17559App : public x360n::SessionTitleApp {
  public:
-  using rex::ReXApp::ReXApp;
+  Dash17559App() : SessionTitleApp("dash_17559", kPPCImageConfig) {}
+  ~Dash17559App() override { Shutdown(); }
 
-  bool ConstructRuntime(const rex::PathConfig& defaults) override {
-    auto paths = defaults;
-    return x360n::PrepareDashboardPaths(paths, "17559", dash17559::kOriginalAssets) &&
-           rex::ReXApp::ConstructRuntime(paths);
+ protected:
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(SessionTitleApp::OnConfigure(settings));
+    REX_TRY_VOID(dash17559::RegisterSystemUiSettings(settings));
+    settings_ = rex::ScopeGuard([&settings] { settings.Unregister(dash17559::GetSystemUiSettings()); });
+    return GetTitleRuntime().GetTitlePaths().entry.SetText(rex::SettingLayer::kTitle, "dash.xex");
   }
-
-  static std::unique_ptr<rex::ui::WindowedApp> Create(
-      rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<Dash17559App>(new Dash17559App(ctx, "dash_17559",
-        PPCImageConfig));
+  rex::Result<void> OnSettingsLoaded(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(SessionTitleApp::OnSettingsLoaded(settings));
+    return x360n::PrepareDashboardPaths(GetTitleRuntime().GetTitlePaths(), "17559", dash17559::kOriginalAssets);
   }
-
-  // x360-native: ReXApp loads game:\default.xex by default (rex_app.cpp:262);
-  // the dashboard's executable is dash.xex, the same file the manifest's
-  // [entrypoint] was generated from.
-  void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\dash.xex"; }
-
-  void OnPreLaunchModule() override {
-    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture), REXCVAR_GET(x360n_guest_capture_seconds));
-    dash17559::InstallDisplayTransition(*runtime());
-    dash17559::InstallSystemUi(*runtime());
-    x360n::ImportLaunchData(*runtime(), dash17559::SystemXamPath());
-    if (x360n::IsDashboardReturn() && !dash17559::PrepareReturnContext(*runtime()))
-      REX_FATAL("17559: unsupported dashboard return flags");
-    if (REXCVAR_GET(dash17559_boot_intro) && !x360n::IsDashboardReturn())
-      dash17559::InstallBootIntro(*runtime());
-  }
-
-  void OnGuestThreadExit(rex::system::XThread*) override {
-    dash17559::ReleaseSystemUiHost();
-    x360n::ExportLaunchRequest(*runtime());
-  }
-  bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
-  void OnShutdown() override { guest_capture_.Stop(); }
-
-  // x360-native: dash.xex links media: to \SystemRoot itself (ObCreateSymbolicLink,
-  // "Registered symbolic link: media: => \SystemRoot") and opens media:\shrdres.xzp
-  // (run 20261012T011724Z-dash17559-run-8: "device not found"). On the console that is
-  // the system partition with dash.xex and shrdres.xzp; here it is the package folder
-  // (--game_data_root), the same files, mounted read-only.
-  void OnPostSetup() override {
-    // The launcher's opt-in --crash-stack attaches the supervisor debugger.
-    // Capture PPC state alongside its native stack, with no handler installed
-    // during normal sessions. Install before any original guest thread starts.
-    if (rex::debug::IsDebuggerAttached()) {
-      const auto log = REXCVAR_GET(log_file);
-      if (!log.empty()) {
-        auto fault_path = std::filesystem::path(std::u8string(log.begin(), log.end()));
-        fault_path += ".ppc.txt";
-        if (!guest_fault_context_.Start(*runtime()->memory(), fault_path))
-          REXLOG_ERROR("17559: cannot create PPC fault diagnostic next to {}", log);
-      }
-    }
-    const auto result = experimental_region_.Map(*runtime()->memory(),
-        REXCVAR_GET(dash17559_experimental_region));
-    using Result = dash17559::ExperimentalRegion::Result;
-    if (result == Result::Overlap || result == Result::AllocationFailed) {
-      REX_FATAL("dash_17559: experimental region setup failed ({})", static_cast<int>(result));
-    }
+  rex::Result<void> OnSessionLaunch(rex::kernel::TitleRuntime& title) override {
+    const auto root = title.GetTitlePaths().game_root.Get();
+    REX_TRY_VOID(title.GetFileSystem().Mount({"\\SystemRoot", rex::filesystem::ProviderType::kHostDirectory,
+        root, rex::filesystem::MountFlags::kNone, {}}));
+    if (!dash17559::MountSystemExtPartition(title.GetFileSystem(), root))
+      return rex::Err(rex::ErrorCategory::kIO, "17559: system extension partition mount failed");
+    const auto executable = title.GetModuleRegistry().GetExecutable();
+    if (!executable) return rex::Err(rex::ErrorCategory::kModule, "17559: no executable module");
+    auto module = title.GetObjectTable().Get<rex::kernel::ModuleObject>(*executable);
+    if (!module || !module->processor_module)
+      return rex::Err(rex::ErrorCategory::kModule, "17559: executable image is unavailable");
+    const auto mapped = experimental_region_.Map(*module->processor_module->GetAddressSpace(),
+        dash17559::GetSystemUiSettings().experimental_region.Get());
+    using Region = dash17559::ExperimentalRegion;
+    if (mapped == Region::Result::Overlap || mapped == Region::Result::AllocationFailed)
+      return rex::Err(rex::ErrorCategory::kMemory, "17559: experimental region setup failed");
+    module = {};
     REXLOG_WARN("[compatibility-experiment] dash17559_experimental_region={}; "
-                "0x8E030000 size=65536 RW; região de compatibilidade experimental; "
-                "conteúdo real desconhecido",
-                result == Result::Disabled ? "disabled" : "enabled");
-    auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\SystemRoot",
-                                                                    game_data_root(), true);
-    if (!device->Initialize() || !runtime()->file_system()->RegisterDevice(std::move(device))) {
-      REXLOG_ERROR("dash_17559: could not mount {} at \\SystemRoot", game_data_root().string());
+                "0x8E030000 size=65536 RW; actual original contents unknown",
+                mapped == Region::Result::Disabled ? "disabled" : "enabled");
+    if (rex::platform::IsDebuggerAttached() && x360n::GetLaunchSettings().guest_fault_context.Get().empty()) {
+      const auto configured = rex::string::to_path(REX_LOGGER().file_name.Get());
+      auto diagnostic = configured.is_absolute() ? configured : log_root.Get() / "dash_17559.log";
+      diagnostic += ".ppc.txt";
+      REX_TRY_VOID(x360n::GetLaunchSettings().guest_fault_context.SetText(rex::SettingLayer::kRuntime,
+          rex::string::PathToUTF8(diagnostic)));
     }
-    dash17559::MountSystemExtPartition(*runtime()->file_system(), game_data_root());
+    dash17559::InstallDisplayTransition(title);
+    ui_installed_ = true;
+    dash17559::InstallSystemUi(title);
+    return rex::Ok();
+  }
+  rex::Result<void> OnTitleLaunch(rex::kernel::TitleRuntime& title) override {
+    REX_TRY_VOID(SessionTitleApp::OnTitleLaunch(title));
+    if (x360n::IsDashboardReturn() && !dash17559::PrepareReturnContext(title))
+      return rex::Err(rex::ErrorCategory::kValidation, "17559: unsupported dashboard return flags");
+    if (dash17559::GetSystemUiSettings().boot_intro.Get() && !x360n::IsDashboardReturn())
+      dash17559::InstallBootIntro(title);
+    return rex::Ok();
+  }
+  std::string GetSystemXamPath() const override { return dash17559::SystemXamPath(); }
+  void OnSessionUnload(rex::kernel::TitleRuntime& title) override {
+    if (std::exchange(ui_installed_, false)) dash17559::ReleaseSystemUiHost(title);
+    experimental_region_ = {};
+    SessionTitleApp::OnSessionUnload(title);
+  }
+  void OnRelease() override {
+    SessionTitleApp::OnRelease();
+    settings_.Reset();
   }
 
  private:
-  x360n::GuestCapture guest_capture_;
-  x360n::GuestFaultContext guest_fault_context_;
+  rex::ScopeGuard settings_;
   dash17559::ExperimentalRegion experimental_region_;
-
-  // Override virtual hooks for customization:
-  // void OnPostInitLogging() override {}
-  // void OnPreSetup(rex::RuntimeConfig& config) override {}
-  // void OnPostLoadXexImage() override {}
-  // void OnPostSetup() override {}
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
-  // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
-  // std::unique_ptr<rex::ui::AchievementNotificationDialog>
-  // CreateAchievementNotificationDialog() override;
-  // void OnShutdown() override {}
-  // void OnConfigurePaths(rex::PathConfig& paths) override {}
+  bool ui_installed_ = false;
 };

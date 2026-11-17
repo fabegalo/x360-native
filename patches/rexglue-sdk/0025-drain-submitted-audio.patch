@@ -1,64 +1,320 @@
-diff --git a/src/audio/sdl/sdl_audio_driver.cpp b/src/audio/sdl/sdl_audio_driver.cpp
-index e57feea..c2f99f2 100644
---- a/src/audio/sdl/sdl_audio_driver.cpp
-+++ b/src/audio/sdl/sdl_audio_driver.cpp
-@@ -140,15 +140,51 @@ void SDLAudioDriver::SubmitFrame(uint32_t frame_ptr) {
+diff --git a/include/rex/apu/audio_system.h b/include/rex/apu/audio_system.h
+--- a/include/rex/apu/audio_system.h
++++ b/include/rex/apu/audio_system.h
+@@ -61,7 +61,7 @@
+  * A sample that is not finite becomes silence. With apu.peak_limit above 0, a stream whose peak
+  * stays above it for two periods ramps to silence until a frame comes back under it.
+  */
+-REX_DECLARE_INTERFACE(IAudioSystem, 1)
++REX_DECLARE_INTERFACE(IAudioSystem, 2)
+   static constexpr u32 kMaxStreams = 8;
  
- void SDLAudioDriver::Shutdown() {
-   if (sdl_stream_) {
--    size_t pending_frames;
--    {
--      std::lock_guard lock(frames_mutex_);
--      pending_frames = frames_queued_.size();
-+    // The producer is stopped (or UnregisterClient holds the client lock).
-+    // Detach the pull callback before draining: otherwise it keeps adding
-+    // silence when the guest queue empties, so the stream can never drain.
-+    // SDL serializes this change with any callback already in progress.
-+    if (!SDL_SetAudioStreamGetCallback(sdl_stream_, nullptr, nullptr)) {
+   virtual AudioSettings& GetSettings() = 0;
+@@ -79,6 +79,13 @@
+    * Closes a stream. Queued frames are discarded. Returns after the stream's last callback.
+    */
+   virtual void CloseStream(AudioStreamID stream) = 0;
++
++  /**
++   * Waits at most two seconds for submitted frames to leave the mixer. The producer must
++   * already be stopped. This is not a guarantee of audible playback on the host device.
++   * Returns an error on timeout, stream replacement or a stopped mixer.
++   */
++  [[nodiscard]] virtual Result<void> DrainStream(AudioStreamID stream) = 0;
+ 
+   /**
+    * Queues a copy of a frame. Never waits for the device.
+diff --git a/src/apu/audio_system.h b/src/apu/audio_system.h
+--- a/src/apu/audio_system.h
++++ b/src/apu/audio_system.h
+@@ -31,6 +31,7 @@
+   [[nodiscard]] Result<rex::apu::AudioStreamID> OpenStream(
+       MoveOnlyFunction<void()> on_frame_played) override;
+   void CloseStream(rex::apu::AudioStreamID stream) override;
++  [[nodiscard]] Result<void> DrainStream(rex::apu::AudioStreamID stream) override;
+   [[nodiscard]] Result<void> Submit(rex::apu::AudioStreamID stream,
+                                     rex::apu::AudioFrame frame) override;
+   u32 GetOutputChannels() const override;
+diff --git a/src/apu/audio_system.cpp b/src/apu/audio_system.cpp
+--- a/src/apu/audio_system.cpp
++++ b/src/apu/audio_system.cpp
+@@ -33,6 +33,7 @@
+ 
+ struct Slot {
+   bool open = false;
++  u32 in_flight = 0;
+   u32 generation = 0;
+   std::deque<QueuedFrame> queue;
+   MoveOnlyFunction<void()> on_frame_played;
+@@ -50,13 +51,14 @@
+   std::atomic<bool> focused{true};
+ 
+   mutable std::mutex mutex;
++  std::condition_variable drained;
+   std::array<Slot, kMaxStreams> slots;
+   u32 next_generation = 1;
+ 
+   std::thread thread;
+   std::mutex wake_mutex;
+   std::condition_variable wake;
+-  bool stop = false;
++  std::atomic<bool> stop{false};
+ 
+   std::atomic<u32> channels{2};
+   std::atomic<u64> underruns{0};
+@@ -72,6 +74,17 @@
+   MoveOnlyFunction<void(u32)> mix_period;
+ 
+   std::array<MixSlot, kMaxStreams> mix_slots;
++  std::array<u32, kMaxStreams> pending_generations{};
++
++  void FinishMixedFrame() {
++    std::lock_guard lock(mutex);
++    for (u32 i = 0; i < kMaxStreams; ++i) {
++      if (pending_generations[i] && pending_generations[i] == slots[i].generation &&
++          slots[i].in_flight) --slots[i].in_flight;
++    }
++    pending_generations.fill(0);
++    drained.notify_all();
++  }
+   f32 master_applied = 1.0f;
+   bool device_open = false;
+   bool reopen_failed = false;
+@@ -101,6 +114,7 @@
+       continue;
+     }
+     slot.open = true;
++    slot.in_flight = 0;
+     slot.generation = state_->next_generation++;
+     slot.queue.clear();
+     slot.on_frame_played = std::move(on_frame_played);
+@@ -117,8 +131,29 @@
+   std::lock_guard lock(state_->mutex);
+   Slot& slot = state_->slots[index - 1];
+   slot.open = false;
++  slot.in_flight = 0;
++  state_->drained.notify_all();
+   slot.queue.clear();
+   slot.on_frame_played = nullptr;
++}
++
++Result<void> AudioSystem::DrainStream(rex::apu::AudioStreamID stream) {
++  State& s = *state_;
++  const u32 index = static_cast<u32>(stream);
++  if (!index || index > kMaxStreams)
++    return Err(ErrorCategory::kNotFound, "unknown audio stream");
++  std::unique_lock lock(s.mutex);
++  Slot& slot = s.slots[index - 1];
++  const u32 generation = slot.generation;
++  const bool ready = s.drained.wait_for(lock, std::chrono::seconds(2), [&] {
++    return !slot.open || slot.generation != generation || s.stop.load() ||
++           (slot.queue.empty() && !slot.in_flight);
++  });
++  if (!slot.open || slot.generation != generation)
++    return Err(ErrorCategory::kNotFound, "audio stream closed during drain");
++  if (!ready || s.stop.load())
++    return Err(ErrorCategory::kRuntime, "audio stream drain timed out or mixer stopped");
++  return Ok();
+ }
+ 
+ Result<void> AudioSystem::Submit(rex::apu::AudioStreamID stream, rex::apu::AudioFrame frame) {
+@@ -176,6 +211,8 @@
+   s.out_samples = 0;
+   s.out_pos = 0;
+   s.out_channels = 0;
++  s.pending_generations.fill(0);
++  for (Slot& slot : s.slots) slot.in_flight = 0;
+ 
+   s.mix_period = [this](u32 out_channels) {
+     State& s = *state_;
+@@ -198,6 +235,8 @@
+         }
+         taken[i] = slot.queue.front();
+         slot.queue.pop_front();
++        ++slot.in_flight;
++        s.pending_generations[i] = slot.generation;
+         have[i] = true;
+         s.latency_sum_us += static_cast<u64>(
+             std::chrono::duration_cast<std::chrono::microseconds>(now - taken[i].submitted)
+@@ -275,6 +314,7 @@
+         std::copy_n(s.out.data() + s.out_pos, count, samples.data() + done);
+         done += count;
+         s.out_pos += static_cast<u32>(count);
++        if (s.out_pos == s.out_samples) s.FinishMixedFrame();
+       }
+     });
+   };
+@@ -296,7 +336,7 @@
+       {
+         std::unique_lock lock(s.wake_mutex);
+         if (s.wake.wait_until(lock, pulled ? Clock::now() + kDeviceWatch : next,
+-                              [&] { return s.stop; })) {
++                              [&] { return s.stop.load(); })) {
+           break;
+         }
+       }
+@@ -317,6 +357,7 @@
+         {
+           std::lock_guard lock(s.mix_mutex);
+           s.mix_period(s.channels.load());
++          s.FinishMixedFrame();
+         }
+         if (s.driver) {
+           if (s.reopen_wait > 0) {
+@@ -354,10 +395,19 @@
+     return;
+   }
+   {
++    std::unique_lock lock(state_->mutex);
++    if (!state_->drained.wait_for(lock, std::chrono::seconds(2), [&] {
++      return std::ranges::all_of(state_->slots, [](const Slot& slot) {
++        return !slot.open || (slot.queue.empty() && !slot.in_flight);
++      });
++    })) REXAPU_WARN("Audio mixer stop: queued frames did not drain before timeout");
++  }
++  {
+     std::lock_guard lock(state_->wake_mutex);
+     state_->stop = true;
+   }
+   state_->wake.notify_all();
++  state_->drained.notify_all();
+   state_->thread.join();
+   state_->driver = nullptr;
+   state_->channels = 2;
+diff --git a/src/kernel/apu.cpp b/src/kernel/apu.cpp
+--- a/src/kernel/apu.cpp
++++ b/src/kernel/apu.cpp
+@@ -153,6 +153,9 @@
+     if (!client.in_use) {
+       continue;
+     }
++    if (auto drained = audio_->DrainStream(client.stream); !drained) {
++      REXAPU_WARN("Guest audio drain failed, {}", drained.error().message);
++    }
+     audio_->CloseStream(client.stream);
+     if (client.wrapped_callback_arg) {
+       StateOf(runtime_).GetAddressSpace()->SystemHeapFree(client.wrapped_callback_arg);
+@@ -191,6 +194,9 @@
+   if (index >= kMaxClients || !clients_[index].in_use) {
+     return;
+   }
++  if (auto drained = audio_->DrainStream(clients_[index].stream); !drained) {
++    REXAPU_WARN("Guest audio drain failed, {}", drained.error().message);
++  }
+   audio_->CloseStream(clients_[index].stream);
+   StateOf(runtime_).GetAddressSpace()->SystemHeapFree(clients_[index].wrapped_callback_arg);
+   clients_[index] = {};
+diff --git a/src/apu/sdl3/sdl3_audio_driver.cpp b/src/apu/sdl3/sdl3_audio_driver.cpp
+--- a/src/apu/sdl3/sdl3_audio_driver.cpp
++++ b/src/apu/sdl3/sdl3_audio_driver.cpp
+@@ -99,6 +99,30 @@
+ 
+ void SDL3AudioDriver::CloseDevice() {
+   if (stream_) {
++    // Detaching waits for a running pull callback, then prevents endless silence during flush.
++    if (!SDL_SetAudioStreamGetCallback(stream_, nullptr, nullptr)) {
 +      REXAPU_WARN("audio shutdown: could not detach callback: {}", SDL_GetError());
 +    } else {
-+      size_t pending_frames;
-+      {
-+        std::lock_guard lock(frames_mutex_);
-+        pending_frames = frames_queued_.size();
-+      }
-+      const int output_bytes = int(channel_samples_ * sdl_device_channels_ * sizeof(float));
-+      const int available_before = SDL_GetAudioStreamAvailable(sdl_stream_);
-+      // Reuse the normal conversion/mix and semaphore completion for every
-+      // frame already submitted by the guest. No amplitude ramp is added.
-+      if (pending_frames)
-+        SDLCallback(this, sdl_stream_, int(pending_frames) * output_bytes, 0);
-+      bool drained = SDL_FlushAudioStream(sdl_stream_);
-+      const uint64_t deadline = SDL_GetTicks() + 2000;
++      bool drained = SDL_FlushAudioStream(stream_);
++      const u64 deadline = SDL_GetTicks() + 2000;
 +      while (drained) {
-+        const int queued = SDL_GetAudioStreamQueued(sdl_stream_);
-+        const int available = SDL_GetAudioStreamAvailable(sdl_stream_);
++        const int queued = SDL_GetAudioStreamQueued(stream_);
++        const int available = SDL_GetAudioStreamAvailable(stream_);
 +        if (queued < 0 || available < 0) { drained = false; break; }
 +        if (!queued && !available) break;
 +        if (SDL_GetTicks() >= deadline) { drained = false; break; }
 +        SDL_Delay(1);
 +      }
 +      if (drained) {
-+        // Empty stream means handed to the device, not necessarily played.
-+        // Let the current device buffer finish before closing its endpoint.
 +        SDL_AudioSpec format{};
 +        int device_frames = 0;
-+        if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(sdl_stream_),
-+                                    &format, &device_frames) && format.freq > 0 && device_frames > 0)
-+          SDL_Delay(uint32_t((uint64_t(device_frames) * 1000 + format.freq - 1) / format.freq));
-+        REXAPU_INFO("audio shutdown: drained {} guest frames and {} queued output bytes",
-+                    pending_frames, available_before);
++        if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(stream_), &format, &device_frames) &&
++            format.freq > 0 && device_frames > 0)
++          SDL_Delay(static_cast<u32>((static_cast<u64>(device_frames) * 1000 + format.freq - 1) / format.freq));
 +      } else {
-+        // The bound only prevents a hung/lost device blocking shutdown forever.
-+        // It is explicitly a failed drain, never reported as completion.
-+        REXAPU_WARN("audio shutdown: drain failed/timed out; remaining audio discarded: {}",
-+                    SDL_GetError());
++        REXAPU_WARN("audio shutdown: drain failed/timed out; remaining audio discarded: {}", SDL_GetError());
 +      }
-     }
--    // SDL calls must be outside frames_mutex_: the audio callback takes it
--    // while SDL owns its stream lock.
--    REXAPU_INFO("audio shutdown: {} guest frames pending; {} output bytes available",
--                pending_frames, SDL_GetAudioStreamAvailable(sdl_stream_));
-     SDL_DestroyAudioStream(sdl_stream_);
-     sdl_stream_ = nullptr;
++    }
+     SDL_DestroyAudioStream(stream_);
+     stream_ = nullptr;
    }
+diff --git a/tests/unit/apu/audio_system_test.cpp b/tests/unit/apu/audio_system_test.cpp
+--- a/tests/unit/apu/audio_system_test.cpp
++++ b/tests/unit/apu/audio_system_test.cpp
+@@ -666,3 +666,76 @@
+     CHECK_FALSE(REX_SETTINGS().Find("apu.gain").value()->IsFrozen());
+   });
+ }
++
++
++REX_TEST_CASE("drain waits for queued samples to leave a partial device pull", "[apu][audio-drain]") {
++  Run({{"apu.driver", "fake"}, {"apu.peak_limit", "0"}}, [](rex::apu::IAudioSystem& audio) {
++    g_device.pull.SetPaused(true);
++    std::this_thread::sleep_for(std::chrono::milliseconds(30));
++    (void)g_device.Take();
++    g_device.pull.SetRequest(kPeriodFrames / 2);
++    std::atomic<unsigned> credited{0};
++    const auto stream = audio.OpenStream([&] { ++credited; });
++    REQUIRE(stream);
++    REQUIRE(audio.Submit(*stream, Constant(0.25f)));
++    std::atomic<bool> returned{false}, succeeded{false};
++    std::jthread drain([&] {
++      succeeded = audio.DrainStream(*stream).has_value();
++      returned = true;
++    });
++    std::this_thread::sleep_for(std::chrono::milliseconds(20));
++    CHECK_FALSE(returned.load());
++    g_device.pull.SetPaused(false);
++    REQUIRE(WaitFor([&] { return returned.load(); }));
++    drain.join();
++    REQUIRE(succeeded.load());
++    CHECK(credited.load() == 1);
++    REQUIRE(WaitFor([&] { return g_device.GetBlockCount() >= 4; }));
++    size_t samples = 0;
++    for (const auto& block : g_device.Take()) for (const auto sample : block) {
++      if (sample != 0.0f) {
++        CHECK(Near(sample, 0.25f, 1e-6f));
++        ++samples;
++      }
++    }
++    CHECK(samples == rex::apu::kAudioFrameSamples);
++    audio.CloseStream(*stream);
++    CHECK_FALSE(audio.DrainStream(*stream));
++    CHECK_FALSE(audio.DrainStream(rex::apu::AudioStreamID{0}));
++  });
++}
++
++REX_TEST_CASE("a stalled audio drain fails without discarding its queued frame", "[apu][audio-drain]") {
++  Run({{"apu.driver", "fake"}}, [](rex::apu::IAudioSystem& audio) {
++    g_device.pull.SetPaused(true);
++    std::this_thread::sleep_for(std::chrono::milliseconds(30));
++    const auto stream = audio.OpenStream([] {});
++    REQUIRE(stream);
++    REQUIRE(audio.Submit(*stream, Constant(0.125f)));
++    const auto failed = audio.DrainStream(*stream);
++    CHECK_FALSE(failed);
++    CHECK(audio.GetStats().queued_frames == 1);
++    g_device.pull.SetPaused(false);
++    REQUIRE(audio.DrainStream(*stream));
++    CHECK(audio.GetStats().queued_frames == 0);
++    audio.CloseStream(*stream);
++  });
++}
++
++REX_TEST_CASE("stopping the mixer drains submitted frames from open streams", "[apu][audio-drain]") {
++  g_device.Reset();
++  std::atomic<unsigned> credited{0};
++  AudioApp app({{"apu.driver", "fake"}, {"apu.peak_limit", "0"}});
++  app.body = [&](rex::apu::IAudioSystem& audio) {
++    const auto stream = audio.OpenStream([&] { ++credited; });
++    REQUIRE(stream);
++    for (unsigned i = 0; i < 3; ++i) REQUIRE(audio.Submit(*stream, Constant(0.25f)));
++  };
++  REQUIRE(app.Start());
++  app.Finish();
++  CHECK(credited.load() == 3);
++  size_t samples = 0;
++  for (const auto& block : g_device.Take()) for (const auto sample : block)
++    if (sample != 0.0f) ++samples;
++  CHECK(samples == 3 * rex::apu::kAudioFrameSamples);
++}

@@ -8,11 +8,11 @@ block(SCOPE_FOR VARIABLES)
   ppc_add_test_binary("${CMAKE_CURRENT_SOURCE_DIR}/asm/vmsum.s" "${CMAKE_CURRENT_BINARY_DIR}/obj" "${vmsum_bin}")
 endblock()
 add_custom_command(OUTPUT "${vmsum_gen}/ppc_test_functions.cpp" "${vmsum_gen}/ppc_test_decls.h"
-  COMMAND $<TARGET_FILE:rexglue> recompile-tests --output=${vmsum_gen} --bin-dir=${vmsum_bin} --asm-dir=${CMAKE_CURRENT_SOURCE_DIR}/asm
+  COMMAND $<TARGET_FILE:rexglue> recompile-tests --fast-vector-math --output=${vmsum_gen} --bin-dir=${vmsum_bin} --asm-dir=${CMAKE_CURRENT_SOURCE_DIR}/asm
   DEPENDS "${vmsum_bin}/vmsum.bin" "${vmsum_bin}/vmsum.map" rexglue VERBATIM)
 add_executable(x360n_vmsum_checks main.cpp "${vmsum_gen}/ppc_test_functions.cpp")
 target_include_directories(x360n_vmsum_checks PRIVATE "${vmsum_gen}")
-target_link_libraries(x360n_vmsum_checks PRIVATE rexruntime simde fmt::fmt x360n_ppc_options)
+target_link_libraries(x360n_vmsum_checks PRIVATE ${X360N_SDK_LIBRARIES} simde x360n_ppc_options)
 target_compile_options(x360n_vmsum_checks PRIVATE -fno-char8_t -msse4.1 -mssse3 -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 x360n_stage_runtime_dlls(x360n_vmsum_checks)
 add_test(NAME sdkcheck.Vmsum COMMAND x360n_vmsum_checks)

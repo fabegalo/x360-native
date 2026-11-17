@@ -1,86 +1,79 @@
---- a/include/rex/system/xobject.h
-+++ b/include/rex/system/xobject.h
-@@ -140,6 +140,7 @@
-     Thread,
-     Timer,
-     XamTask,
-+    ProfileCreation,
-   };
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -10,6 +10,9 @@
+  */
  
-   XObject(Type type);
---- a/src/kernel/xam/xam_enum.cpp
-+++ b/src/kernel/xam/xam_enum.cpp
-@@ -115,6 +115,51 @@
-   return X_ERROR_SUCCESS;
- }
- 
-+class ProfileCreation final : public XObject {
+ #include "xam/xam_state.h"
++#include "xam/categories.h"
++#include <atomic>
++#include <memory>
+ #include <rex/kernel/object/module_object.h>
+ #include <rex/kernel/object/object_table.h>
+ #include <rex/kernel/title_runtime.h>
+@@ -117,6 +120,50 @@
+   if (!identity.xuid || xuid != identity.xuid) return kernel::X_ERROR_NO_SUCH_USER;
+   *account = AccountFor(identity);
+   return kernel::X_ERROR_SUCCESS;
++}
++
++class ProfileCreation final : public kernel::IXAMObject {
 + public:
-+  static constexpr Type kObjectType = Type::ProfileCreation;
-+  explicit ProfileCreation(KernelState* kernel) : XObject(kernel, kObjectType) {}
-+  uint64_t xuid = 0;
-+  uint32_t result = 0;
++  static constexpr u32 kTag = 0x50524352;
++  u32 GetTag() const override { return kTag; }
++  u64 xuid = 0;
++  u32 result = 0;
++  std::atomic<bool> consumed{false};
 +};
 +
-+// 17559 816DC468/816DC2B0: flags, device pointer, input XUID, 380-byte
-+// account, optional avatar/preferences, and opaque creation handle output.
-+// Persistence is synchronous locally; the caller still consumes the result
-+// through GetCreationStatus, which releases the completed operation once.
-+u32 CreateLocalProfile(uint32_t flags, mapped_u32 device, uint64_t input_xuid,
-+                       ppc_ptr_t<LocalAccount> account, mapped_u32 handle) {
-+  REXKRNL_INFO("Local profile create flags={:08X} device={} input={:016X}",
-+      flags, device ? uint32_t(*device) : 0xFFFFFFFF, input_xuid);
-+  if (!device || !account || !handle) return X_E_INVALIDARG;
++u32 XamProfileCreate_entry(u32 flags, MappedU32 device, u64 input_xuid,
++                          GuestPtrT<LocalAccount> account, [[maybe_unused]] u32 avatar,
++                          [[maybe_unused]] u32 preferences, [[maybe_unused]] u32 unknown,
++                          MappedU32 handle) {
++  if (!device || !account || !handle) return kernel::X_E_INVALIDARG;
 +  *handle = 0;
 +  if (flags != 1 || input_xuid || account->online_xuid) return 0x80004001u;
-+  if (*device > 1) return X_HRESULT_FROM_WIN32(X_ERROR_DEVICE_NOT_CONNECTED);
++  if (*device > 1) return static_cast<u32>(kernel::XHRESULTFromWin32(kernel::X_ERROR_DEVICE_NOT_CONNECTED));
 +  std::string name;
 +  for (unsigned i = 0; i < 16; ++i) {
-+    const uint16_t c = account->name[i];
-+    if (!c) break;
-+    if (c < 32 || c > 126 || i == 15) return X_E_INVALIDARG;
-+    name.push_back(char(c));
++    const u16 ch = account->name[i];
++    if (!ch) break;
++    if (ch < 32 || ch > 126 || i == 15) return kernel::X_E_INVALIDARG;
++    name.push_back(static_cast<char>(ch));
 +  }
-+  auto operation = make_object<ProfileCreation>(REX_KERNEL_STATE());
-+  operation->result = REX_KERNEL_STATE()->user_profile()->CreateLocal(name, &operation->xuid);
-+  *handle = operation->handle();
-+  REXKRNL_INFO("Local profile created name={} xuid={:016X} result={}", name,
-+      operation->xuid, operation->result);
++  auto& objects = CurrentTitle().objects;
++  auto added = objects.AddXAMObject(std::make_unique<ProfileCreation>(), {});
++  if (!added) return kernel::X_E_FAIL;
++  auto operation = objects.Get<ProfileCreation>(*added);
++  operation->result = CurrentXAM().GetUserProfile().CreateLocal(name, &operation->xuid);
++  *handle = *added;
++  REXXAM_INFO("Local profile created name={} xuid={:016X} result={}", name, operation->xuid, operation->result);
 +  return 0;
 +}
 +
-+u32 XamProfileGetCreationStatus_entry(u32 handle, mapped_u64 xuid) {
-+  if (!xuid) return X_E_INVALIDARG;
-+  auto operation = REX_KERNEL_OBJECTS()->LookupObject<ProfileCreation>(handle);
-+  if (!operation) return X_E_INVALIDARG;
++u32 XamProfileGetCreationStatus_entry(u32 handle, MappedU64 xuid) {
++  if (!xuid) return kernel::X_E_INVALIDARG;
++  auto operation = CurrentTitle().objects.Get<ProfileCreation>(handle);
++  if (!operation || operation->consumed.exchange(true)) return kernel::X_E_INVALIDARG;
 +  *xuid = operation->xuid;
-+  const auto result = X_HRESULT_FROM_WIN32(operation->result);
-+  operation->Delete();
++  const auto result = static_cast<u32>(kernel::XHRESULTFromWin32(operation->result));
++  kernel::CloseOwned(CurrentTitle().objects, handle);
 +  return result;
-+}
+ }
+ 
+ u32 EnumerateItems(u32 handle, u32 flags, MappedVoid buffer_ptr, u32* items_returned,
+@@ -225,3 +272,7 @@
+ REX_XAM_BODY(__imp__XamProfileFindAccount, rex::xam::XamProfileFindAccount_entry)
+ 
+ REX_XAM_BODY(__imp__XamProfileLoadAccountInfo, rex::xam::XamProfileLoadAccountInfo_entry)
 +
- // https://github.com/LestaD/SourceEngine2007/blob/master/se2007/engine/xboxsystem.cpp#L518
- uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
-                         uint32_t buffer_size, uint32_t* items_returned, uint32_t overlapped_ptr) {
-@@ -221,3 +266,15 @@
- REX_EXPORT(__imp__XamCreateEnumeratorHandle, rex::kernel::xam::XamCreateEnumeratorHandle_entry)
- REX_EXPORT(__imp__XamGetPrivateEnumStructureFromHandle,
-            rex::kernel::xam::XamGetPrivateEnumStructureFromHandle_entry)
++REX_XAM_BODY(__imp__XamProfileCreate, rex::xam::XamProfileCreate_entry)
 +
-+extern "C" REX_FUNC(__imp__XamProfileCreate) {
-+  using namespace rex::kernel::xam;
-+  using namespace rex;
-+  auto device = mapped_u32(ctx.r4.u32 ? reinterpret_cast<be<uint32_t>*>(base + ctx.r4.u32) : nullptr, ctx.r4.u32);
-+  auto account = ppc_ptr_t<LocalAccount>(ctx.r6.u32 ? reinterpret_cast<LocalAccount*>(base + ctx.r6.u32) : nullptr, ctx.r6.u32);
-+  auto handle = mapped_u32(ctx.r10.u32 ? reinterpret_cast<be<uint32_t>*>(base + ctx.r10.u32) : nullptr, ctx.r10.u32);
-+  ctx.r3.u64 = CreateLocalProfile(ctx.r3.u32, device, ctx.r5.u64, account, handle);
-+}
-+REX_EXPORT(__imp__XamProfileGetCreationStatus, rex::kernel::xam::XamProfileGetCreationStatus_entry)
-+
-+static rex::ppc::detail::PPCFuncRegistrar profile_create_reg("__imp__XamProfileCreate", &__imp__XamProfileCreate);
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -713,13 +713,13 @@
++REX_XAM_BODY(__imp__XamProfileGetCreationStatus, rex::xam::XamProfileGetCreationStatus_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -644,13 +644,13 @@
  REX_EXPORT_STUB(__imp__XamPrepareGamerTiles);
  REX_EXPORT_STUB(__imp__XamProfileClose);
  REX_EXPORT_STUB(__imp__XamProfileControlPec);
@@ -96,3 +89,72 @@
  REX_EXPORT_STUB(__imp__XamProfileGetLastSync);
  REX_EXPORT_STUB(__imp__XamProfileGetLiveLegalLocale);
  REX_EXPORT_STUB(__imp__XamProfileGetLocalTitleCount);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -354,3 +354,7 @@
+ REX_XAM_FORWARD(__imp__XamShowSigninUIp)
+ 
+ REX_XAM_FORWARD(__imp__XamHudGetUserIndex)
++
++REX_XAM_FORWARD(__imp__XamProfileCreate)
++
++REX_XAM_FORWARD(__imp__XamProfileGetCreationStatus)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -918,3 +918,54 @@
+     CHECK(caller.XAM("XamHudGetUserIndex") == 255);
+   });
+ }
++
++
++REX_TEST_CASE("retail local profile creation uses a one-shot official handle and preserves the active account", "[kernel][xam][profile-creation]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    REQUIRE(profile.CreateLocal("First") == 0);
++    const auto first = profile.GetXUID();
++    REQUIRE(profile.SetLocalSession(first) == 0);
++    const auto device = caller.Alloc(4), account = caller.Alloc(380), handle_out = caller.Alloc(4), xuid_out = caller.Alloc(8);
++    caller.Store32(device, 1);
++    const std::string name = "Second";
++    for (size_t i = 0; i < name.size(); ++i) caller.GetBase()[account + 9 + i * 2] = static_cast<u8>(name[i]);
++    auto create = [&](u32 flags, u64 input) { return caller.XAM("XamProfileCreate", {flags, device, input, account, 0, 0, 0, handle_out}); };
++    CHECK(caller.XAM("XamProfileCreate", {1, 0, 0, account, 0, 0, 0, handle_out}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(create(0, 0) == 0x80004001u);
++    CHECK(caller.Load32(handle_out) == 0);
++    CHECK(create(1, 0xE000000000000001ull) == 0x80004001u);
++    caller.Store64(account + 40, 1);
++    CHECK(create(1, 0) == 0x80004001u);
++    caller.Store64(account + 40, 0);
++    caller.Store32(device, 2);
++    CHECK(create(1, 0) == static_cast<u32>(rex::kernel::XHRESULTFromWin32(rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED)));
++    caller.Store32(device, 1);
++    REQUIRE(create(1, 0) == 0);
++    const auto handle = caller.Load32(handle_out);
++    REQUIRE(handle != 0);
++    CHECK(caller.GetRuntime().GetObjectTable().Get(handle));
++    CHECK(caller.XAM("XamProfileGetCreationStatus", {handle, 0}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    REQUIRE(caller.XAM("XamProfileGetCreationStatus", {handle, xuid_out}) == 0);
++    const auto second = (u64(caller.Load32(xuid_out)) << 32) | caller.Load32(xuid_out + 4);
++    CHECK(second != 0);
++    CHECK(second != first);
++    CHECK(second >> 60 == 0xE);
++    CHECK(profile.FindLocal(second).name == "Second");
++    CHECK(profile.identity().xuid == first);
++    CHECK(profile.GetSigninState() == 1);
++    CHECK_FALSE(caller.GetRuntime().GetObjectTable().Get(handle));
++    caller.Store64(xuid_out, 0xCDCDCDCDCDCDCDCDull);
++    CHECK(caller.XAM("XamProfileGetCreationStatus", {handle, xuid_out}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(caller.Load32(xuid_out) == 0xCDCDCDCD);
++    REQUIRE(create(1, 0) == 0);
++    const auto duplicate = caller.Load32(handle_out);
++    CHECK(caller.XAM("XamProfileGetCreationStatus", {duplicate, xuid_out}) == static_cast<u32>(rex::kernel::XHRESULTFromWin32(rex::kernel::X_ERROR_ALREADY_EXISTS)));
++    CHECK(caller.Load32(xuid_out) == 0);
++    CHECK(caller.Load32(xuid_out + 4) == 0);
++    CHECK_FALSE(caller.GetRuntime().GetObjectTable().Get(duplicate));
++    CHECK(profile.local_profiles().size() == 2);
++    CHECK(profile.identity().xuid == first);
++  });
++}

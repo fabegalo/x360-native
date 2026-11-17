@@ -1,23 +1,42 @@
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index ff6cb56..7774283 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -546,7 +546,17 @@ REX_EXPORT_STUB(__imp__XamLoaderSetSpindleSpeed);
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -48,6 +48,11 @@
+ namespace xam {
+ 
+ using namespace rex::kernel;
++
++u32 XamLookupCommonStringByIndex_entry([[maybe_unused]] u32 index) {
++  REXXAM_WARN("XamLookupCommonStringByIndex({}): common-string resource unavailable", index);
++  return 0;
++}
+ 
+ u32 XamFeatureEnabled_entry([[maybe_unused]] u32 unk) {
+   return 0;
+@@ -451,3 +456,5 @@
+ REX_XAM_BODY(__imp__XamQueryLiveHiveW, rex::xam::XamQueryLiveHiveW_entry)
+ REX_XAM_BODY(__imp__XamLoaderGetDvdTrayState, rex::xam::XamLoaderGetDvdTrayState_entry)
+ REX_XAM_BODY(__imp__XamSwapDisc, rex::xam::XamSwapDisc_entry)
++
++REX_XAM_BODY(__imp__XamLookupCommonStringByIndex, rex::xam::XamLookupCommonStringByIndex_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -541,7 +541,7 @@
  REX_EXPORT_STUB(__imp__XamLoaderShouldConfirmReboot);
  REX_EXPORT_STUB(__imp__XamLocateTitle);
  REX_EXPORT_STUB(__imp__XamLogLocalizationEtx);
 -REX_EXPORT_STUB(__imp__XamLookupCommonStringByIndex);
-+namespace {
-+rex::u32 XamLookupCommonStringByIndexUnavailable(rex::u32 index) {
-+  // No common-string resource table is loaded. This export returns a pointer,
-+  // not a status: null means lookup failure (as in Xenia Canary 2372a541).
-+  // Dashboard 17559's sub_92188D88 checks null and returns -1, so confirmation
-+  // is NOT accepted. Never return the incoming ID as a guest address.
-+  REXKRNL_WARN("XamLookupCommonStringByIndex({}): common-string resource unavailable", index);
-+  return 0;
-+}
-+}  // namespace
-+REX_EXPORT(__imp__XamLookupCommonStringByIndex, XamLookupCommonStringByIndexUnavailable)
++
  REX_EXPORT_STUB(__imp__XamLrcEncryptDecryptTitleMessage);
  REX_EXPORT_STUB(__imp__XamLrcGetInput);
  REX_EXPORT_STUB(__imp__XamLrcGetInputWithSeek);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -249,3 +249,5 @@
+ REX_XAM_FORWARD(__imp__XamSetCountry)
+ 
+ REX_XAM_FORWARD(__imp__XTLGetLanguageV2)
++
++REX_XAM_FORWARD(__imp__XamLookupCommonStringByIndex)

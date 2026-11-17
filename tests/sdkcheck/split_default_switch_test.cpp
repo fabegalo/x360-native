@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <fstream>
 #include <iterator>
@@ -49,15 +49,15 @@ TEST_CASE("Unsigned split defaults preserve complete large switch tables",
     work.write("test.xex", bytes);
     std::ofstream(work.dir / "test.toml") <<
         "project_name='large_switch'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    const auto* function = pipeline->context().graph.getFunction(kXexText);
+    const auto* function = pipeline->GetContext().graph.GetFunction(kXexText);
     REQUIRE(function);
-    REQUIRE(function->jumpTables().size() == 1);
-    const auto& table = function->jumpTables().front();
+    REQUIRE(function->GetJumpTables().size() == 1);
+    const auto& table = function->GetJumpTables().front();
     CHECK(table.targets.size() == (variant == 0 ? 643 : 512));
-    CHECK(table.tableByteLength == table.targets.size() * 4);
+    CHECK(table.table_byte_length == table.targets.size() * 4);
     REQUIRE(pipeline->RunWrite().has_value());
     if (variant == 0) {
       std::ifstream source(work.dir / "out" / "large_switch_recomp.0.cpp");

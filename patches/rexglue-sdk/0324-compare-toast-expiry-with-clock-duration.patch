@@ -1,0 +1,15 @@
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -56,8 +56,9 @@
+       if (!visible_since) {
+         visible_since = now;
+       }
+-      age = std::chrono::duration<f32>(now - *visible_since).count();
+-      if (age >= kDisplaySeconds) {
++      const auto elapsed = now - *visible_since;
++      age = static_cast<f32>(std::chrono::duration<f64>(elapsed).count());
++      if (elapsed >= std::chrono::milliseconds(4500)) {
+         state_->queue.pop_front();
+       } else {
+         break;

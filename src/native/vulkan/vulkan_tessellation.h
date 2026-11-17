@@ -11,12 +11,12 @@
 // Pure shader generation derived from ReXGlue/Xenia (BSD-3-Clause).
 // Native owns all modules, resources, pipelines and submissions.
 #pragma once
-#include <rex/graphics/pipeline/shader/spirv_translator.h>
-#include <fmt/format.h>
+#include <gpu/xenos/pipeline/shader/spirv_translator.h>
+#include <format>
 namespace x360n::native {
-using rex::graphics::Shader;
-using rex::graphics::SpirvShaderTranslator;
-namespace xenos = rex::graphics::xenos;
+using rex::gpu::Shader;
+using rex::gpu::SPIRVShaderTranslator;
+namespace xenos = rex::xenos;
 constexpr bool IsTriangleDomainHostVertexShaderType(
     Shader::HostVertexShaderType host_vertex_shader_type) {
   return host_vertex_shader_type == Shader::HostVertexShaderType::kTriangleDomainCPIndexed ||
@@ -38,20 +38,20 @@ constexpr bool IsPatchIndexedHostVertexShaderType(
 std::string GetTessellationSystemConstantsBlockGlsl() {
   std::string source;
   source += "layout(set = 1, binding = 0, std140) uniform XeSystemConstants {\n";
-  source += fmt::format("  layout(offset = {}) uint xe_vertex_index_endian;\n",
-                        offsetof(SpirvShaderTranslator::SystemConstants, vertex_index_endian));
-  source += fmt::format("  layout(offset = {}) int xe_vertex_base_index;\n",
-                        offsetof(SpirvShaderTranslator::SystemConstants, vertex_base_index));
-  source += fmt::format("  layout(offset = {}) uint xe_vertex_index_min;\n",
-                        offsetof(SpirvShaderTranslator::SystemConstants, vertex_index_min));
-  source += fmt::format("  layout(offset = {}) uint xe_vertex_index_max;\n",
-                        offsetof(SpirvShaderTranslator::SystemConstants, vertex_index_max));
+  source += std::format("  layout(offset = {}) uint xe_vertex_index_endian;\n",
+                        offsetof(SPIRVShaderTranslator::SystemConstants, vertex_index_endian));
+  source += std::format("  layout(offset = {}) int xe_vertex_base_index;\n",
+                        offsetof(SPIRVShaderTranslator::SystemConstants, vertex_base_index));
+  source += std::format("  layout(offset = {}) uint xe_vertex_index_min;\n",
+                        offsetof(SPIRVShaderTranslator::SystemConstants, vertex_index_min));
+  source += std::format("  layout(offset = {}) uint xe_vertex_index_max;\n",
+                        offsetof(SPIRVShaderTranslator::SystemConstants, vertex_index_max));
   source +=
-      fmt::format("  layout(offset = {}) float xe_tessellation_factor_range_min;\n",
-                  offsetof(SpirvShaderTranslator::SystemConstants, tessellation_factor_range_min));
+      std::format("  layout(offset = {}) float xe_tessellation_factor_range_min;\n",
+                  offsetof(SPIRVShaderTranslator::SystemConstants, tessellation_factor_range_min));
   source +=
-      fmt::format("  layout(offset = {}) float xe_tessellation_factor_range_max;\n",
-                  offsetof(SpirvShaderTranslator::SystemConstants, tessellation_factor_range_max));
+      std::format("  layout(offset = {}) float xe_tessellation_factor_range_max;\n",
+                  offsetof(SPIRVShaderTranslator::SystemConstants, tessellation_factor_range_max));
   source += "} xe_system_cbuffer;\n";
   return source;
 }
@@ -136,7 +136,7 @@ std::string GetTessellationControlShaderGlsl(Shader::HostVertexShaderType host_v
   source += "layout(location = 0) patch out vec4 xe_out_patch_control_point_indices;\n";
   // In GLSL, primitive mode / spacing / winding are TES layout qualifiers.
   // TCS only supports `layout(vertices = N) out`.
-  source += fmt::format("layout(vertices = {}) out;\n", output_control_points);
+  source += std::format("layout(vertices = {}) out;\n", output_control_points);
 
   source += R"(
 void main() {

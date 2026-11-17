@@ -1,100 +1,100 @@
-diff --git a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
-index 251047f..c7e3a74 100644
---- a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
-+++ b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
-@@ -9,6 +9,8 @@
-  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
-  */
- 
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_xex.cpp b/src/kernel/xboxkrnl/xboxkrnl_xex.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_xex.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_xex.cpp
+@@ -15,6 +15,9 @@
+ #include <rex/memory/mapped_ptr.h>
+ #include <rex/kernel/module.h>
+ #include <rex/types.h>
 +#include <array>
-+#include <rex/system/lzx.h>
- #include <rex/kernel/xboxkrnl/private.h>
- #include <rex/logging.h>
- #include <rex/hook.h>
-@@ -214,6 +216,82 @@ u32 XexLoadImageHeaders_entry(mapped_string path, mapped_void headers) {
++#include <rex/filesystem/file_system_factory.h>
++#include "kernel/rexkernel_module.h"
+ #include <rex/kernel/title_runtime.h>
+ #include <rex/kernel/object/module_object.h>
+ #include <rex/kernel/types/thread.h>
+@@ -221,6 +224,82 @@
+   REX_KERNEL_STUB("XexLoadImageHeaders({})", path.GetValue());
    return X_STATUS_NOT_IMPLEMENTED;
  }
- 
++
 +// LDI caller-owned workspace profile used by XAM 17559's avatar stream.
 +// Observed ABI: (block_bytes*, {window_bytes, partition_bytes}*, alloc, free,
 +// workspace, workspace_bytes*, context*). Both sizes are 32 KiB in this profile.
 +// Only independent blocks with an explicit Reset between them are implemented.
 +// Nonzero status is failure; finer proprietary error-code parity is not claimed.
 +namespace {
-+constexpr uint32_t kLdiMagic = 0x4C444931, kLdiWindow = 0x8000, kLdiWorkspace = 0x9800;
-+bool LdiContext(mapped_u32 context) {
-+  return context && context[0] == kLdiMagic && context[1] == context.guest_address();
++constexpr u32 kLdiMagic = 0x4C444931, kLdiWindow = 0x8000, kLdiWorkspace = 0x9800;
++bool LdiContext(MappedU32 context) {
++  return context && context.AsArray<u32>()[0] == kLdiMagic && context.AsArray<u32>()[1] == context.GetGuestAddress();
 +}
-+bool LdiRange(uint32_t address, uint32_t size) {
-+  return address && uint64_t(address) + size <= 0x100000000ull;
++bool LdiRange(u32 address, u32 size) {
++  return address && u64(address) + size <= 0x100000000ull;
 +}
-+bool LdiOverlaps(uint32_t a, uint32_t n, uint32_t b, uint32_t m) {
-+  return uint64_t(a) < uint64_t(b) + m && uint64_t(b) < uint64_t(a) + n;
++bool LdiOverlaps(u32 a, u32 n, u32 b, u32 m) {
++  return u64(a) < u64(b) + m && u64(b) < u64(a) + n;
 +}
 +}  // namespace
 +
-+u32 LDICreateDecompression_entry(mapped_u32 block_bytes, mapped_u32 config, u32 alloc,
-+                                 u32 free, mapped_u32 workspace, mapped_u32 workspace_bytes,
-+                                 mapped_u32 context_out) {
++u32 LDICreateDecompression_entry(MappedU32 block_bytes, MappedU32 config, u32 alloc,
++                                 u32 free, MappedU32 workspace, MappedU32 workspace_bytes,
++                                 MappedU32 context_out) {
 +  if (!context_out) return 1;
 +  *context_out = 0;
 +  if (!block_bytes || !config || !workspace_bytes || alloc || free ||
-+      *block_bytes != kLdiWindow || config[0] != kLdiWindow || config[1] != kLdiWindow)
++      *block_bytes != kLdiWindow || config.AsArray<u32>()[0] != kLdiWindow || config.AsArray<u32>()[1] != kLdiWindow)
 +    return 1;
-+  const uint32_t available = *workspace_bytes;
++  const u32 available = *workspace_bytes;
 +  *workspace_bytes = kLdiWorkspace;
-+  if (!workspace || (workspace.guest_address() & 15) || available < kLdiWorkspace ||
-+      !LdiRange(workspace.guest_address(), kLdiWorkspace) ||
-+      LdiOverlaps(workspace.guest_address(), kLdiWorkspace, context_out.guest_address(), 4))
++  if (!workspace || (workspace.GetGuestAddress() & 15) || available < kLdiWorkspace ||
++      !LdiRange(workspace.GetGuestAddress(), kLdiWorkspace) ||
++      LdiOverlaps(workspace.GetGuestAddress(), kLdiWorkspace, context_out.GetGuestAddress(), 4))
 +    return 1;
-+  workspace[0] = kLdiMagic;
-+  workspace[1] = workspace.guest_address();
-+  workspace[2] = 0;  // Ready for an independent frame.
-+  workspace[3] = kLdiWindow;
-+  *context_out = workspace.guest_address();
++  workspace.AsArray<u32>()[0] = kLdiMagic;
++  workspace.AsArray<u32>()[1] = workspace.GetGuestAddress();
++  workspace.AsArray<u32>()[2] = 0;  // Ready for an independent frame.
++  workspace.AsArray<u32>()[3] = kLdiWindow;
++  *context_out = workspace.GetGuestAddress();
 +  return 0;
 +}
 +
-+u32 LDIDecompress_entry(mapped_u32 context, mapped_void source, u32 source_bytes,
-+                        mapped_void destination, mapped_u32 output_bytes) {
++u32 LDIDecompress_entry(MappedU32 context, MappedVoid source, u32 source_bytes,
++                        MappedVoid destination, MappedU32 output_bytes) {
 +  if (!output_bytes || !LdiContext(context)) return 1;
-+  const uint32_t requested = *output_bytes;
++  const u32 requested = *output_bytes;
 +  // Do not silently discard history on a second call: this profile requires Reset.
-+  if (context[2] != 0 || !requested || requested > kLdiWindow || !source_bytes ||
++  if (context.AsArray<u32>()[2] != 0 || !requested || requested > kLdiWindow || !source_bytes ||
 +      source_bytes > kLdiWorkspace || !source || !destination ||
-+      !LdiRange(source.guest_address(), source_bytes) ||
-+      !LdiRange(destination.guest_address(), requested) ||
-+      LdiOverlaps(context.guest_address(), 16, output_bytes.guest_address(), 4) ||
-+      LdiOverlaps(context.guest_address(), 16, destination.guest_address(), requested))
++      !LdiRange(source.GetGuestAddress(), source_bytes) ||
++      !LdiRange(destination.GetGuestAddress(), requested) ||
++      LdiOverlaps(context.GetGuestAddress(), 16, output_bytes.GetGuestAddress(), 4) ||
++      LdiOverlaps(context.GetGuestAddress(), 16, destination.GetGuestAddress(), requested))
 +    return 1;
 +  *output_bytes = 0;
-+  context[2] = 1;  // Reset is also required after a failed decode.
-+  std::array<uint8_t, kLdiWindow> decoded{};
-+  if (lzx_decompress(source.host_address(), source_bytes, decoded.data(), requested,
-+                     kLdiWindow, nullptr, 0)) return 1;
-+  std::memcpy(destination.host_address(), decoded.data(), requested);
++  context.AsArray<u32>()[2] = 1;  // Reset is also required after a failed decode.
++  std::array<u8, kLdiWindow> decoded{};
++  if (GetKernelServices()->file_system->DecompressLZX(
++        {source.As<const u8*>(), source_bytes}, {decoded.data(), requested}, kLdiWindow, {})) return 1;
++  std::memcpy(destination.GetHostPtr(), decoded.data(), requested);
 +  *output_bytes = requested;
 +  return 0;
 +}
 +
-+u32 LDIResetDecompression_entry(mapped_u32 context) {
++u32 LDIResetDecompression_entry(MappedU32 context) {
 +  if (!LdiContext(context)) return 1;
-+  context[2] = 0;
++  context.AsArray<u32>()[2] = 0;
 +  return 0;
 +}
 +
-+u32 LDIDestroyDecompression_entry(mapped_u32 context) {
++u32 LDIDestroyDecompression_entry(MappedU32 context) {
 +  if (!LdiContext(context)) return 1;
 +  // Storage belongs to the caller. No host pointer or persistent host allocation.
-+  for (uint32_t i = 0; i < 4; ++i) context[i] = 0;
++  for (u32 i = 0; i < 4; ++i) context.AsArray<u32>()[i] = 0;
 +  return 0;
 +}
 +
-+
+ 
  }  // namespace rex::kernel::xboxkrnl
  
- REX_EXPORT(__imp__XexCheckExecutablePrivilege,
-@@ -258,7 +336,7 @@ REX_EXPORT_STUB(__imp__XexTitleHashOpen);
+@@ -267,7 +346,7 @@
  REX_EXPORT_STUB(__imp__XexReserveCodeBuffer);
  REX_EXPORT_STUB(__imp__XexCommitCodeBuffer);
  REX_EXPORT_STUB(__imp__XexRegisterUsermodeModule);
@@ -106,3 +106,49 @@ index 251047f..c7e3a74 100644
 +REX_EXPORT(__imp__LDIDecompress, rex::kernel::xboxkrnl::LDIDecompress_entry)
 +REX_EXPORT(__imp__LDIDestroyDecompression, rex::kernel::xboxkrnl::LDIDestroyDecompression_entry)
 +REX_EXPORT(__imp__LDIResetDecompression, rex::kernel::xboxkrnl::LDIResetDecompression_entry)
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 2)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 3)
+ /**
+  * Creates an empty mount table.
+  *
+@@ -69,6 +69,10 @@
+    */
+   [[nodiscard]] virtual Result<PEInfo> ParsePE(std::span<const u8> image) = 0;
+ 
++  /** Decodes an LZX stream, returning the libmspack status; 0 means success. */
++  [[nodiscard]] virtual int DecompressLZX(std::span<const u8> input, std::span<u8> output,
++                                        u32 window_size, std::span<const u8> window_data) = 0;
++
+   /**
+    * Finds an optional header entry in a raw XEX header.
+    *
+diff --git a/src/filesystem/filesystem_module.h b/src/filesystem/filesystem_module.h
+--- a/src/filesystem/filesystem_module.h
++++ b/src/filesystem/filesystem_module.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include "filesystem/lzx.h"
+ #include <span>
+ #include <string_view>
+ 
+@@ -76,6 +77,11 @@
+ 
+   Result<PEInfo> ParsePE(std::span<const u8> image) override { return filesystem::ParsePE(image); }
+ 
++  int DecompressLZX(std::span<const u8> input, std::span<u8> output, u32 window_size,
++                    std::span<const u8> window_data) override {
++    return detail::LZXDecompress(input, output, window_size, window_data);
++  }
++
+   std::optional<XEXOptHeaderEntry> FindXEXOptHeader(std::span<const u8> header,
+                                                     kernel::XEXHeaderKey key) override {
+     return FindOptHeaderEntry(header, key);

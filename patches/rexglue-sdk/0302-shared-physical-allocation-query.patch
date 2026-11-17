@@ -1,0 +1,139 @@
+diff --git a/include/rex/guest.h b/include/rex/guest.h
+--- a/include/rex/guest.h
++++ b/include/rex/guest.h
+@@ -97,6 +97,11 @@
+    */
+   [[nodiscard]] virtual Result<u32> LoadAcquire32(u32 address) = 0;
+ 
++  /** True for a nonempty range with committed, accessible pages in any physical alias.
++   * Unlike the span accessors, this checks the guest allocation and protection.
++   */
++  [[nodiscard]] virtual bool IsPhysicalRangeAllocated(PhysicalRange range) = 0;
++
+   /** Publishes completed writes through a writable physical span to every watched alias. */
+   [[nodiscard]] virtual Result<void> NotifyPhysicalWrite(PhysicalRange range) = 0;
+ };
+diff --git a/include/rex/kernel/heap.h b/include/rex/kernel/heap.h
+--- a/include/rex/kernel/heap.h
++++ b/include/rex/kernel/heap.h
+@@ -674,6 +674,9 @@
+    */
+   u32 GetPhysicalAddress(u32 address) const;
+ 
++  /** Checks committed physical pages through all guest aliases without touching their bytes. */
++  [[nodiscard]] bool IsPhysicalRangeAllocated(u32 address, u32 length);
++
+   void Zero(u32 address, u32 size) const;
+ 
+   void Fill(u32 address, u32 size, u8 value) const;
+diff --git a/src/kernel/memory.cpp b/src/kernel/memory.cpp
+--- a/src/kernel/memory.cpp
++++ b/src/kernel/memory.cpp
+@@ -514,6 +514,27 @@
+   return rex::memory::HostPtrToGuest(virtual_membase_, host_address);
+ }
+ 
++bool GuestAddressSpace::IsPhysicalRangeAllocated(u32 address, u32 length) {
++  const u64 end = u64{address} + length;
++  if (!length || end > 0x20000000ull) return false;
++  for (u64 page = address & ~u64{4095}; page < end; page += 4096) {
++    bool allocated = false;
++    for (const u32 base : {0xE0000000u, 0xA0000000u, 0xC0000000u}) {
++      auto* heap = LookupHeap(base);
++      if (!heap || heap->GetHeapType() != HeapType::kGuestPhysical) continue;
++      const u32 origin = GetPhysicalAddress(base);
++      if (page < origin || page >= u64{origin} + heap->GetHeapSize()) continue;
++      u32 protect = 0;
++      if (heap->QueryProtect(base + static_cast<u32>(page - origin), &protect) && protect) {
++        allocated = true;
++        break;
++      }
++    }
++    if (!allocated) return false;
++  }
++  return true;
++}
++
+ u32 GuestAddressSpace::GetPhysicalAddress(u32 address) const {
+   const BaseHeap* heap = LookupHeap(address);
+   if (!heap || heap->GetHeapType() != kernel::HeapType::kGuestPhysical) {
+diff --git a/src/kernel/title_context.h b/src/kernel/title_context.h
+--- a/src/kernel/title_context.h
++++ b/src/kernel/title_context.h
+@@ -45,6 +45,7 @@
+   [[nodiscard]] Result<std::span<std::byte>> GetWritablePhysicalSpan(PhysicalRange range) override;
+   [[nodiscard]] Result<void> StoreRelease32(u32 address, u32 value) override;
+   [[nodiscard]] Result<u32> LoadAcquire32(u32 address) override;
++  [[nodiscard]] bool IsPhysicalRangeAllocated(PhysicalRange range) override;
+   [[nodiscard]] Result<void> NotifyPhysicalWrite(PhysicalRange range) override;
+   [[nodiscard]] ScopeGuard AddWriteListener(IPhysicalWriteListener& listener) override;
+   void WatchPhysicalWrites(PhysicalRange range) override;
+diff --git a/src/kernel/title_context.cpp b/src/kernel/title_context.cpp
+--- a/src/kernel/title_context.cpp
++++ b/src/kernel/title_context.cpp
+@@ -98,6 +98,10 @@
+   kernel::GuestAddressSpace& memory = *StateOf(runtime_).GetAddressSpace();
+   std::memcpy(memory.TranslatePhysical<u8*>(address), data.data(), data.size());
+   return NotifyPhysicalWrite({address, static_cast<u32>(data.size())});
++}
++
++bool TitleContext::IsPhysicalRangeAllocated(PhysicalRange range) {
++  return StateOf(runtime_).GetAddressSpace()->IsPhysicalRangeAllocated(range.address, range.length);
+ }
+ 
+ Result<void> TitleContext::NotifyPhysicalWrite(PhysicalRange range) {
+diff --git a/tests/unit/gpu/fake_title_context.h b/tests/unit/gpu/fake_title_context.h
+--- a/tests/unit/gpu/fake_title_context.h
++++ b/tests/unit/gpu/fake_title_context.h
+@@ -58,6 +58,9 @@
+   Result<u32> LoadAcquire32(u32 address) override {
+     return memory_.TranslatePhysical<const be_u32*>(address)->Load(std::memory_order_acquire);
+   }
++  bool IsPhysicalRangeAllocated(PhysicalRange range) override {
++    return memory_.IsPhysicalRangeAllocated(range.address, range.length);
++  }
+   Result<void> NotifyPhysicalWrite(PhysicalRange range) override {
+     if (u64{range.address} + range.length > 0x20000000ull)
+       return Err(ErrorCategory::kMemory, "physical write outside memory");
+diff --git a/include/rex/gpu/graphics_system.h b/include/rex/gpu/graphics_system.h
+--- a/include/rex/gpu/graphics_system.h
++++ b/include/rex/gpu/graphics_system.h
+@@ -51,7 +51,7 @@
+  * Vd calls and GPU register accesses to a Xenos driver. With no driver a project that presents
+  * itself calls ReportFrame and UISystem::DrawOverlays from its own present.
+  */
+-REX_DECLARE_INTERFACE(IGraphicsSystem, 3)
++REX_DECLARE_INTERFACE(IGraphicsSystem, 4)
+   virtual GraphicsSettings& GetSettings() = 0;
+ 
+   /** Presents an original system texture with its RGB16 LUT; false when unavailable. */
+diff --git a/tests/unit/kernel/title_context_test.cpp b/tests/unit/kernel/title_context_test.cpp
+--- a/tests/unit/kernel/title_context_test.cpp
++++ b/tests/unit/kernel/title_context_test.cpp
+@@ -225,3 +225,26 @@
+   achievement.unlocked = true;
+   CHECK(achievement.GetDescription() == "Done");
+ }
++
++REX_TEST_CASE("physical allocation queries preserve all aliases and reject inaccessible pages", "[kernel][title_context][physical-range-query]") {
++  rex::test::KernelFixture fixture;
++  auto& memory = *StateOf(fixture.GetRuntime()).GetAddressSpace();
++  rex::kernel::TitleContext context(fixture.GetRuntime());
++  CHECK_FALSE(context.IsPhysicalRangeAllocated({0, 0}));
++  CHECK_FALSE(context.IsPhysicalRangeAllocated({0x1FFFFFF0, 0x20}));
++  CHECK_FALSE(context.IsPhysicalRangeAllocated({0xFFFFFFF0, 0x20}));
++  for (auto [address, size] : std::array<std::pair<rex::u32, rex::u32>, 3>{
++      std::pair{0xE2000000u, 4096u}, {0xA4000000u, 65536u}, {0xC8000000u, 16u << 20}}) {
++    auto* heap = memory.LookupHeap(address);
++    REQUIRE(heap);
++    const auto physical = memory.GetPhysicalAddress(address);
++    CHECK_FALSE(context.IsPhysicalRangeAllocated({physical, size}));
++    REQUIRE(heap->AllocFixed(address, size, size,
++        rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
++        rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite));
++    CHECK(context.IsPhysicalRangeAllocated({physical, size}));
++    CHECK(context.IsPhysicalRangeAllocated({physical + 1, size - 2}));
++    REQUIRE(heap->Protect(address, size, rex::kernel::kMemoryProtectNoAccess));
++    CHECK_FALSE(context.IsPhysicalRangeAllocated({physical, size}));
++  }
++}

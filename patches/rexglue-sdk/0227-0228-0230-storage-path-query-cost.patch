@@ -1,0 +1,43 @@
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -56,13 +56,18 @@
+ bool IsUnlinkedStoragePath(const std::filesystem::path& path) {
+   if (path.empty()) return false;
+   for (auto p = std::filesystem::absolute(platform::OrdinaryPath(path)).lexically_normal(); !p.empty();) {
++#ifdef _WIN32
++    // Native attributes reject all reparse points without querying each ancestor twice.
++    const auto attrs = GetFileAttributesW(platform::HostPath(p).c_str());
++    if (attrs == INVALID_FILE_ATTRIBUTES) {
++      const auto error = GetLastError();
++      if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
++    } else if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) return false;
++#else
+     std::error_code ec;
+-    const auto status = std::filesystem::symlink_status(platform::HostPath(p), ec);
++    const auto status = std::filesystem::symlink_status(p, ec);
+     if (ec && ec != std::errc::no_such_file_or_directory) return false;
+     if (std::filesystem::is_symlink(status)) return false;
+-#ifdef _WIN32
+-    const auto attrs = GetFileAttributesW(platform::HostPath(p).c_str());
+-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+ #endif
+     auto parent = p.parent_path();
+     if (parent == p) break;
+@@ -82,7 +87,15 @@
+     std::filesystem::recursive_directory_iterator it(device.root, ec), end;
+     if (ec) return kernel::X_ERROR_ACCESS_DENIED;
+     for (; it != end; it.increment(ec)) {
+-      if (ec || !IsUnlinkedStoragePath(it->path())) return kernel::X_ERROR_ACCESS_DENIED;
++      if (ec) return kernel::X_ERROR_ACCESS_DENIED;
++      // Root ancestors are validated above. Reject each entry before the iterator descends.
++#ifdef _WIN32
++      const auto attrs = GetFileAttributesW(platform::HostPath(it->path()).c_str());
++      if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT))
++        return kernel::X_ERROR_ACCESS_DENIED;
++#else
++      if (it->is_symlink(ec) || ec) return kernel::X_ERROR_ACCESS_DENIED;
++#endif
+       // Secondary volumes have independent accounting; never count them in HDD.
+       if (device.device_id == 1 && it->path() == device.root / "storage") {
+         it.disable_recursion_pending(); continue;

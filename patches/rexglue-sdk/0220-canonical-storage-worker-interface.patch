@@ -1,0 +1,92 @@
+diff --git a/include/rex/kernel/object/kernel_thread.h b/include/rex/kernel/object/kernel_thread.h
+--- a/include/rex/kernel/object/kernel_thread.h
++++ b/include/rex/kernel/object/kernel_thread.h
+@@ -62,7 +62,7 @@
+   virtual ~ICallingThread() = default;
+ 
+   /** Runs a registered guest callback on this calling thread, preserving its context. */
+-  virtual bool CallGuestFunction(u32 address, std::span<u64> args) = 0;
++  virtual bool CallGuestFunction(u32 address, std::span<u64> args, u64* result = nullptr) = 0;
+   virtual bool CanCallGuestFunction(u32 address) const = 0;
+   virtual u32 GetTitleProcessType() const = 0;
+   virtual u32 GetLastError() = 0;
+@@ -195,7 +195,7 @@
+ 
+   u32 GetThreadID() const { return thread_id_; }
+ 
+-  bool CallGuestFunction(u32 address, std::span<u64> args) override;
++  bool CallGuestFunction(u32 address, std::span<u64> args, u64* result = nullptr) override;
+   u32 GetTitleProcessType() const override;
+   bool CanCallGuestFunction(u32 address) const override;
+   u32 GetLastError() override;
+diff --git a/src/kernel/kernel_thread.cpp b/src/kernel/kernel_thread.cpp
+--- a/src/kernel/kernel_thread.cpp
++++ b/src/kernel/kernel_thread.cpp
+@@ -221,10 +221,11 @@
+   return functions && functions->GetFunction(address);
+ }
+ 
+-bool KernelThread::CallGuestFunction(u32 address, std::span<u64> args) {
++bool KernelThread::CallGuestFunction(u32 address, std::span<u64> args, u64* result) {
+   if (!CanCallGuestFunction(address)) return false;
+   auto* functions = StateOf(*runtime_).GetFunctionDispatcher();
+-  functions->ExecuteTrap(thread_state_.get(), address, args.data(), args.size());
++  const auto returned = functions->ExecuteTrap(thread_state_.get(), address, args.data(), args.size());
++  if (result) *result = returned;
+   return true;
+ }
+ 
+diff --git a/include/rex/kernel/thread_registry.h b/include/rex/kernel/thread_registry.h
+--- a/include/rex/kernel/thread_registry.h
++++ b/include/rex/kernel/thread_registry.h
+@@ -132,7 +132,7 @@
+   rex::MoveOnlyFunction<void(X_HANDLE)> publish;
+ };
+ 
+-REX_DECLARE_INTERFACE(IThreadRegistry, 5)
++REX_DECLARE_INTERFACE(IThreadRegistry, 6)
+   virtual ~IThreadRegistry() = default;
+ 
+   /**
+@@ -150,6 +150,10 @@
+    * @return The creation handle, or the status of the allocation or the thread creation.
+    */
+   [[nodiscard]] virtual Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context, TaskThreadCallbacks callbacks = {}) = 0;
++
++  /** Starts a host worker with a canonical guest context; the caller owns the creation handle. */
++  [[nodiscard]] virtual Result<X_HANDLE> LaunchHostThread(std::string_view name, u32 stack_size,
++      rex::MoveOnlyFunction<int()> body) = 0;
+ 
+   /** Returns the thread the caller runs on, which the registry owns. */
+   [[nodiscard]] virtual ICallingThread* GetCallingThread() = 0;
+diff --git a/src/kernel/thread_registry.h b/src/kernel/thread_registry.h
+--- a/src/kernel/thread_registry.h
++++ b/src/kernel/thread_registry.h
+@@ -42,6 +42,8 @@
+ 
+   [[nodiscard]] Result<X_HANDLE> Launch(std::unique_ptr<KernelThread> thread) override;
+   [[nodiscard]] Result<X_HANDLE> CreateTaskThread(u32 start_address, u32 start_context, TaskThreadCallbacks callbacks = {}) override;
++  [[nodiscard]] Result<X_HANDLE> LaunchHostThread(std::string_view name, u32 stack_size,
++      rex::MoveOnlyFunction<int()> body) override;
+   [[nodiscard]] ICallingThread* GetCallingThread() override;
+   [[nodiscard]] IObjectWaiter& GetObjectWaiter() override { return *this; }
+   rex::platform::WaitResult WaitHostObject(rex::platform::WaitHandle* handle,
+diff --git a/src/kernel/thread_registry.cpp b/src/kernel/thread_registry.cpp
+--- a/src/kernel/thread_registry.cpp
++++ b/src/kernel/thread_registry.cpp
+@@ -47,6 +47,15 @@
+   return Launch(std::move(thread));
+ }
+ 
++Result<X_HANDLE> ThreadRegistry::LaunchHostThread(std::string_view name, u32 stack_size,
++    rex::MoveOnlyFunction<int()> body) {
++  if (StateOf(runtime_).IsTerminatingTitle())
++    return Err<X_HANDLE>(StatusError(X_STATUS_PROCESS_IS_TERMINATING));
++  auto thread = std::make_unique<KernelThread>(runtime_, stack_size, 0, std::move(body));
++  thread->SetName(name);
++  return Launch(std::move(thread));
++}
++
+ ICallingThread* ThreadRegistry::GetCallingThread() {
+   return KernelThread::GetCallingThread();
+ }

@@ -1,19 +1,27 @@
 // CPU execution of the shared primitive processor; no GPU or gameplay claim.
-#include <rex/graphics/primitive_processor.h>
-#include <rex/graphics/registers.h>
-#include <rex/system/xmemory.h>
+#include <catch2/catch_test_macros.hpp>
+#include "gpu/xenos/primitive_processor.h"
+#include "gpu/xenos/xenos_settings.h"
+#include <rex/xenos/register.h>
+#include <rex/kernel/heap.h>
+#include "kernel/title_context.h"
+#include "kernel/title_state.h"
+#include "kernel/kernel_fixture.h"
 #include <deque>
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
-using namespace rex::graphics;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+namespace reg = rex::xenos::reg;
 namespace {
 void Require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 struct CpuMemory : SharedMemory {
-  explicit CpuMemory(rex::memory::Memory& m) : SharedMemory(m) { InitializeCommon(); }
+  explicit CpuMemory(rex::kernel::TitleContext& m) : SharedMemory(m, m) { InitializeCommon(); }
   bool UploadRanges(const std::vector<std::pair<uint32_t, uint32_t>>& ranges) override {
     for (auto [page, count] : ranges)
-      MakeRangeValid(page << page_size_log2(), count << page_size_log2(), false);
+      MarkRangeValid(page << GetPageSizeLog2(), count << GetPageSizeLog2(), false);
     return true;
   }
 };
@@ -22,8 +30,8 @@ struct CpuPrimitives : PrimitiveProcessor {
   std::vector<uint8_t> builtin;
   std::deque<Buffer> converted;
   bool fail_allocation = false;
-  CpuPrimitives(RegisterFile& r, rex::memory::Memory& m, SharedMemory& s,
-                bool full32, bool native_fans) : PrimitiveProcessor(r, m, s) {
+  CpuPrimitives(RegisterFile& r, const XenosSettings& settings, rex::kernel::TitleContext& m, SharedMemory& s,
+                bool full32, bool native_fans) : PrimitiveProcessor(r, settings, m, m, s) {
     Require(InitializeCommon(full32, native_fans, true, true, true, true), "primitive setup");
   }
   bool InitializeBuiltinIndexBuffer(size_t bytes, std::function<void(void*)> fill) override {
@@ -35,7 +43,7 @@ struct CpuPrimitives : PrimitiveProcessor {
     handle = converted.size();
     auto& b = converted.emplace_back();
     b.bytes.resize(count * (format == xenos::IndexFormat::kInt16 ? 2 : 4) + 64);
-    b.offset = coalign ? GetSimdCoalignmentOffset(b.bytes.data(), original) : 0;
+    b.offset = coalign ? GetSIMDCoalignmentOffset(b.bytes.data(), original) : 0;
     return b.bytes.data() + b.offset;
   }
   std::vector<uint32_t> Indices(const ProcessingResult& result) const {
@@ -52,10 +60,10 @@ struct CpuPrimitives : PrimitiveProcessor {
       uint32_t value;
       if (result.host_index_format == xenos::IndexFormat::kInt16) {
         uint16_t word; std::memcpy(&word, data + i * 2, 2);
-        value = xenos::GpuSwap(word, result.host_shader_index_endian);
+        value = xenos::GPUSwap(word, result.host_shader_index_endian);
       } else {
         std::memcpy(&value, data + i * 4, 4);
-        value = xenos::GpuSwap(value, result.host_shader_index_endian);
+        value = xenos::GPUSwap(value, result.host_shader_index_endian);
       }
       output.push_back(value & xenos::kVertexIndexMask);
     }
@@ -79,21 +87,24 @@ std::vector<uint32_t> Expected(const std::vector<uint32_t>& source, bool fan) {
   flush(); return output;
 }
 }
-int main() {
-  try {
-    rex::memory::Memory memory;
-    Require(memory.Initialize(), "guest memory setup");
+TEST_CASE("Shared tessellation converts fans and strips with restart parity", "[sdk][gpu][shader-fetch][primitive]") {
+  struct TestSettings : XenosSettings {} settings;
+  REQUIRE(settings.primitive_processor_cache_min_indices.Set(1000000));
+  rex::test::KernelFixture fixture;
+  std::exception_ptr failure;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+   try {
+    auto& memory = *rex::kernel::StateOf(caller.GetRuntime()).GetAddressSpace();
+    rex::kernel::TitleContext context(caller.GetRuntime());
     constexpr uint32_t virt = 0xA1000000, physical = 0x01000000;
     Require(memory.LookupHeap(virt)->AllocFixed(virt, 4096, 4096,
-        rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-        rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite), "index allocation");
-    Require(rex::cvar::SetFlagByName("primitive_processor_cache_min_indices", "1000000"),
-            "disable cache for independent conversion cases");
-    CpuMemory shared(memory);
+        rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+        rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite), "index allocation");
+    CpuMemory shared(context);
     RegisterFile regs;
     unsigned checks = 0;
     for (bool full32 : {false, true}) for (bool native_fans : {false, true}) {
-      CpuPrimitives processor(regs, memory, shared, full32, native_fans);
+      CpuPrimitives processor(regs, settings, context, shared, full32, native_fans);
       for (auto mode : {xenos::TessellationMode::kDiscrete, xenos::TessellationMode::kContinuous}) {
         for (bool fan : {false, true}) for (bool dma : {false, true}) {
           for (bool wide : {false, true}) for (bool swapped : {false, true}) {
@@ -109,10 +120,10 @@ int main() {
               if (dma) for (unsigned i = 0; i < count; ++i) {
                 if (wide) {
                   const uint32_t value = indices[i] == 0xFEEF ? indices[i] : indices[i] | 0xA5000000;
-                  uint32_t raw = xenos::GpuSwap(value, endian);
+                  uint32_t raw = xenos::GPUSwap(value, endian);
                   std::memcpy(memory.TranslateVirtual(virt + i * 4), &raw, 4);
                 } else {
-                  uint16_t raw = xenos::GpuSwap(uint16_t(indices[i]), endian);
+                  uint16_t raw = xenos::GPUSwap(uint16_t(indices[i]), endian);
                   std::memcpy(memory.TranslateVirtual(virt + i * 2), &raw, 2);
                 }
               }
@@ -122,14 +133,14 @@ int main() {
               draw.source_select = dma ? xenos::SourceSelect::kDMA : xenos::SourceSelect::kAutoIndex;
               draw.index_size = wide ? xenos::IndexFormat::kInt32 : xenos::IndexFormat::kInt16;
               draw.num_indices = count;
-              regs[XE_GPU_REG_VGT_DRAW_INITIATOR] = draw.value;
-              regs[XE_GPU_REG_VGT_OUTPUT_PATH_CNTL] = uint32_t(xenos::VGTOutputPath::kTessellationEnable);
-              regs[XE_GPU_REG_VGT_HOS_CNTL] = uint32_t(mode);
+              regs[std::to_underlying(xenos::Register::VGT_DRAW_INITIATOR)] = draw.value;
+              regs[std::to_underlying(xenos::Register::VGT_OUTPUT_PATH_CNTL)] = uint32_t(xenos::VGTOutputPath::kTessellationEnable);
+              regs[std::to_underlying(xenos::Register::VGT_HOS_CNTL)] = uint32_t(mode);
               reg::VGT_DMA_SIZE size{}; size.num_words = count; size.swap_mode = endian;
-              regs[XE_GPU_REG_VGT_DMA_SIZE] = size.value; regs[XE_GPU_REG_VGT_DMA_BASE] = physical;
-              regs[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = 0xFEEF;
+              regs[std::to_underlying(xenos::Register::VGT_DMA_SIZE)] = size.value; regs[std::to_underlying(xenos::Register::VGT_DMA_BASE)] = physical;
+              regs[std::to_underlying(xenos::Register::VGT_MULTI_PRIM_IB_RESET_INDX)] = 0xFEEF;
               reg::PA_SU_SC_MODE_CNTL sc{}; sc.multi_prim_ib_ena = restart;
-              regs[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = sc.value;
+              regs[std::to_underlying(xenos::Register::PA_SU_SC_MODE_CNTL)] = sc.value;
               PrimitiveProcessor::ProcessingResult result{};
               Require(processor.Process(result), "tessellated fan/strip accepted");
               Require(result.IsTessellated() && result.host_primitive_type == xenos::PrimitiveType::kTriangleList,
@@ -143,6 +154,8 @@ int main() {
       }
     }
     std::cout << checks << " shared tessellation conversion cases passed\n";
-    return 0;
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    CHECK(checks > 0);
+   } catch (...) { failure = std::current_exception(); }
+  });
+  if (failure) std::rethrow_exception(failure);
 }

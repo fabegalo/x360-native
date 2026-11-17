@@ -133,10 +133,10 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   publish(owner_file, owner);
   const auto xex_hash = identities[0].sha256;
   toml::table manifest{
-    {"project", toml::table{{"name", t.id}, {"sdk_version", "0.10.0"}, {"game_root", Path(t.game_root)}}},
+    {"project", toml::table{{"name", t.id}, {"sdk_version", "0.11.0"}, {"game_root", Path(t.game_root)}}},
     {"entrypoint", toml::table{{"file_path", Path(t.game_root / "default.xex")}, {"out_directory_path", Path(generated)}}},
     {"x360n", toml::table{{"xex_sha256", xex_hash}, {"native_exe", Path(t.exe)},
-      {"user_data_root", Path(paths.local() / "user" / t.id)}, {"args", toml::array{"--gpu_plugin=xenos", "--mnk_mode=true"}}}}
+      {"user_data_root", Path(paths.local() / "user" / t.id)}, {"args", toml::array{"--mnk_mode=true"}}}}
   };
   toml::table setup{{"label", t.label}, {"label_en", t.label_en}, {"limitations", t.limitations},
     {"limitations_en", t.limitations_en}, {"kind", "game"}, {"session", false}, {"importable", false},
@@ -181,33 +181,9 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   auto manifest_text = Toml(manifest);
   // The pinned codegen's version updater canonicalizes this one assignment.
   // Emit its spelling up front so the producer cannot mutate a certified input.
-  Replace(manifest_text, "sdk_version = '0.10.0'", "sdk_version = \"0.10.0\"");
+  Replace(manifest_text, "sdk_version = '0.11.0'", "sdk_version = \"0.11.0\"");
   publish(t.manifest, manifest_text);
   publish(dir / "preparation.toml", Toml(setup));
-  // This pinned SDK template has only scalar substitutions and cmake_var calls.
-  // Reject unfamiliar directives instead of silently emitting a broken project.
-  auto integration = ReadText(paths.root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja");
-  // The pinned SDK's DLL template assumes source-relative output directories.
-  // Keep its registry and codegen intact; wire compact absolute outputs below.
-  const auto dll_section = integration.find("# Include DLL module shared library targets");
-  if (dll_section == std::string::npos) throw std::runtime_error("Unsupported pinned SDK DLL integration");
-  integration.erase(dll_section);
-  integration += "include(\"${CMAKE_CURRENT_SOURCE_DIR}/generated/x360n_modules.cmake\")\n";
-  Replace(integration, "{{ cmake_var(\"CMAKE_CURRENT_SOURCE_DIR\") }}/{{ entrypoint_out_dir }}",
-      "{{ cmake_var(\"X360N_GENERATED_ROOT\") }}");
-  for (const auto& file : {"sources.cmake", "dll_targets.cmake"})
-    Replace(integration, std::string("include({{ entrypoint_out_dir }}/") + file + ")",
-        std::string("include(\"{{ cmake_var(\"X360N_GENERATED_ROOT\") }}/") + file + "\")");
-  integration = std::regex_replace(integration, std::regex(R"re(\{\{ cmake_var\("([A-Za-z0-9_]+)"\) \}\})re"), "$${$1}");
-  Replace(integration, "{{ names.snake_case }}", t.id);
-  Replace(integration, "{{ entrypoint_out_dir }}", "generated/default");
-  Replace(integration, "{{ sdk_version }}", "0.10.0");
-  if (integration.find("{{") != std::string::npos || integration.find("{%") != std::string::npos)
-    throw std::runtime_error("Unsupported pinned SDK project template");
-  // The pinned CLI refreshes generated/rexglue.cmake unconditionally from its
-  // source-relative template. Keep our absolute-output integration separate so
-  // that codegen cannot undo the compact paths before the second configure.
-  publish(dir / "generated/x360n_rexglue.cmake", integration);
   auto module_integration = ReadText(paths.root / "titles/common/generic/modules.cmake");
   Replace(module_integration, "@TITLE@", t.id);
   publish(dir / "generated/x360n_modules.cmake", module_integration + module_cmake);

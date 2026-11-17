@@ -1,0 +1,51 @@
+diff --git a/src/xam/xam_net.cpp b/src/xam/xam_net.cpp
+--- a/src/xam/xam_net.cpp
++++ b/src/xam/xam_net.cpp
+@@ -1216,6 +1216,8 @@
+ u32 XamNetworkStorageIsUserInSync_entry() { return 0; }
+ u32 XamNetworkStorageUserHasPrivilege_entry() { return 0; }
+ u32 XamNetworkStorageShouldHideFromTitle_entry() { return 1; }
++// BOOL capability: no cloud cache exists on an offline local device.
++u32 XamNetworkStorageDeviceHasCacheFile_entry() { return 0; }
+ 
+ }  // namespace xam
+ }  // namespace rex
+@@ -1278,3 +1280,5 @@
+ REX_XAM_BODY(__imp__XamNetworkStorageIsUserInSync, rex::xam::XamNetworkStorageIsUserInSync_entry)
+ REX_XAM_BODY(__imp__XamNetworkStorageUserHasPrivilege, rex::xam::XamNetworkStorageUserHasPrivilege_entry)
+ REX_XAM_BODY(__imp__XamNetworkStorageShouldHideFromTitle, rex::xam::XamNetworkStorageShouldHideFromTitle_entry)
++
++REX_XAM_BODY(__imp__XamNetworkStorageDeviceHasCacheFile, rex::xam::XamNetworkStorageDeviceHasCacheFile_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -571,7 +571,7 @@
+ REX_EXPORT_STUB(__imp__XamNetworkStorageCheckOutTitle);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageCreateCacheOnDevice);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageDeleteCacheOnDevice);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageDeviceHasCacheFile);
++
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetBackingDevice);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetLastSyncTime);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetNetworkDevice);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -380,3 +380,5 @@
+ REX_XAM_FORWARD(__imp__XamUserReadUserPreference)
+ 
+ REX_XAM_FORWARD(__imp__XamContentGetMetaDataInternal)
++
++REX_XAM_FORWARD(__imp__XamNetworkStorageDeviceHasCacheFile)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1270,6 +1270,8 @@
+           "XamNetworkStorageIsSupportedContentType", "XamNetworkStorageIsUserInSync", "XamNetworkStorageUserHasPrivilege"})
+         CHECK(c.XAM(name, {user, 0xFFFFFFFF}) == 0);
+       CHECK(c.XAM("XamNetworkStorageShouldHideFromTitle", {user, 0xFFFFFFFF}) == 1);
++      for (const u32 device : {0u, 1u, 2u, 0xFFFFFFFFu})
++        CHECK(c.XAM("XamNetworkStorageDeviceHasCacheFile", {device, user}) == 0);
+     }
+   });
+ }

@@ -1,35 +1,59 @@
-diff --git "a/src/kernel/xam/xam_user.cpp" "b/src/kernel/xam/xam_user.cpp"
-index 9b00b9b..00e87b9 100644
---- "a/src/kernel/xam/xam_user.cpp"
-+++ "b/src/kernel/xam/xam_user.cpp"
-@@ -216,15 +216,12 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
-                                       be<uint32_t>* setting_ids, uint32_t unk,
-                                       be<uint32_t>* buffer_size_ptr, uint8_t* buffer,
-                                       XAM_OVERLAPPED* overlapped) {
--  if (!REX_KERNEL_STATE()->user_profile()->signin_state()) return X_ERROR_NOT_LOGGED_ON;
-   if (!xuid_count) {
-     assert_null(xuids);
-   } else {
-     assert_true(xuid_count == 1);
-     assert_not_null(xuids);
-     // TODO(gibbed): allow proper lookup of arbitrary XUIDs
--    const auto& user_profile = REX_KERNEL_STATE()->user_profile();
--    assert_true(static_cast<uint64_t>(xuids[0]) == user_profile->xuid());
-     // TODO(gibbed): we assert here, but in case a title passes xuid_count > 1
-     // until it's implemented for release builds...
-     xuid_count = 1;
-@@ -276,6 +273,14 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
-     return X_ERROR_INSUFFICIENT_BUFFER;
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -198,7 +198,6 @@
+                                  be_u64* xuids, u32 setting_count, be_u32* setting_ids,
+                                  [[maybe_unused]] u32 unk, be_u32* buffer_size_ptr, u8* buffer,
+                                  kernel::XOVERLAPPED* overlapped) {
+-  if (!CurrentXAM().GetUserProfile().GetSigninState()) return kernel::X_ERROR_NOT_LOGGED_ON;
+   const bool by_xuid = xuid_count && xuids;
+   const u32 xuid_entries = by_xuid ? xuid_count : 1;
+ 
+@@ -241,6 +240,9 @@
+     }
+     return kernel::X_ERROR_INSUFFICIENT_BUFFER;
    }
- 
-+  // A sizing query only depends on setting IDs, including the caller's
-+  // any-user index (255). Require an account only when reading its data.
-+  const auto& sizing_profile = REX_KERNEL_STATE()->user_profile();
-+  if (!sizing_profile->signin_state()) return X_ERROR_NOT_LOGGED_ON;
-+  if (xuids) {
-+    assert_true(static_cast<uint64_t>(xuids[0]) == sizing_profile->xuid());
-+  }
 +
-   // Title ID = 0 means us.
-   // 0xfffe07d1 = profile?
++  // Buffer sizing depends on setting IDs, even before a user has signed in.
++  if (!CurrentXAM().GetUserProfile().GetSigninState()) return kernel::X_ERROR_NOT_LOGGED_ON;
  
+   if (!by_xuid && user_index) {
+     if (overlapped) {
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1179,3 +1179,34 @@
+     for (const auto handle : {matching, filtered, version1}) CHECK(caller.Kernel("NtClose", {handle}) == 0);
+   });
+ }
++
++
++REX_TEST_CASE("profile setting sizing precedes account lookup for both exports", "[kernel][xam][profile-sizing]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    REQUIRE(rex::xam::CurrentXAM().GetUserProfile().GetSigninState() == 0);
++    const auto ids = c.Alloc(4), size = c.Alloc(4), buffer = c.Alloc(256);
++    c.Store32(ids, kKnownSetting);
++    const auto xuid = c.AllocQuad(0xE000000000000001ull);
++    for (const bool ex : {false, true}) {
++      for (const bool by_xuid : {false, true}) {
++        const auto call = [&](u32 output) {
++          if (ex) return c.XAM("XamUserReadProfileSettingsEx",
++              {0, 255, by_xuid ? 1u : 0u, by_xuid ? xuid : 0u, 1, ids, size, 0, output, 0});
++          return c.XAM("XamUserReadProfileSettings",
++              {0, 255, by_xuid ? 1u : 0u, by_xuid ? xuid : 0u, 1, ids, size, output, 0});
++        };
++        c.Store32(size, 0);
++        CHECK(call(0) == rex::kernel::X_ERROR_INSUFFICIENT_BUFFER);
++        CHECK(c.Load32(size) == kHeaderSize + kEntrySize);
++        c.Store32(size, kHeaderSize + kEntrySize - 1);
++        c.Store32(buffer, 0xDEADBEEF);
++        CHECK(call(buffer) == rex::kernel::X_ERROR_INSUFFICIENT_BUFFER);
++        CHECK(c.Load32(buffer) == 0xDEADBEEF);
++        c.Store32(size, 256);
++        CHECK(call(buffer) == rex::kernel::X_ERROR_NOT_LOGGED_ON);
++        CHECK(c.Load32(buffer) == 0xDEADBEEF);
++      }
++    }
++  });
++}

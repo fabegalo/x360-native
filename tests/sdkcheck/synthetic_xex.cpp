@@ -7,6 +7,9 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include "codegen/tool_runtime.h"
+#include "object_app.h"
+#include "test_memory.h"
 
 namespace x360n::test {
 
@@ -41,13 +44,19 @@ constexpr uint32_t kHeaderSize = 0x1000;  // XEX headers before the image
 }  // namespace
 
 std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::vector<Placed>* placed,
-                              uint16_t call_ordinal, Entry entry_kind) {
+                              uint16_t call_ordinal, Entry entry_kind, uint32_t image_base) {
+  REQUIRE((image_base >= 0x80000000 && image_base <= 0xA0000000-kXexImageSize));
+  REQUIRE(image_base % kXexPage == 0);
+  const auto image_slots=image_base+(kXexSlots-kXexBase);
+  const auto image_pdata=image_base+(kXexPdata-kXexBase);
+  const auto image_text=image_base+(kXexText-kXexBase);
+  const auto image_thunks=image_base+(kXexThunks-kXexBase);
   Bytes x(kHeaderSize + kXexImageSize);
-  const size_t img = kHeaderSize;  // file offset of the image (guest kXexBase)
-  auto at = [&](uint32_t guest) { return img + (guest - kXexBase); };
+  const size_t img = kHeaderSize;  // file offset of the image (guest image_base)
+  auto at = [&](uint32_t guest) { return img + (guest - image_base); };
 
   // Place slots and thunks; write the record words into the image.
-  uint32_t next_slot = kXexSlots, next_thunk = kXexThunks;
+  uint32_t next_slot = image_slots, next_thunk = image_thunks;
   for (size_t l = 0; l < libraries.size(); ++l) {
     for (const auto& r : libraries[l]) {
       Placed p{l, r.ordinal};
@@ -67,12 +76,12 @@ std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::
       placed->push_back(p);
     }
   }
-  REQUIRE(next_slot <= kXexPdata);
-  REQUIRE(next_thunk <= kXexText + kXexTextSize);
+  REQUIRE(next_slot <= image_pdata);
+  REQUIRE(next_thunk <= image_text + kXexTextSize);
 
   // Entry point and its .pdata entry (the codegen requires the exception directory):
   // begin address, then PrologLength | FunctionLength << 8 | ThirtyTwoBit << 30.
-  const uint32_t entry = kXexText;
+  const uint32_t entry = image_text;
   std::vector<uint32_t> code;
   uint32_t prolog = 0;
   if (entry_kind == Entry::kReturnZero) {
@@ -100,8 +109,8 @@ std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::
     }
   }
   for (size_t i = 0; i < code.size(); ++i) x.be32(at(entry + 4 * uint32_t(i)), code[i]);
-  x.be32(at(kXexPdata), entry);
-  x.be32(at(kXexPdata + 4), prolog | (uint32_t(code.size()) << 8) | (1u << 30));
+  x.be32(at(image_pdata), entry);
+  x.be32(at(image_pdata + 4), prolog | (uint32_t(code.size()) << 8) | (1u << 30));
 
   // PE headers (little-endian), as XexModule::ReadPEHeaders checks them.
   x.str(img + 0, "MZ");
@@ -115,28 +124,28 @@ std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::
   x.le16(nt + 22, 0x0102);  // EXECUTABLE_IMAGE | 32BIT_MACHINE
   const size_t opt = nt + 24;
   x.le16(opt + 0, 0x10B);  // IMAGE_NT_OPTIONAL_HDR32_MAGIC
-  x.le32(opt + 16, entry - kXexBase);
-  x.le32(opt + 28, kXexBase);
+  x.le32(opt + 16, entry - image_base);
+  x.le32(opt + 28, image_base);
   x.le32(opt + 32, kXexPage);
   x.le32(opt + 36, 0x200);
   x.le32(opt + 56, kXexImageSize);
   x.le32(opt + 60, 0x1000);
   x.le16(opt + 68, 14);  // IMAGE_SUBSYSTEM_XBOX
   x.le32(opt + 92, 16);
-  x.le32(opt + 96 + 3 * 8, kXexPdata - kXexBase);  // IMAGE_DIRECTORY_ENTRY_EXCEPTION
+  x.le32(opt + 96 + 3 * 8, image_pdata - image_base);  // IMAGE_DIRECTORY_ENTRY_EXCEPTION
   x.le32(opt + 96 + 3 * 8 + 4, 8);
   const size_t sec = opt + 224;
   x.str(sec, ".rdata");
   x.le32(sec + 8, 0x100);
-  x.le32(sec + 12, kXexSlots - kXexBase);
+  x.le32(sec + 12, image_slots - image_base);
   x.le32(sec + 16, 0x100);
-  x.le32(sec + 20, kXexSlots - kXexBase);
+  x.le32(sec + 20, image_slots - image_base);
   x.le32(sec + 36, 0x40000040);  // INITIALIZED_DATA | MEM_READ
   x.str(sec + 40, ".text");
   x.le32(sec + 48, kXexTextSize);
-  x.le32(sec + 52, kXexText - kXexBase);
+  x.le32(sec + 52, image_text - image_base);
   x.le32(sec + 56, kXexTextSize);
-  x.le32(sec + 60, kXexText - kXexBase);
+  x.le32(sec + 60, image_text - image_base);
   x.le32(sec + 76, 0x60000020);  // CNT_CODE | MEM_EXECUTE | MEM_READ
 
   // XEX2 header and optional headers (big-endian).
@@ -180,7 +189,7 @@ std::vector<uint8_t> BuildXex(const std::vector<LibraryRecord>& libraries, std::
   const size_t s = 0x800;
   x.be32(s + 0x000, 0x184 + 2 * 0x18);
   x.be32(s + 0x004, kXexImageSize);
-  x.be32(s + 0x110, kXexBase);
+  x.be32(s + 0x110, image_base);
   x.be32(s + 0x180, 2);
   x.be32(s + 0x184, (1u << 4) | 3);         // 1 page, XEX_SECTION_READONLY_DATA
   x.be32(s + 0x184 + 0x18, (1u << 4) | 1);  // 1 page, XEX_SECTION_CODE
@@ -195,8 +204,19 @@ Workdir::Workdir(const char* group, const char* name)
 }
 
 Workdir::~Workdir() {
+  tools_.reset();
   // X360N_KEEP_TEST_DIRS=1 keeps it, to rerun a probe by hand (x360n run --crash-stack).
-  if (const char* keep = std::getenv("X360N_KEEP_TEST_DIRS"); keep && std::string(keep) == "1") {
+#ifdef _WIN32
+  char* keep = nullptr;
+  size_t count = 0;
+  _dupenv_s(&keep, &count, "X360N_KEEP_TEST_DIRS");
+  const bool retain = keep && std::string(keep) == "1";
+  std::free(keep);
+#else
+  const char* keep = std::getenv("X360N_KEEP_TEST_DIRS");
+  const bool retain = keep && std::string(keep) == "1";
+#endif
+  if (retain) {
     return;
   }
   std::error_code ec;
@@ -206,6 +226,15 @@ Workdir::~Workdir() {
 void Workdir::write(const char* file, const std::vector<uint8_t>& bytes) const {
   std::ofstream(dir / file, std::ios::binary)
       .write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+}
+
+rex::codegen::ToolApp& Workdir::GetTools() {
+  if (!tools_) {
+    rex::test::ReleaseTestMemory();
+    tools_ = std::make_unique<rex::test::ObjectApp<rex::codegen::ToolApp>>(
+        "sdkcheck", dir / "tool");
+  }
+  return *tools_;
 }
 
 }  // namespace x360n::test

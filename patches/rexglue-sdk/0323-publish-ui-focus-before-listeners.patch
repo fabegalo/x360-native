@@ -1,0 +1,56 @@
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -192,6 +192,21 @@
+ }
+ 
+ void UISystem::State::OnEvent(ui::UIEvent& event) {
++  using Type = ui::UIEvent::Type;
++  // Publish focus, input and audio state before notifying observers.
++  if (event.GetType() == Type::kFocus) {
++    const bool gained = driver->HasFocus();
++    focused = gained;
++    if (audio) {
++      audio->SetFocused(gained);
++    }
++    if (input) {
++      InputEvent focus{.type = gained ? InputEvent::Type::kFocusGained
++                                      : InputEvent::Type::kFocusLost};
++      input->OnInputEvent(focus);
++    }
++    RefreshCapture();
++  }
+   {
+     std::lock_guard delivery(delivery_mutex);
+     std::vector<rex::ui::IUIEventListener*> snapshot;
+@@ -203,7 +218,6 @@
+       listener->OnUIEvent(event);
+     }
+   }
+-  using Type = ui::UIEvent::Type;
+   switch (event.GetType()) {
+     case Type::kResize: {
+       const ui::WindowSize size = driver->GetWindowSize();
+@@ -224,20 +238,8 @@
+     case Type::kMonitorUpdate:
+       content_scale = driver->GetContentScale();
+       break;
+-    case Type::kFocus: {
+-      const bool gained = driver->HasFocus();
+-      focused = gained;
+-      if (audio) {
+-        audio->SetFocused(gained);
+-      }
+-      if (input) {
+-        InputEvent focus{.type = gained ? InputEvent::Type::kFocusGained
+-                                        : InputEvent::Type::kFocusLost};
+-        input->OnInputEvent(focus);
+-      }
+-      RefreshCapture();
+-      break;
+-    }
++    case Type::kFocus:
++      break;
+     case Type::kClose:
+       RequestClose();
+       break;

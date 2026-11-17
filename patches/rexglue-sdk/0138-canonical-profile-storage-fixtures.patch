@@ -1,0 +1,170 @@
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include "rex_test.h"
++#include "temp_folder.h"
+ 
+ #include <cstring>
+ #include <fstream>
+@@ -499,7 +500,7 @@
+     CHECK(caller.Load32(buffer + 16) == 0x00550073);
+     CHECK(caller.Load32(buffer + 48) == 0);
+     CHECK(caller.Load32(buffer + 52) == 0);
+-    CHECK(caller.Load32(buffer + 388) == 0);
++    CHECK(caller.Load32(buffer + 388) == 1);
+     for (u32 i = 392; i < 424; ++i) CHECK(caller.Load8(buffer + i) == 0xCD);
+     CHECK(caller.XAM("XamProfileEnumerate", {handle, 0, buffer, 0}) == rex::kernel::X_ERROR_NO_MORE_FILES);
+     REQUIRE(caller.XAM("XamProfileCreateEnumerator", {0, handle_ptr}) == 0);
+@@ -520,7 +521,8 @@
+     CHECK(caller.Load32(account + 8) == 0x00550073);
+     CHECK(caller.XAM("XamProfileFindAccount", {static_cast<u32>(identity.xuid), account, device}) == rex::kernel::X_ERROR_NO_SUCH_USER);
+     CHECK(caller.XAM("XamProfileLoadAccountInfo", {0, identity.xuid, account}) == 0);
+-    CHECK(caller.XAM("XamProfileLoadAccountInfo", {1, identity.xuid, account}) == rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED);
++    CHECK(caller.XAM("XamProfileLoadAccountInfo", {1, identity.xuid, account}) == 0);
++    CHECK(caller.XAM("XamProfileLoadAccountInfo", {2, identity.xuid, account}) == rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED);
+     CHECK(caller.XAM("XamUserGetIndexFromXUID", {identity.xuid, 1, device}) == 0);
+     CHECK(caller.Load32(device) == 0);
+     caller.Store32(device, 0xAABBCCDD);
+@@ -563,9 +565,15 @@
+   const auto root = rex::xam::CurrentTitle().user_data_root;
+   REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
+   REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
+-  u64 first = 0, second = 0;
+-  REQUIRE(profile.CreateLocal("First", &first) == 0);
+-  REQUIRE(profile.SetLocalSession(first) == 0);
++  const u64 first = 0xE000000000000001ull;
++  u64 second = 0;
++  std::vector<u8> legacy_record(33, 0);
++  std::memcpy(legacy_record.data(), "X360LP01", 8);
++  rex::memory::store_and_swap<u64>(legacy_record.data() + 8, first);
++  legacy_record[16] = 1;
++  std::memcpy(legacy_record.data() + 17, "First", 5);
++  REQUIRE(rex::platform::WriteHostFile(root / "profiles" / "local-v1.dat", legacy_record, true));
++  REQUIRE(profile.InitializeLocal(root));
+   std::ifstream source(root / "profiles" / "local-v1.dat", std::ios::binary);
+   const std::string legacy(std::istreambuf_iterator<char>(source), {});
+   REQUIRE(legacy.size() == 33);
+@@ -603,21 +611,31 @@
+     CHECK(caller.XAM("XamProfileEnumerate", {handle, 0, record, 0}) == rex::kernel::X_ERROR_NO_MORE_FILES);
+     CHECK(caller.Kernel("NtClose", {handle}) == 0);
+   });
+-  // A failed v2 commit must leave the selected account and legacy source intact.
+-  std::filesystem::create_directory(root / "profiles" / "local-v2.dat.tmp");
++  // A failed canonical session commit must leave the selected account and legacy source intact.
++  std::filesystem::create_directory(root / "profiles" / "session-v1.dat.tmp");
+   CHECK(profile.SetLocalSession(first) == rex::kernel::X_ERROR_FUNCTION_FAILED);
+   CHECK(profile.identity().xuid == second);
+   CHECK(profile.GetSigninState() == 1);
+-  std::filesystem::remove(root / "profiles" / "local-v2.dat.tmp");
+-  std::ofstream(root / "profiles" / "local-v2.dat", std::ios::binary | std::ios::trunc) << "invalid v2";
++  std::filesystem::remove(root / "profiles" / "session-v1.dat.tmp");
++  std::ofstream(root / "profiles" / "session-v1.dat", std::ios::binary | std::ios::trunc) << "invalid session";
+   CHECK_FALSE(profile.InitializeLocal(root));
+   CHECK(profile.identity().xuid == 0);
+   CHECK(profile.local_profiles().empty());
+   CHECK(profile.CreateLocal("Third") == rex::kernel::X_ERROR_FUNCTION_FAILED);
+-  std::ifstream corrupt(root / "profiles" / "local-v2.dat", std::ios::binary);
+-  CHECK(std::string(std::istreambuf_iterator<char>(corrupt), {}) == "invalid v2");
+-}
+-
++  std::ifstream corrupt(root / "profiles" / "session-v1.dat", std::ios::binary);
++  CHECK(std::string(std::istreambuf_iterator<char>(corrupt), {}) == "invalid session");
++
++  // A malformed legacy v2 still must not fall back to its valid v1 migration source.
++  rex::test::TempFolder invalid("rex_profile_legacy_invalid_");
++  REQUIRE(rex::platform::WriteHostFile(invalid.path / "profiles" / "local-v1.dat", legacy_record, true));
++  REQUIRE(rex::platform::WriteHostFile(invalid.path / "profiles" / "local-v2.dat", std::string_view("invalid v2")));
++  rex::xam::UserProfile rejected;
++  CHECK_FALSE(rejected.InitializeLocal(invalid.path));
++  CHECK(rejected.identity().xuid == 0); CHECK(rejected.local_profiles().empty());
++  CHECK(rejected.CreateLocal("Third") == rex::kernel::X_ERROR_FUNCTION_FAILED);
++  const auto untouched = rex::platform::ReadHostFile(invalid.path / "profiles" / "local-v1.dat");
++  REQUIRE(untouched); CHECK(*untouched == legacy_record);
++}
+ 
+ REX_TEST_CASE("local logon modes preserve transactional selection and reject peer or online accounts", "[kernel][xam][local-profile-session]") {
+   KernelFixture fixture;
+@@ -1790,7 +1808,7 @@
+   REQUIRE(profile.AddSetting(std::make_unique<P::FloatSetting>(0x50040115, 2.5f)));
+   REQUIRE(profile.AddSetting(std::make_unique<P::BinarySetting>(0x60400116, std::vector<rex::u8>{1,2,3})));
+   REQUIRE(profile.AddSetting(std::make_unique<P::DateTimeSetting>(0x70080117, 1234567890)));
+-  const auto settings = fixture.GetRoot() / "profiles" / std::format("{:016X}", first) / "settings-v1";
++  const auto settings = profile.PackagePath(first) / "settings-v1";
+   auto bytes = rex::platform::ReadHostFile(settings / "10040111.dat");
+   REQUIRE(bytes); CHECK(*bytes == std::vector<rex::u8>{0xFF, 0xFF, 0xFF, 0x85});
+   auto blocked = settings / "10040111.dat.tmp";
+@@ -1846,7 +1864,7 @@
+     CHECK(c.Load8(output + 8 + 24) == 0xFF);
+     c.Store32(setting_ids, 0x10080119);
+     CHECK(ReadProfile(c, 0, 0, 0, 1, setting_ids, output) == rex::kernel::X_ERROR_INVALID_PARAMETER);
+-    const auto path = fixture.GetRoot() / "profiles" / std::format("{:016X}", profile.GetXUID()) / "settings-v1/10040118.dat";
++    const auto path = profile.PackagePath(profile.GetXUID()) / "settings-v1" / "10040118.dat";
+     std::ofstream(path, std::ios::binary).write("bad", 3);
+     const auto original = profile.GetXUID(); rex::u64 other = 0;
+     REQUIRE(profile.CreateLocal("Reload", &other) == 0);
+@@ -1901,8 +1919,11 @@
+   REQUIRE(profile.CreateLocal("First", &first) == 0);
+   REQUIRE(profile.SetLocalSession(first) == 0);
+   REQUIRE(profile.CreateLocal("Second", &second) == 0);
+-  const auto v1 = root / "profiles" / "local-v1.dat", v2 = root / "profiles" / "local-v2.dat";
+-  REQUIRE(std::filesystem::exists(v1)); REQUIRE(std::filesystem::exists(v2));
++  const auto first_package = profile.PackagePath(first), second_package = profile.PackagePath(second);
++  const auto second_account = rex::platform::ReadHostFile(second_package / "account.dat");
++  REQUIRE(second_account); REQUIRE(second_account->size() == 32);
++  REQUIRE(std::filesystem::is_regular_file(first_package / "account.dat"));
++  REQUIRE(rex::platform::WriteHostFile(second_package / "preserved-profile.bin", std::string_view("settings and achievements")));
+   const auto data = root / "preserved-user-data.bin";
+   { std::ofstream out(data, std::ios::binary); out << "save and profile data"; }
+   const auto epoch = profile.GetStorageEpoch();
+@@ -1916,13 +1937,18 @@
+   std::vector<std::filesystem::path> archives;
+   for (const auto& entry : std::filesystem::directory_iterator(root / "profiles" / "deleted")) archives.push_back(entry.path());
+   REQUIRE(archives.size() == 1);
+-  CHECK(std::filesystem::file_size(archives.front()) == 20 + 2 * 25);
++  const auto archived_account = rex::platform::ReadHostFile(archives.front() / "account.dat");
++  REQUIRE(archived_account); CHECK(*archived_account == *second_account);
++  CHECK_FALSE(std::filesystem::exists(archives.front() / "package"));
++  CHECK_FALSE(std::filesystem::exists(second_package));
+   REQUIRE(profile.RemoveLocal(first) == 0);
+   CHECK(profile.identity().xuid == 0); CHECK(profile.GetSigninState() == 0);
+   CHECK(profile.GetStorageEpoch() > epoch);
+   CHECK(profile.local_profiles().empty());
+-  CHECK(std::filesystem::file_size(v2) == 20);
+-  CHECK(std::filesystem::file_size(v1) == 33);
++  CHECK_FALSE(std::filesystem::exists(first_package));
++  CHECK(std::filesystem::file_size(root / "profiles" / "session-v1.dat") == 17);
++  CHECK_FALSE(std::filesystem::exists(root / "profiles" / "local-v1.dat"));
++  CHECK_FALSE(std::filesystem::exists(root / "profiles" / "local-v2.dat"));
+   CHECK(std::filesystem::file_size(data) == 21);
+   rex::xam::UserProfile reopened;
+   REQUIRE(reopened.InitializeLocal(root));
+@@ -1947,7 +1973,7 @@
+   CHECK(profile.identity().xuid == xuid); CHECK(profile.GetSigninState() == 1);
+   CHECK(profile.GetStorageEpoch() == epoch);
+   std::filesystem::remove(recovery);
+-  std::filesystem::create_directory(root / "profiles" / "local-v2.dat.tmp");
++  std::filesystem::create_directory(root / "profiles" / "session-v1.dat.tmp");
+   CHECK(profile.RemoveLocal(xuid) == rex::kernel::X_ERROR_FUNCTION_FAILED);
+   CHECK(profile.identity().xuid == xuid); CHECK(profile.GetSigninState() == 1);
+   CHECK(profile.GetStorageEpoch() == epoch);
+@@ -2017,7 +2043,7 @@
+     CHECK(c.Load32(id) == 0xE); CHECK(c.Load32(data) == 1);
+     REQUIRE(c.XAM("XamProfileRenameAccount", {first, put_name(u"Renamed")}) == 0);
+     CHECK(c.XAM("XNotifyGetNext", {listener, 0xE, id, data}) == 0);
+-    std::filesystem::create_directory(rex::xam::CurrentTitle().user_data_root / "profiles" / "local-v2.dat.tmp");
++    std::filesystem::create_directory(profile.PackagePath(first) / "account.dat.tmp");
+     CHECK(c.XAM("XamProfileRenameAccount", {first, put_name(u"Rejected")}) == rex::kernel::X_ERROR_FUNCTION_FAILED);
+     CHECK(profile.GetName() == "Renamed"); CHECK(profile.GetStorageEpoch() == epoch);
+     CHECK(c.XAM("XNotifyGetNext", {listener, 0xE, id, data}) == 0);
+@@ -2161,7 +2187,7 @@
+   const auto xuid = profile.identity().xuid;
+   REQUIRE(profile.SetLocalSession(xuid) == 0);
+   REQUIRE(profile.RecordTitlePlayed(0x12345678));
+-  const auto path = rex::xam::CurrentTitle().user_data_root / "profiles" / std::format("{:016X}", xuid) / "titles-played.dat";
++  const auto path = profile.PackagePath(xuid) / "titles-played.dat";
+   auto valid = rex::platform::ReadHostFile(path);
+   REQUIRE(valid); REQUIRE(valid->size() == 16);
+   CHECK(std::string(valid->begin(), valid->begin() + 8) == "X360TP01");

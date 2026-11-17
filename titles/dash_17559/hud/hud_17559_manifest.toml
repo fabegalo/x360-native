@@ -2,7 +2,7 @@
 # SHA256 37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7.
 [project]
 name = "dash_17559"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../../.local/inputs/dashboards/17559/runtime"
 [entrypoint]
 file_path = "../../../.local/inputs/dashboards/17559/runtime/system/hud.xex"

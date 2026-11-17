@@ -1,0 +1,43 @@
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -365,7 +365,7 @@
+ 
+ u32 XamUserReadProfileSettingsEx_entry(u32 title_id, u32 user_index, u32 xuid_count,
+                                        MappedU64 xuids, u32 setting_count, MappedU32 setting_ids,
+-                                       MappedU32 buffer_size_ptr, u32 unk_2, MappedVoid buffer_ptr,
++                                       u32 unk_2, MappedU32 buffer_size_ptr, MappedVoid buffer_ptr,
+                                        GuestPtrT<kernel::XOVERLAPPED> overlapped) {
+   const auto result = XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
+                                       setting_ids, unk_2, buffer_size_ptr, buffer_ptr, overlapped);
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1216,7 +1216,7 @@
+       for (const bool by_xuid : {false, true}) {
+         const auto call = [&](u32 output) {
+           if (ex) return c.XAM("XamUserReadProfileSettingsEx",
+-              {0, 255, by_xuid ? 1u : 0u, by_xuid ? xuid : 0u, 1, ids, size, 0, output, 0});
++              {0, 255, by_xuid ? 1u : 0u, by_xuid ? xuid : 0u, 1, ids, 0, size, output, 0});
+           return c.XAM("XamUserReadProfileSettings",
+               {0, 255, by_xuid ? 1u : 0u, by_xuid ? xuid : 0u, 1, ids, size, output, 0});
+         };
+@@ -2068,3 +2068,18 @@
+   ui.NotifyAchievementUnlocked(0xE123456789ABCDEFull, 2, 42, 99);
+   CHECK(calls == 1);
+ }
++
++
++REX_TEST_CASE("profile Ex uses original flags in r9 and size pointer in r10", "[kernel][xam][profile-ex-abi]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    const auto ids = c.Alloc(4), size = c.Alloc(4), buffer = c.Alloc(256);
++    c.Store32(ids, kKnownSetting); c.Store32(size, 0); c.Store32(buffer, 0xCAFEBABE);
++    CHECK(c.XAM("XamUserReadProfileSettingsEx", {0, 255, 0, 0, 1, ids, size, 0, buffer, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.Load32(size) == 0); CHECK(c.Load32(buffer) == 0xCAFEBABE);
++    CHECK(c.XAM("XamUserReadProfileSettingsEx", {0, 255, 0, 0, 1, ids, 1, size, buffer, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.Load32(size) == 0); CHECK(c.Load32(buffer) == 0xCAFEBABE);
++    CHECK(c.XAM("XamUserReadProfileSettingsEx", {0, 255, 0, 0, 1, ids, 0, size, 0, 0}) == rex::kernel::X_ERROR_INSUFFICIENT_BUFFER);
++    CHECK(c.Load32(size) == kHeaderSize + kEntrySize);
++  });
++}

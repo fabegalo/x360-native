@@ -1,0 +1,79 @@
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -168,11 +168,12 @@
+ 
+ u32 EnumerateItems(u32 handle, u32 flags, MappedVoid buffer_ptr, u32* items_returned,
+                    u32 overlapped_ptr) {
+-  REX_ASSERT(flags == 0);
+-
+-  if (!CurrentTitle().objects.Get<EnumeratorObject>(handle)) {
+-    return kernel::X_ERROR_INVALID_HANDLE;
+-  }
++  auto enumerator = CurrentTitle().objects.Get<EnumeratorObject>(handle);
++  if (!enumerator) return kernel::X_ERROR_INVALID_HANDLE;
++  const auto* header = CurrentTitle().membase.TranslateVirtual<const X_KENUMERATOR*>(enumerator.GetGuestAddress());
++  if (header->app_id == 0xFB &&
++      (header->open_message == 0xB000A || header->open_message == 0xB0050) &&
++      flags != 0 && flags != 2) return kernel::X_ERROR_INVALID_PARAMETER;
+ 
+   auto run = [handle, buffer_ptr](u32& extended_error, u32& length,
+                                   bool& results_in_buffer) -> kernel::X_RESULT {
+@@ -202,6 +203,15 @@
+     return result;
+   } else if (overlapped_ptr) {
+     REX_ASSERT(!items_returned);
++    if (flags & 2) {
++      u32 extended_error = 0, length = 0;
++      bool results_in_buffer = false;
++      const auto result = run(extended_error, length, results_in_buffer);
++      CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr,
++          {.result = result, .extended_error = extended_error,
++           .length = results_in_buffer ? 0 : length});
++      return kernel::X_ERROR_IO_PENDING;
++    }
+     CurrentTitle().overlapped_dispatcher.CompleteDeferred(
+         overlapped_ptr, [run = std::move(run)]() mutable {
+           u32 extended_error = 0;
+diff --git a/tests/unit/kernel/enumerate_test.cpp b/tests/unit/kernel/enumerate_test.cpp
+--- a/tests/unit/kernel/enumerate_test.cpp
++++ b/tests/unit/kernel/enumerate_test.cpp
+@@ -289,3 +289,38 @@
+           kInvalid);
+   });
+ }
++
++
++REX_TEST_CASE("enumerate: direct mode completes on the caller and preserves original error and count", "[kernel][xam][direct-enumeration]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    u32 handle = 0;
++    int calls = 0;
++    const auto calling_thread = std::this_thread::get_id();
++    REQUIRE(rex::xam::CreateEnumerator(&handle, {0xFF, 0xFB, 0xB000A, 0, 0},
++      rex::xam::EnumeratorObject(1, 4, [&](u32, u8* buffer, u32* count) {
++        CHECK(std::this_thread::get_id() == calling_thread);
++        if (calls++ == 0) {
++          *count = 1;
++          std::memset(buffer, 0xAB, 4);
++          return rex::kernel::X_ERROR_SUCCESS;
++        }
++        *count = 0;
++        return rex::kernel::X_ERROR_NO_MORE_FILES;
++      })) == 0);
++    const auto buffer = c.Alloc(4), io = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    CHECK(c.XAM("XamEnumerate", {handle, 1, buffer, 4, 0, io}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(calls == 0);
++    REQUIRE(c.XAM("XamEnumerate", {handle, 2, buffer, 4, 0, io}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(calls == 1);
++    CHECK(c.Load32(buffer) == 0xABABABAB);
++    CHECK(c.LoadAcquire32(io + offsetof(rex::kernel::XOVERLAPPED, result)) == 0);
++    CHECK(c.Load32(io + offsetof(rex::kernel::XOVERLAPPED, length)) == 1);
++    REQUIRE(c.XAM("XamEnumerate", {handle, 2, buffer, 4, 0, io}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(calls == 2);
++    CHECK(c.LoadAcquire32(io + offsetof(rex::kernel::XOVERLAPPED, result)) == rex::kernel::X_ERROR_NO_MORE_FILES);
++    CHECK(c.Load32(io + offsetof(rex::kernel::XOVERLAPPED, extended_error)) == rex::kernel::X_E_NO_MORE_FILES);
++    CHECK(c.Load32(io + offsetof(rex::kernel::XOVERLAPPED, length)) == 0);
++    CHECK(c.Kernel("NtClose", {handle}) == 0);
++  });
++}

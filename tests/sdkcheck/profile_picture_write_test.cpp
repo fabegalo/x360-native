@@ -1,16 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
-#include <rex/system/xio.h>
-#include <rex/system/xam/user_profile.h>
-#include <rex/system/xam/content_manager.h>
+#include <rex/xam/user_profile.h>
+#include <rex/xam/content_manager.h>
+#include <rex/kernel/types/io.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/platform/process.h>
+#include <rex/string/text.h>
+#include "kernel/kernel_fixture.h"
+#include "xam/xam_state.h"
 #include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <thread>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -35,10 +38,7 @@ std::vector<uint8_t> ReadPictureBytes(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(file), {}};
 }
-void SetupPictureRuntime(rex::Runtime& rt) {
-  rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-}
+
 }
 
 TEST_CASE("Raw gamer picture writes persist distinct public and personal files per XUID",
@@ -47,18 +47,17 @@ TEST_CASE("Raw gamer picture writes persist distinct public and personal files p
   uint64_t first = 0, second = 0;
   std::filesystem::path first_package, second_package;
   {
-    rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-    auto* profiles = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+    auto* profiles = &rex::xam::CurrentXAM().GetUserProfile();
     REQUIRE(profiles->CreateLocal("PictureA", &first) == 0);
     REQUIRE(profiles->CreateLocal("PictureB", &second) == 0);
     REQUIRE(profiles->SetLocalSession(first) == 0);
     first_package = profiles->PackagePath(first); second_package = profiles->PackagePath(second);
     const auto account_a = ReadPictureBytes(first_package / "account.dat");
     const auto account_b = ReadPictureBytes(second_package / "account.dat");
-    auto* memory = rt.memory(); auto* base = memory->virtual_membase();
-    const auto block = memory->SystemHeapAlloc(32768); REQUIRE(block);
-    auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(), 128 * 1024, 0, [&] {
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      const auto block = caller.Alloc(32768); REQUIRE(block);
+      auto* base = caller.GetBase();
       auto put = [&](uint32_t address, uint32_t value) { rex::memory::store_and_swap<uint32_t>(base + address, value); };
       auto write = [&](uint32_t flags, const auto& large, const auto& small_png, uint32_t overlap = 0, uint32_t user = 0) {
         std::memcpy(base + block + 512, large.data(), large.size());
@@ -72,7 +71,10 @@ TEST_CASE("Raw gamer picture writes persist distinct public and personal files p
         __imp__XamWriteGamerTileEx(ctx, base);
         return ctx.r3.u32;
       };
-      CHECK(write(0x12, A64, A32) == 0);
+      const auto public_result = write(0x12, A64, A32);
+      INFO("picture write HRESULT=" << caller.GetRuntime().GetThreadRegistry().GetCallingThread()->GetLastError()
+           << "; " << (public_result ? PictureStageDescription(first_package) : "transaction removed"));
+      CHECK(public_result == 0);
       CHECK(ReadPictureBytes(first_package / "tile_64.png") == A64);
       CHECK(ReadPictureBytes(first_package / "tile_32.png") == A32);
       CHECK_FALSE(std::filesystem::exists(first_package / "pp_64.png"));
@@ -82,16 +84,16 @@ TEST_CASE("Raw gamer picture writes persist distinct public and personal files p
       CHECK(ReadPictureBytes(first_package / "tile_64.png") == A64);
       const auto key = ReadPictureBytes(first_package / "settings-v1" / "4064000F.dat");
       CHECK(key.size() == 50);
-      const auto* selected = static_cast<rex::system::xam::UserProfile::UnicodeSetting*>(profiles->GetSetting(0x4064000F));
+      const auto* selected = static_cast<rex::xam::UserProfile::UnicodeSetting*>(profiles->GetSetting(0x4064000F));
       REQUIRE(selected); CHECK_FALSE(selected->load_failed);
       CHECK(selected->value == u"123456780000001100000021");
       CHECK(write(0xB2, A64, A32) == 0); // Both pictures; preserve the selected key.
       CHECK(ReadPictureBytes(first_package / "settings-v1" / "4064000F.dat") == key);
       CHECK(ReadPictureBytes(first_package / "pp_64.png") == A64);
       const auto overlap = block + 4096;
-      std::memset(base + overlap, 0, sizeof(rex::system::XAM_OVERLAPPED));
+      std::memset(base + overlap, 0, sizeof(rex::kernel::XOVERLAPPED));
       CHECK(write(0x32, B64, B32, overlap) == 997);
-      auto* io = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(overlap);
+      auto* io = reinterpret_cast<rex::kernel::XOVERLAPPED*>(base + overlap);
       CHECK(io->result == 0); CHECK(io->extended_error == 0);
       CHECK(ReadPictureBytes(first_package / "tile_64.png") == B64);
       auto corrupt = A64; corrupt[40] ^= 1;
@@ -113,24 +115,60 @@ TEST_CASE("Raw gamer picture writes persist distinct public and personal files p
       CHECK(ReadPictureBytes(second_package / "account.dat") == account_b);
       CHECK_FALSE(std::filesystem::exists(first_package / ".x360n-picture-update"));
       CHECK_FALSE(std::filesystem::exists(second_package / ".x360n-picture-update"));
-      return 0;
-    }));
-    REQUIRE(caller->Create() == 0); uint64_t timeout = uint64_t(-100'000'000ll);
-    REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
-    memory->SystemHeapFree(block);
+    });
   }
   {
-    rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-    auto* profiles = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+    auto* profiles = &rex::xam::CurrentXAM().GetUserProfile();
     CHECK(profiles->FindLocal(first).xuid == first); CHECK(profiles->FindLocal(second).xuid == second);
     CHECK(ReadPictureBytes(profiles->PackagePath(first) / "pp_64.png") == B64);
     CHECK(ReadPictureBytes(profiles->PackagePath(second) / "tile_32.png") == A32);
   }
 }
 
+#if defined(_WIN32)
+TEST_CASE("Profile picture cleanup preserves bytes with a delete-shared reader",
+          "[sdk][profile-picture-write][picture-delete-pending]") {
+  PictureDirectory directory;
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+  auto& profiles = rex::xam::CurrentXAM().GetUserProfile();
+  uint64_t xuid = 0;
+  REQUIRE(profiles.CreateLocal("PendingPicture", &xuid) == 0);
+  const auto package = profiles.PackagePath(xuid);
+  const auto stage = package / ".x360n-picture-update";
+  std::jthread reader;
+  rex::xam::UserProfile::PictureUpdate update;
+  update.public_picture = true;
+  update.large_png.assign(A64.begin(), A64.end());
+  update.small_png.assign(A32.begin(), A32.end());
+  const auto result = profiles.WritePictures(xuid, update, nullptr, [&](uint32_t checkpoint) {
+    if (checkpoint != 6) return;
+    HANDLE file = CreateFileW((stage / "new0").c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    REQUIRE(file != INVALID_HANDLE_VALUE);
+    reader = std::jthread([file] {
+      for (unsigned i = 0; i < 1000; ++i) {
+        FILE_STANDARD_INFO info{};
+        if (GetFileInformationByHandleEx(file, FileStandardInfo, &info, sizeof(info)) && info.DeletePending) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      CloseHandle(file);
+    });
+  });
+  if (reader.joinable()) reader.join();
+  CHECK(result == 0);
+  CHECK_FALSE(std::filesystem::exists(stage));
+  CHECK(ReadPictureBytes(package / "tile_64.png") == A64);
+  CHECK(ReadPictureBytes(package / "tile_32.png") == A32);
+}
+#endif
+
 namespace {
-rex::system::xam::UserProfile::PictureUpdate PictureSet(bool second) {
-  rex::system::xam::UserProfile::PictureUpdate update;
+rex::xam::UserProfile::PictureUpdate PictureSet(bool second) {
+  rex::xam::UserProfile::PictureUpdate update;
   update.large_png = second ? B64 : A64; update.small_png = second ? B32 : A32;
   update.public_picture = update.personal_picture = true;
   update.key = second ? u"876543210000000200000003" : u"123456780000001100000021";
@@ -147,20 +185,20 @@ TEST_CASE("Picture quota includes growth of every published image while backups 
   const uint64_t staged = 144 + 4 * enlarged + 50 + previous;
   { std::ofstream config(directory.root / "storage.toml"); config << "version=1\n[hdd]\ncapacity_bytes=8388608\n"; }
   {
-    rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-    auto* profile = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+    auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
     REQUIRE(profile->CreateLocal("PictureQuota", &xuid) == 0);
     REQUIRE(profile->SetLocalSession(xuid) == 0);
     REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
-    const auto device = rt.kernel_state()->content_manager()->GetDevice(1); REQUIRE(device);
+    const auto device = rex::xam::CurrentXAM().GetContentManager().GetDevice(1); REQUIRE(device);
     used = device->total_bytes - device->free_bytes;
   }
   // Room for backups, input snapshots and one temporary file, but not for
   // the growth of all four public names before those snapshots are removed.
   { std::ofstream config(directory.root / "storage.toml");
     config << "version=1\n[hdd]\ncapacity_bytes=" << used + staged + enlarged << "\n"; }
-  rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-  auto* profile = rt.kernel_state()->user_profile();
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
   const auto package = profile->PackagePath(xuid); REQUIRE_FALSE(package.empty());
   auto update = PictureSet(true);
   update.large_png.resize(enlarged); update.small_png.resize(enlarged);
@@ -179,13 +217,13 @@ TEST_CASE("Picture staging is reclaimed before the final quota check",
   std::filesystem::path package;
   { std::ofstream config(directory.root / "storage.toml"); config << "version=1\n[hdd]\ncapacity_bytes=8388608\n"; }
   {
-    rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-    auto* profile = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+    auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
     REQUIRE(profile->CreateLocal("PictureReclaim", &xuid) == 0);
     REQUIRE(profile->SetLocalSession(xuid) == 0);
     REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
     package = profile->PackagePath(xuid);
-    const auto device = rt.kernel_state()->content_manager()->GetDevice(1); REQUIRE(device);
+    const auto device = rex::xam::CurrentXAM().GetContentManager().GetDevice(1); REQUIRE(device);
     used = device->total_bytes - device->free_bytes;
   }
   { std::ofstream config(directory.root / "storage.toml");
@@ -193,8 +231,8 @@ TEST_CASE("Picture staging is reclaimed before the final quota check",
   const auto stage = package / ".x360n-picture-update";
   REQUIRE(std::filesystem::create_directory(stage));
   { std::ofstream partial(stage / "new0", std::ios::binary); partial << std::string(8192, 'x'); }
-  rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-  auto* profile = rt.kernel_state()->user_profile();
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
   CHECK(profile->WritePictures(xuid, PictureSet(true)) == 0);
   CHECK(ReadPictureBytes(package / "tile_64.png") == B64);
   CHECK_FALSE(std::filesystem::exists(stage));
@@ -204,8 +242,8 @@ TEST_CASE("Picture staging is reclaimed before the final quota check",
 TEST_CASE("Picture publication rolls back after a real locked second destination",
           "[sdk][profile-picture-recovery]") {
   PictureDirectory directory;
-  rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-  auto* profile = rt.kernel_state()->user_profile(); uint64_t xuid = 0;
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile(); uint64_t xuid = 0;
   REQUIRE(profile->CreateLocal("PictureLock", &xuid) == 0); REQUIRE(profile->SetLocalSession(xuid) == 0);
   REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
   const auto package = profile->PackagePath(xuid);
@@ -232,8 +270,8 @@ TEST_CASE("Picture publication rolls back after a real locked second destination
 TEST_CASE("Committed picture cleanup preserves newer public bytes and retries private cleanup",
           "[sdk][profile-picture-recovery]") {
   PictureDirectory directory;
-  rex::Runtime rt(directory.root, directory.root); SetupPictureRuntime(rt);
-  auto* profile = rt.kernel_state()->user_profile(); uint64_t xuid = 0;
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, directory.root);
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile(); uint64_t xuid = 0;
   REQUIRE(profile->CreateLocal("PictureCleanup", &xuid) == 0); REQUIRE(profile->SetLocalSession(xuid) == 0);
   REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
   const auto package = profile->PackagePath(xuid);
@@ -256,18 +294,18 @@ TEST_CASE("Committed picture cleanup preserves newer public bytes and retries pr
 }
 
 TEST_CASE("Picture update independent process fixture", "[sdk][profile-picture-process-child]") {
-  const auto* input = _wgetenv(L"X360N_PICTURE_PROCESS_ROOT");
-  const auto* requested = _wgetenv(L"X360N_PICTURE_PROCESS_PHASE");
+  const auto input = rex::platform::GetEnvironmentValue("X360N_PICTURE_PROCESS_ROOT");
+  const auto requested = rex::platform::GetEnvironmentValue("X360N_PICTURE_PROCESS_PHASE");
   if (!input || !requested) SKIP("Run tests/local/profile-pictures-process.ps1");
-  const auto root = std::filesystem::weakly_canonical(std::filesystem::path(input));
+  const auto root = std::filesystem::weakly_canonical(std::filesystem::u8path(*input));
   REQUIRE(root.parent_path() == std::filesystem::weakly_canonical(std::filesystem::current_path() / ".local/diagnostics"));
   REQUIRE(root.filename().string().starts_with("picture-process-"));
   REQUIRE(ReadPictureBytes(root / ".picture-process-fixture") ==
           std::vector<uint8_t>{'x','3','6','0','n','-','p','i','c','t','u','r','e','-','p','r','o','c','e','s','s','-','v','1'});
-  const std::wstring phase(requested);
-  rex::Runtime rt(root, root); SetupPictureRuntime(rt);
-  auto* profile = rt.kernel_state()->user_profile();
-  if (phase == L"seed") {
+  const std::string phase(*requested);
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, root);
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
+  if (phase == "seed") {
     uint64_t xuid = 0; REQUIRE(profile->CreateLocal("PictureProc", &xuid) == 0);
     REQUIRE(profile->SetLocalSession(xuid) == 0);
     REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
@@ -279,28 +317,68 @@ TEST_CASE("Picture update independent process fixture", "[sdk][profile-picture-p
   }
   const auto identity = profile->identity(); REQUIRE(identity.xuid); REQUIRE(identity.name == "PictureProc");
   const auto package = profile->PackagePath(identity.xuid); REQUIRE_FALSE(package.empty());
-  if (phase == L"interrupt") {
-    const auto* value = _wgetenv(L"X360N_PICTURE_PROCESS_CHECKPOINT"); REQUIRE(value);
-    const auto checkpoint = std::wcstoul(value, nullptr, 10); REQUIRE(checkpoint <= 6);
+  if (phase == "interrupt") {
+    const auto value = rex::platform::GetEnvironmentValue("X360N_PICTURE_PROCESS_CHECKPOINT"); REQUIRE(value);
+    const auto checkpoint = std::strtoul(value->c_str(), nullptr, 10); REQUIRE(checkpoint <= 6);
     profile->WritePictures(identity.xuid, PictureSet(true), nullptr, [&](uint32_t current) {
       if (current == checkpoint) std::_Exit(93);
     });
     FAIL("Interruption checkpoint was not reached");
   }
-  if (phase == L"corrupt" || phase == L"conflict") {
-    CHECK(profile->RecoverPictures(identity.xuid) == (phase == L"corrupt" ? 13u : 183u));
+  if (phase == "corrupt" || phase == "conflict") {
+    CHECK(profile->RecoverPictures(identity.xuid) == (phase == "corrupt" ? 13u : 183u));
     CHECK(std::filesystem::exists(package / ".x360n-picture-update" / "ready"));
     return;
   }
-  REQUIRE((phase == L"old" || phase == L"new"));
-  const bool next = phase == L"new";
+  REQUIRE((phase == "old" || phase == "new"));
+  const bool next = phase == "new";
   std::vector<uint8_t> bytes;
   REQUIRE(profile->ReadPicture(identity.xuid, false, false, bytes) == 0); CHECK(bytes == (next ? B64 : A64));
   REQUIRE(profile->ReadPicture(identity.xuid, false, true, bytes) == 0); CHECK(bytes == (next ? B32 : A32));
   REQUIRE(profile->ReadPicture(identity.xuid, true, false, bytes) == 0); CHECK(bytes == (next ? B64 : A64));
   REQUIRE(profile->ReadPicture(identity.xuid, true, true, bytes) == 0); CHECK(bytes == (next ? B32 : A32));
-  const auto* key = static_cast<rex::system::xam::UserProfile::UnicodeSetting*>(profile->GetSetting(0x4064000F));
+  const auto* key = static_cast<rex::xam::UserProfile::UnicodeSetting*>(profile->GetSetting(0x4064000F));
   REQUIRE(key); CHECK_FALSE(key->load_failed); CHECK(key->value == *PictureSet(next).key);
   CHECK_FALSE(std::filesystem::exists(package / ".x360n-picture-update"));
 }
 #endif
+
+TEST_CASE("Profile tile reads preserve full XUID and distinct public and personal namespaces",
+          "[sdk][profile-picture-write]") {
+  rex::test::KernelFixture fixture;
+  auto& profiles = rex::xam::CurrentXAM().GetUserProfile();
+  uint64_t first = 0, second = 0;
+  REQUIRE(profiles.CreateLocal("PictureReadA", &first) == 0);
+  REQUIRE(profiles.CreateLocal("PictureReadB", &second) == 0);
+  const auto first_write = profiles.WritePictures(first, PictureSet(false));
+  INFO("picture write error=" << first_write << "; "
+       << (first_write ? PictureStageDescription(profiles.PackagePath(first)) : "transaction removed"));
+  REQUIRE(first_write == 0);
+  REQUIRE(profiles.WritePictures(second, PictureSet(true)) == 0);
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    const auto output = caller.Alloc(32768), size = caller.Alloc(4);
+    auto read = [&](uint32_t type, uint64_t xuid, uint32_t user) {
+      caller.Store32(size, 32768);
+      std::memset(caller.GetBase() + output, 0xAB, 32768);
+      return caller.XAM("XamReadTile", {type, 0, xuid, user, output, size, 0});
+    };
+    CHECK(read(10, first, 0xFE) == 0);
+    CHECK(caller.Load32(size) == A64.size());
+    CHECK(std::equal(A64.begin(), A64.end(), caller.GetBase() + output));
+    CHECK(read(11, second, 0xFE) == 0);
+    CHECK(caller.Load32(size) == B32.size());
+    CHECK(std::equal(B32.begin(), B32.end(), caller.GetBase() + output));
+    CHECK(read(10, first ^ 0x100000000ull, 0xFE) == 1168);
+    CHECK(caller.GetBase()[output] == 0xAB);
+    CHECK(read(2, first, 0) == 1168);
+    REQUIRE(profiles.SetLocalSession(first) == 0);
+    CHECK(read(2, 0, 0) == 0);
+    CHECK(std::equal(A64.begin(), A64.end(), caller.GetBase() + output));
+    CHECK(read(10, second, 0) == 1168);
+    CHECK(read(10, first, 1) == 1317);
+    CHECK(read(10, first, 4) == 87);
+    CHECK(read(0, first, 0) == 87);
+    CHECK(read(10, second, 0xFE) == 0);
+    CHECK(std::equal(B64.begin(), B64.end(), caller.GetBase() + output));
+  });
+}

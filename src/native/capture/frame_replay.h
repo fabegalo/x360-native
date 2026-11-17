@@ -16,13 +16,14 @@
 #include <functional>
 #include <string>
 #include <vector>
-namespace rex::ui { class Presenter; struct RawImage; }
+namespace rex::gpu { class Presenter; struct RawImage; }
+namespace rex::kernel { class ISystemHeap; }
 namespace x360n::native {
 struct ReplayOptions {
   uint32_t repeat = 1;  // Passes over the whole capture (later passes are warm).
   // Real presentation (offscreen presenter) and comparison of its output.
   // Without one, frames end with CompleteFrame and the output is not checked.
-  rex::ui::Presenter* presenter = nullptr;
+  rex::gpu::Presenter* presenter = nullptr;
   // Negative controls only: skip restoring EDRAM, or alter the first 16 bytes
   // of the Nth memory record when it is applied (0 = first).
   bool skip_edram = false;
@@ -54,7 +55,7 @@ struct ReplayResult {
     return true;
   }
 };
-ReplayResult ReplayCapture(capture::Reader&, ScanoutBackend&, rex::memory::Memory&, const ReplayOptions& = {});
+ReplayResult ReplayCapture(capture::Reader&, ScanoutBackend&, rex::IPhysicalMemory&, rex::kernel::ISystemHeap&, const ReplayOptions& = {});
 // Allocates the guest physical pages a capture touches (replay hosts only).
-void EnsurePhysicalAllocated(rex::memory::Memory&, uint32_t address, uint32_t length);
+void EnsurePhysicalAllocated(rex::IPhysicalMemory&, rex::kernel::ISystemHeap&, uint32_t address, uint32_t length);
 }

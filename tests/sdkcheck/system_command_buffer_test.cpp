@@ -2,12 +2,13 @@
 #include <cstring>
 #include <filesystem>
 #include <vector>
-#include <rex/runtime.h>
-#include <rex/graphics/xenos.h>
-#include <rex/graphics/register_file.h>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xboxkrnl/video.h>
-#include <rex/ppc/func.h>
+#include <rex/kernel/xboxkrnl.h>
+#include <rex/kernel/heap.h>
+#include <rex/xenos/register.h>
+#include <rex/xenos/packet.h>
+#include <rex/ppc/hook.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/title_state.h"
 
 extern "C" REX_FUNC(__imp__VdSwap);
 extern "C" REX_FUNC(__imp__VdSetSystemCommandBuffer);
@@ -26,23 +27,17 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
           "[sdk][system-command-buffer]") {
   swap_callbacks = 0;
   observed = {};
-  namespace xenos = rex::graphics::xenos;
-  using rex::X_STATUS;
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
-  auto* memory = rt.memory();
-  auto* base = memory->virtual_membase();
+  namespace xenos = rex::xenos;
+  rex::test::KernelFixture fixture;
+  auto& rt = fixture.GetRuntime();
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto* memory = rex::kernel::StateOf(rt).GetAddressSpace();
+  auto* base = caller.GetBase();
   const auto scratch = memory->SystemHeapAlloc(4096);
   const auto stack = memory->SystemHeapAlloc(4096);
-  const auto title = memory->SystemHeapAlloc(64 * 32 * 4, 4096, rex::memory::kSystemHeapPhysical);
-  const auto system = memory->SystemHeapAlloc(64 * 32 * 4, 4096, rex::memory::kSystemHeapPhysical);
-  REQUIRE(scratch);
-  REQUIRE(stack);
-  REQUIRE(title);
-  REQUIRE(system);
+  const auto title = memory->SystemHeapAlloc(64 * 32 * 4, 4096, rex::kernel::kSystemHeapPhysical);
+  const auto system = memory->SystemHeapAlloc(64 * 32 * 4, 4096, rex::kernel::kSystemHeapPhysical);
+  REQUIRE(scratch); REQUIRE(stack); REQUIRE(title); REQUIRE(system);
   auto* bytes = memory->TranslateVirtual<uint8_t*>(scratch);
   std::memset(bytes, 0, 4096);
   auto put = [&](uint32_t offset, uint32_t value) {
@@ -50,7 +45,7 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   };
   auto get = [&](uint32_t offset) { return rex::memory::load_and_swap<uint32_t>(bytes + offset); };
   // Title Direct3D front buffer header fetch: tiled 64x32 k_8_8_8_8.
-  xenos::xe_gpu_texture_fetch_t fetch{};
+  xenos::TextureFetch fetch{};
   fetch.type = xenos::FetchConstantType::kTexture;
   fetch.tiled = 1;
   fetch.pitch = 64 >> 5;
@@ -66,7 +61,9 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   put(0x508, 0);      // RGB
   put(0x50C, 64);
   put(0x510, 32);
-  PPCContext ctx{};
+  auto& ctx = caller.GetContext();
+  const auto original_stack = ctx.r1.u64;
+  rex::ScopeGuard restore_stack([&] { ctx.r1.u64 = original_stack; });
   auto swap = [&] {
     ctx.r1.u64 = stack + 1024;
     rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(stack + 1024 + 0x54), scratch + 0x50C);
@@ -89,15 +86,15 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   const uint32_t title_physical = memory->GetPhysicalAddress(title);
   const uint32_t system_physical = memory->GetPhysicalAddress(system);
 
-  rex::kernel::xboxkrnl::SetSystemSwapCallback(&ObserveSwap);
+  rex::kernel::xboxkrnl::SetSystemSwapCallback(rt, &ObserveSwap);
   swap();
   CHECK(swap_callbacks == 1);
   CHECK(observed.frontbuffer_physical == title_physical);
   CHECK(observed.width == 64);
   CHECK(observed.height == 32);
   // Without a published descriptor the title's own frame is presented.
-  CHECK(get(0) == xenos::MakePacketType0(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, 6));
-  CHECK(get(7 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
+  CHECK(get(0) == xenos::BuildPacketType0(std::to_underlying(xenos::Register::SHADER_CONSTANT_FETCH_00_0), 6));
+  CHECK(get(7 * 4) == xenos::BuildPacketType3(xenos::PM4_XE_SWAP, 4));
   CHECK(get(9 * 4) == title_physical);
   CHECK(query() == 1);
 
@@ -111,7 +108,7 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   ctx.r3.u64 = scratch + 0x600;
   __imp__VdSetSystemCommandBuffer(ctx, base);
   swap();
-  CHECK(get(7 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SYSTEM_COMMANDS, 10));
+  CHECK(get(7 * 4) == xenos::BuildPacketType3(xenos::PM4_XE_SYSTEM_COMMANDS, 10));
   CHECK(get(8 * 4) == 0xA0123000);
   CHECK(get(9 * 4) == 0x123);
   const uint32_t fence = get(10 * 4);
@@ -121,15 +118,15 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   for (uint32_t i = 0; i < 6; ++i) CHECK((i == 1 || get((12 + i) * 4) == words[i]));
   CHECK(get(13 * 4) == ((words[1] & 0xFFF) | (title_physical & 0xFFFFF000)));
   CHECK(get(1 * 4) == words[0]);
-  CHECK(get(18 * 4) == xenos::MakePacketType0(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, 6));
-  xenos::xe_gpu_texture_fetch_t presented{};
+  CHECK(get(18 * 4) == xenos::BuildPacketType0(std::to_underlying(xenos::Register::SHADER_CONSTANT_FETCH_00_0), 6));
+  xenos::TextureFetch presented{};
   auto* presented_words = reinterpret_cast<uint32_t*>(&presented);
   for (uint32_t i = 0; i < 6; ++i) presented_words[i] = get((19 + i) * 4);
   CHECK(presented.base_address == system_physical >> 12);
   CHECK(presented.size_2d.width == 47);
   CHECK(presented.size_2d.height == 23);
   CHECK(presented.pitch == 2);
-  CHECK(get(25 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
+  CHECK(get(25 * 4) == xenos::BuildPacketType3(xenos::PM4_XE_SWAP, 4));
   CHECK(get(27 * 4) == system_physical);
   CHECK(get(28 * 4) == 48);
   CHECK(get(29 * 4) == 24);
@@ -151,16 +148,21 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   }
   __imp__VdSetSystemCommandBuffer(ctx, base);
   swap();
-  CHECK(get(7 * 4) == xenos::MakePacketType0(rex::graphics::XE_GPU_REG_D1OVL_ENABLE, 1));
+  CHECK(get(7 * 4) == xenos::BuildPacketType0(std::to_underlying(xenos::Register::D1OVL_ENABLE), 1));
   CHECK(get(8 * 4) == 0);
-  CHECK(get(9 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
+  CHECK(get(9 * 4) == xenos::BuildPacketType3(xenos::PM4_XE_SWAP, 4));
   CHECK(get(11 * 4) == title_physical);
-  rex::kernel::xboxkrnl::SetSystemSwapCallback(nullptr);
+  rex::kernel::xboxkrnl::SetSystemSwapCallback(rt, nullptr);
   swap();
   CHECK(swap_callbacks == 4);
-  CHECK(get(7 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
+  CHECK(get(7 * 4) == xenos::BuildPacketType3(xenos::PM4_XE_SWAP, 4));
   memory->SystemHeapFree(system);
   memory->SystemHeapFree(title);
   memory->SystemHeapFree(stack);
   memory->SystemHeapFree(scratch);
+  rex::kernel::xboxkrnl::SetSystemSwapCallback(rt, &ObserveSwap);
+  });
+  REQUIRE(rex::kernel::StateOf(rt).GetSystemCommandBufferState().callback.load() != nullptr);
+  rt.Unload();
+  CHECK(rex::kernel::StateOf(rt).GetSystemCommandBufferState().callback.load() == nullptr);
 }

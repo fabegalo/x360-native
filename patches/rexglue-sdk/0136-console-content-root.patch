@@ -1,0 +1,141 @@
+diff --git a/include/rex/kernel/title_paths.h b/include/rex/kernel/title_paths.h
+--- a/include/rex/kernel/title_paths.h
++++ b/include/rex/kernel/title_paths.h
+@@ -24,6 +24,8 @@
+               "Game files, mounted as game:, read only unless game_writable is set", kUntilLaunch);
+   REX_SETTING(bool, game_writable, false, "Mount game: read write instead of read only",
+               kUntilLaunch);
++  REX_SETTING(std::filesystem::path, content_root, "",
++              "Console XContent hard drive, empty uses app.user_root", kUntilLaunch);
+   REX_SETTING(std::filesystem::path, update_root, "", "Title update files, empty for none",
+               kUntilLaunch);
+   REX_SETTING(std::filesystem::path, metadata_root, "{app.root}/metadata",
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -59,10 +59,11 @@
+   filesystem::IFileSystemFactory& file_system_factory; /**< Opens content packages and XDBF data. */
+   rex::memory::GuestMembase membase;
+   std::filesystem::path user_data_root; /**< Root of the per user data, empty when there is none. */
++  std::filesystem::path content_data_root; /**< Console XContent root; empty uses user_data_root. */
+ };
+ 
+ /** Title load and unload calls from the kernel to XAM. */
+-REX_DECLARE_INTERFACE(IXAMTitleLifecycle, 3)
++REX_DECLARE_INTERFACE(IXAMTitleLifecycle, 4)
+   virtual ~IXAMTitleLifecycle() = default;
+ 
+   /**
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -805,6 +805,8 @@
+   if (!user_data_root.empty()) {
+     user_data_root = std::filesystem::absolute(user_data_root);
+   }
++  auto content_root = GetTitlePaths().content_root.Get();
++  if (!content_root.empty()) content_root = std::filesystem::absolute(content_root);
+   xam_ = GetKernelServices()->xam;
+   xam_managers_ = GetKernelServices()->managers;
+   if (auto attached = xam_->AttachTitle(rex::xam::XAMKernelInterfaces{
+@@ -816,6 +818,7 @@
+           .file_system_factory = *GetKernelServices()->file_system,
+           .membase = memory_->GetMembase(),
+           .user_data_root = std::move(user_data_root),
++          .content_data_root = std::move(content_root),
+       });
+       !attached) {
+     return attached;
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -117,7 +117,9 @@
+ }  // namespace
+ 
+ ContentManager::ContentManager(const XAMTitle& title, rex::xam::UserProfile& user_profile)
+-    : title_(title), root_path_(title.user_data_root), user_profile_(user_profile) {}
++    : title_(title),
++      root_path_(title.content_data_root.empty() ? title.user_data_root : title.content_data_root),
++      user_profile_(user_profile) {}
+ 
+ ContentManager::~ContentManager() = default;
+ 
+diff --git a/src/app/command_line.cpp b/src/app/command_line.cpp
+--- a/src/app/command_line.cpp
++++ b/src/app/command_line.cpp
+@@ -20,10 +20,11 @@
+   std::string_view setting;
+ };
+ 
+-constexpr std::array<Flag, 7> kFlags = {{
++constexpr std::array<Flag, 8> kFlags = {{
+     {"modules", ""},
+     {"game_data_root", "title.game_root"},
+     {"user_data_root", "app.user_root"},
++    {"content_data_root", "title.content_root"},
+     {"update_data_root", "title.update_root"},
+     {"cache_root", "app.cache_root"},
+     {"metadata_root", "title.metadata_root"},
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -80,6 +80,7 @@
+     {"log.show_thread", ""},
+     {"paths.game_data_root", "title.game_root"},
+     {"paths.user_data_root", "app.user_root"},
++    {"runtime.content_data_root", "title.content_root"},
+     {"paths.update_data_root", "title.update_root"},
+     {"paths.cache_root", "app.cache_root"},
+     {"paths.metadata_root", "title.metadata_root"},
+diff --git a/tests/unit/kernel/title_launch_test.cpp b/tests/unit/kernel/title_launch_test.cpp
+--- a/tests/unit/kernel/title_launch_test.cpp
++++ b/tests/unit/kernel/title_launch_test.cpp
+@@ -92,6 +92,8 @@
+ 
+   rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+     REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle, "kernel.user_language", "0"));
++    // Other fixtures analyze modules without an executable; this fixture launches one.
++    REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle, "title.entry", "default.xex"));
+     REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle, "title.game_root",
+                                   (folder_.path / "game").string()));
+     REX_TRY_VOID(root.SetText(rex::SettingLayer::kTitle, folder_.path.string()));
+diff --git a/tests/unit/kernel/title_runtime_test.cpp b/tests/unit/kernel/title_runtime_test.cpp
+--- a/tests/unit/kernel/title_runtime_test.cpp
++++ b/tests/unit/kernel/title_runtime_test.cpp
+@@ -33,6 +33,7 @@
+ #include <memory>
+ #include <rex/settings_registry.h>
+ #include <rex/path_settings.h>
++#include <rex/xam/content_manager.h>
+ #include <filesystem>
+ #include "kernel/apu.h"
+ #include <algorithm>
+@@ -705,3 +706,28 @@
+   CHECK_FALSE(tool->GetRuntime().GetFileSystem().FindLink("cache:"));
+   CHECK(std::filesystem::is_empty(original.path));
+ }
++
++REX_TEST_CASE("successive runtimes use the same console hard drive without moving profile roots", "[kernel][title][console-content-root]") {
++  const rex::test::TempFolder disk("rex_console_content_");
++  rex::kernel::XCONTENT_AGGREGATE_DATA data{};
++  data.device_id = 1; data.xuid = 0; data.title_id = 0x12345678;
++  data.content_type = rex::kernel::XContentType::kArcadeTitle;
++  data.SetFileName("shared-package"); data.SetDisplayName(u"Generic content");
++  for (unsigned cycle = 0; cycle < 2; ++cycle) {
++    rex::test::LoadedTitle loaded({}, false, [&] {
++      REQUIRE(rex::kernel::GetTitlePaths().content_root.Set(disk.path));
++    });
++    rex::ScopeGuard restore([] { CHECK(rex::kernel::GetTitlePaths().content_root.Reset()); });
++    CHECK(rex::xam::CurrentTitle().user_data_root != disk.path);
++    auto& content = loaded.runtime.GetContentManager();
++    if (!cycle) {
++      REQUIRE(content.CreateContent("package", 0, data));
++      REQUIRE(content.CloseContent("package"));
++    }
++    auto items = content.ListContent(1, 0, rex::kernel::XContentType::kArcadeTitle, 0x12345678);
++    REQUIRE(items.size() == 1);
++    CHECK(items[0].GetFileName() == "shared-package");
++    CHECK(static_cast<rex::u32>(items[0].title_id) == 0x12345678);
++  }
++  CHECK(std::filesystem::is_directory(disk.path / "0000000000000000/12345678/000D0000/shared-package"));
++}

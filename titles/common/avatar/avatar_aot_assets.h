@@ -8,8 +8,8 @@
 #include "avatar_assets_request.h"
 #include "avatar_metadata.h"
 
-namespace rex::memory {
-class Memory;
+namespace rex::kernel {
+class GuestAddressSpace;
 }
 
 namespace x360n::avatar {
@@ -37,13 +37,13 @@ using AvatarAotCall =
 // Empty destination allocates owned output; a supplied destination stays owned
 // by the caller after Release. Scratch and source copies are always private.
 std::unique_ptr<AssetsBackend> MakeAotAssetsBackend(
-    rex::memory::Memory& memory, AvatarAotCall call, const AvatarToc& toc,
+    rex::kernel::GuestAddressSpace& memory, AvatarAotCall call, const AvatarToc& toc,
     std::vector<AssetSelection> selection, uint32_t protocol,
     uint32_t body_type, uint32_t callbacks, AotAssetsStats& stats,
     AssetsBuffers destination = {});
 
 std::unique_ptr<AssetsBackend> MakeAotMetadataAssetsBackend(
-    rex::memory::Memory& memory, AvatarAotCall call, const AvatarToc& toc,
+    rex::kernel::GuestAddressSpace& memory, AvatarAotCall call, const AvatarToc& toc,
     std::span<const uint8_t, kMetadataSize> metadata, uint16_t mask,
     uint32_t callbacks, AotAssetsStats& stats, AssetsBuffers destination = {});
 

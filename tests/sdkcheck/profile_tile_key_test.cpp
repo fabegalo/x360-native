@@ -1,22 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/ppc/func.h>
+#include "kernel/kernel_fixture.h"
+#include <rex/kernel/types/status.h>
+#include <rex/memory/endian.h>
 #include <array>
 #include <cstring>
-#include <filesystem>
 #include <string_view>
 
-extern "C" REX_FUNC(__imp__XamParseGamerTileKey);
-using rex::X_RESULT;
-
 TEST_CASE("Gamer picture keys preserve original components and reserved defaults", "[sdk][profile-tile-key]") {
-  rex::Runtime rt(std::filesystem::temp_directory_path());
-  rex::RuntimeConfig config{}; config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-  const auto block = rt.memory()->SystemHeapAlloc(512); REQUIRE(block);
-  auto* base = rt.memory()->virtual_membase();
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([](rex::test::Caller& caller) {
+  const auto block = caller.Alloc(512); REQUIRE(block);
+  auto* base = caller.GetBase();
   auto put = [&](uint32_t offset, uint32_t value) {
     rex::memory::store_and_swap<uint32_t>(base + block + offset, value);
   };
@@ -28,10 +22,10 @@ TEST_CASE("Gamer picture keys preserve original components and reserved defaults
     put(12, null_buffer ? 0 : block + 128);
     for (size_t i = 0; i < text.size(); ++i)
       rex::memory::store_and_swap<uint16_t>(base + block + 128 + i * 2, text[i]);
-    PPCContext ctx{};
+    auto& ctx = caller.GetContext();
     ctx.r3.u64 = block; ctx.r4.u64 = block + 64;
     ctx.r5.u64 = block + 68; ctx.r6.u64 = block + 72;
-    __imp__XamParseGamerTileKey(ctx, base);
+    caller.XAM("XamParseGamerTileKey");
     CHECK(ctx.r3.u32 == 0);
     return std::array<uint32_t, 3>{get(64), get(68), get(72)};
   };
@@ -45,11 +39,12 @@ TEST_CASE("Gamer picture keys preserve original components and reserved defaults
   CHECK(run({}, true) == original_default); CHECK(get(8) == 0);
   CHECK(run(u"000000000000000000000000") == std::array<uint32_t, 3>{0, 0, 0});
   put(64, 0xA5A5A5A5);
-  PPCContext ctx{}; ctx.r3.u64 = 5; ctx.r4.u64 = block + 64;
+  auto& ctx = caller.GetContext(); ctx.r3.u64 = 5; ctx.r4.u64 = block + 64;
   ctx.r5.u64 = block + 68; ctx.r6.u64 = block + 72;
-  __imp__XamParseGamerTileKey(ctx, base);
-  CHECK(ctx.r3.u32 == X_ERROR_INVALID_PARAMETER); CHECK(get(64) == 0xA5A5A5A5);
+  caller.XAM("XamParseGamerTileKey");
+  CHECK(ctx.r3.u32 == rex::kernel::X_ERROR_INVALID_PARAMETER); CHECK(get(64) == 0xA5A5A5A5);
   ctx.r3.u64 = block; ctx.r4.u64 = 5;
-  __imp__XamParseGamerTileKey(ctx, base);
-  CHECK(ctx.r3.u32 == X_ERROR_INVALID_PARAMETER);
+  caller.XAM("XamParseGamerTileKey");
+  CHECK(ctx.r3.u32 == rex::kernel::X_ERROR_INVALID_PARAMETER);
+  });
 }

@@ -3,7 +3,7 @@
 namespace x360n::native {
 ScaledResolveCache::~ScaledResolveCache() { Clear(); }
 void ScaledResolveCache::Clear() {
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = (mirror_ ? mirror_->Lock() : rex::ScopeGuard{});
   if (mirror_) for (auto& [index, page] : pages_) if (page->watch) mirror_->Unwatch(page->watch);
   pages_.clear(); mirror_ = nullptr;
 }
@@ -13,7 +13,7 @@ void ScaledResolveCache::Invalidate(void*, void* data, uint64_t, bool) {
 }
 bool ScaledResolveCache::Overlaps(uint32_t start, uint32_t length) const {
   if (!enabled() || !length) return false;
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = (mirror_ ? mirror_->Lock() : rex::ScopeGuard{});
   const uint64_t end = std::min<uint64_t>(uint64_t(start) + length, GuestMemoryMirror::kSize);
   for (uint64_t address = start & ~(kPage - 1); address < end; address += kPage) {
     auto found = pages_.find(uint32_t(address / kPage));
@@ -24,7 +24,7 @@ bool ScaledResolveCache::Overlaps(uint32_t start, uint32_t length) const {
 std::vector<std::pair<uint32_t, uint32_t>> ScaledResolveCache::Stale(uint32_t start, uint32_t length) const {
   std::vector<std::pair<uint32_t, uint32_t>> runs;
   if (!length) return runs;
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = (mirror_ ? mirror_->Lock() : rex::ScopeGuard{});
   const uint64_t end = std::min<uint64_t>(uint64_t(start) + length, GuestMemoryMirror::kSize);
   for (uint64_t address = start & ~(kPage - 1); address < end; address += kPage) {
     auto found = pages_.find(uint32_t(address / kPage));
@@ -36,7 +36,7 @@ std::vector<std::pair<uint32_t, uint32_t>> ScaledResolveCache::Stale(uint32_t st
 }
 void ScaledResolveCache::MarkCurrent(uint32_t start, uint32_t length, bool resolved) {
   if (!length) return;
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = (mirror_ ? mirror_->Lock() : rex::ScopeGuard{});
   const uint64_t end = std::min<uint64_t>(uint64_t(start) + length, GuestMemoryMirror::kSize);
   for (uint64_t address = start & ~(kPage - 1); address < end; address += kPage) {
     auto& pointer = pages_[uint32_t(address / kPage)];

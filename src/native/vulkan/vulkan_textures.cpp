@@ -3,32 +3,34 @@
 #include "../quality/settings.h"
 #include "../textures/texture_load.h"
 #include "../textures/texture.h"
-#include <rex/graphics/pipeline/texture/info.h>
-#include "src/graphics/shaders/vulkan_spirv/texture_load_8bpb_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_16bpb_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_32bpb_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_64bpb_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_128bpb_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_unorm_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_float_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_8bpb_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_16bpb_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_32bpb_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_64bpb_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_128bpb_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_unorm_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_float_scaled_cs.h"
+#include <rex/xenos/texture.h>
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_8bpb_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_16bpb_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_32bpb_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_64bpb_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_128bpb_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_depth_unorm_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_depth_float_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_8bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_16bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_32bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_64bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_128bpb_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_depth_unorm_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/texture_load_depth_float_scaled_cs.h"
 #include <algorithm>
 #include <bit>
 #include <cstring>
 #include <stdexcept>
 
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
 namespace {
 struct Format { VkFormat vk; DXGI_FORMAT conversion; uint32_t bytes, block, components; };
-Format TextureFormatFor(const xe_gpu_texture_fetch_t& fetch, bool sign) {
+Format TextureFormatFor(const TextureFetch& fetch, bool sign) {
   const auto format = GetBaseFormat(fetch.format);
   if (ExpandedTextureBlock(format)) return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, 4};
   // Host texels stay normalized; the shared shader restores guest integer units.
@@ -92,9 +94,9 @@ VkDeviceSize LoadSourceExtent(const LoadConstants& c, uint32_t block_bytes, uint
   if (c.is_tiled_3d_endian_scale & 1) {
     const uint32_t block_log2 = std::countr_zero(block_bytes);
     size = c.is_tiled_3d_endian_scale & 2
-        ? texture_util::GetTiledAddressUpperBound3D(width, c.size_blocks[1], c.size_blocks[2],
+        ? rex::xenos::GetTiledAddressUpperBound3D(width, c.size_blocks[1], c.size_blocks[2],
             c.guest_pitch_aligned, c.guest_z_stride_block_rows_aligned, block_log2)
-        : texture_util::GetTiledAddressUpperBound2D(width, c.size_blocks[1],
+        : rex::xenos::GetTiledAddressUpperBound2D(width, c.size_blocks[1],
             c.guest_pitch_aligned, block_log2);
   } else {
     // The pinned shader's linear pitch is in bytes, tiled pitch in blocks.
@@ -116,37 +118,37 @@ struct VulkanRender::TextureResource {
   VkDeviceSize bytes = 0;
   TextureResource(const Device& d, VkImageCreateInfo info, VkImageViewType type, VkComponentMapping swizzle)
       : device(d) {
-    const auto& fn = device.functions();
-    CheckVulkan(fn.vkCreateImage(device.device(), &info, nullptr, &image), "create Native texture");
+    const auto& fn = device.GetFunctions();
+    CheckVulkan(fn.vkCreateImage(device.GetDevice(), &info, nullptr, &image), "create Native texture");
     try {
       VkMemoryRequirements requirements;
-      fn.vkGetImageMemoryRequirements(device.device(), image, &requirements);
-      auto types = requirements.memoryTypeBits & device.memory_types().device_local;
+      fn.vkGetImageMemoryRequirements(device.GetDevice(), image, &requirements);
+      auto types = requirements.memoryTypeBits & device.GetMemoryTypes().device_local;
       if (!types) types = requirements.memoryTypeBits;
       if (!types) throw std::runtime_error("Native Vulkan: no texture memory type");
       VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
       allocate.allocationSize = bytes = requirements.size;
       allocate.memoryTypeIndex = std::countr_zero(types);
-      CheckVulkan(fn.vkAllocateMemory(device.device(), &allocate, nullptr, &memory), "allocate Native texture");
-      CheckVulkan(fn.vkBindImageMemory(device.device(), image, memory, 0), "bind Native texture");
+      CheckVulkan(fn.vkAllocateMemory(device.GetDevice(), &allocate, nullptr, &memory), "allocate Native texture");
+      CheckVulkan(fn.vkBindImageMemory(device.GetDevice(), image, memory, 0), "bind Native texture");
       VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
       view_info.image = image;
       view_info.viewType = type;
       view_info.format = info.format;
       view_info.components = swizzle;
       view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, info.mipLevels, 0, info.arrayLayers};
-      CheckVulkan(fn.vkCreateImageView(device.device(), &view_info, nullptr, &view), "create Native texture view");
+      CheckVulkan(fn.vkCreateImageView(device.GetDevice(), &view_info, nullptr, &view), "create Native texture view");
     } catch (...) {
-      fn.vkDestroyImage(device.device(), image, nullptr);
-      if (memory) fn.vkFreeMemory(device.device(), memory, nullptr);
+      fn.vkDestroyImage(device.GetDevice(), image, nullptr);
+      if (memory) fn.vkFreeMemory(device.GetDevice(), memory, nullptr);
       throw;
     }
   }
   ~TextureResource() {
-    const auto& fn = device.functions();
-    fn.vkDestroyImageView(device.device(), view, nullptr);
-    fn.vkDestroyImage(device.device(), image, nullptr);
-    fn.vkFreeMemory(device.device(), memory, nullptr);
+    const auto& fn = device.GetFunctions();
+    fn.vkDestroyImageView(device.GetDevice(), view, nullptr);
+    fn.vkDestroyImage(device.GetDevice(), image, nullptr);
+    fn.vkFreeMemory(device.GetDevice(), memory, nullptr);
   }
 };
 void VulkanRender::TextureWatch(void*, void* data, uint64_t range, bool) {
@@ -155,7 +157,7 @@ void VulkanRender::TextureWatch(void*, void* data, uint64_t range, bool) {
   entry.watches[range] = nullptr;
 }
 void VulkanRender::Unwatch(TextureEntry& entry) {
-  auto lock = GuestMemoryMirror::Lock();
+  auto lock = mirror_->Lock();
   for (auto& watch : entry.watches) {
     if (watch) mirror_->Unwatch(watch);
     watch = nullptr;
@@ -165,8 +167,8 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
                                   uint32_t block_bytes, uint32_t block_width, VkExtent3D extent,
                                   const ScaledSource* scaled) {
   static_assert(std::tuple_size_v<decltype(load_pipelines_)> == size_t(LoadShader::kCount));
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   if (!load_layout_) {
     const VkDescriptorSetLayout sets[]{storage_layout_, storage_layout_};
     const VkPushConstantRange constants{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(LoadConstants)};
@@ -181,22 +183,22 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
   if (!pipeline.valid()) {
     std::span<const uint32_t> code;
     if (scaled) switch (plan.shader) {
-      case LoadShader::k8bpb: code = texture_load_8bpb_scaled_cs; break;
-      case LoadShader::k16bpb: code = texture_load_16bpb_scaled_cs; break;
-      case LoadShader::k32bpb: code = texture_load_32bpb_scaled_cs; break;
-      case LoadShader::k64bpb: code = texture_load_64bpb_scaled_cs; break;
-      case LoadShader::k128bpb: code = texture_load_128bpb_scaled_cs; break;
-      case LoadShader::kDepthUnorm: code = texture_load_depth_unorm_scaled_cs; break;
-      case LoadShader::kDepthFloat: code = texture_load_depth_float_scaled_cs; break;
+      case LoadShader::k8bpb: code = kTextureLoad8BPBScaledCS; break;
+      case LoadShader::k16bpb: code = kTextureLoad16BPBScaledCS; break;
+      case LoadShader::k32bpb: code = kTextureLoad32BPBScaledCS; break;
+      case LoadShader::k64bpb: code = kTextureLoad64BPBScaledCS; break;
+      case LoadShader::k128bpb: code = kTextureLoad128BPBScaledCS; break;
+      case LoadShader::kDepthUnorm: code = kTextureLoadDepthUNormScaledCS; break;
+      case LoadShader::kDepthFloat: code = kTextureLoadDepthFloatScaledCS; break;
       default: throw std::logic_error("Native Vulkan: scaled texture load shader without SPIR-V");
     } else switch (plan.shader) {
-      case LoadShader::k8bpb: code = texture_load_8bpb_cs; break;
-      case LoadShader::k16bpb: code = texture_load_16bpb_cs; break;
-      case LoadShader::k32bpb: code = texture_load_32bpb_cs; break;
-      case LoadShader::k64bpb: code = texture_load_64bpb_cs; break;
-      case LoadShader::k128bpb: code = texture_load_128bpb_cs; break;
-      case LoadShader::kDepthUnorm: code = texture_load_depth_unorm_cs; break;
-      case LoadShader::kDepthFloat: code = texture_load_depth_float_cs; break;
+      case LoadShader::k8bpb: code = kTextureLoad8BPBCS; break;
+      case LoadShader::k16bpb: code = kTextureLoad16BPBCS; break;
+      case LoadShader::k32bpb: code = kTextureLoad32BPBCS; break;
+      case LoadShader::k64bpb: code = kTextureLoad64BPBCS; break;
+      case LoadShader::k128bpb: code = kTextureLoad128BPBCS; break;
+      case LoadShader::kDepthUnorm: code = kTextureLoadDepthUNormCS; break;
+      case LoadShader::kDepthFloat: code = kTextureLoadDepthFloatCS; break;
       default: throw std::logic_error("Native Vulkan: texture load shader without SPIR-V");
     }
     pipeline = ComputePipeline(load_layout_, code);
@@ -215,8 +217,8 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
   const VkDeviceSize offset = page->used;
   page->used += need;
   if (uint64_t(offset) + need > UINT32_MAX) throw std::runtime_error("Native Vulkan: texture load scratch offset");
-  const VkDeviceSize storage_limit = device_.properties().maxStorageBufferRange;
-  const VkDeviceSize alignment = std::max<VkDeviceSize>(device_.properties().minStorageBufferOffsetAlignment,
+  const VkDeviceSize storage_limit = device_.GetProperties().maxStorageBufferRange;
+  const VkDeviceSize alignment = std::max<VkDeviceSize>(device_.GetProperties().minStorageBufferOffsetAlignment,
       VkDeviceSize(1) << std::max(plan.source_bpe_log2, plan.dest_bpe_log2));
   auto bind = [&](VkDescriptorSet& set, VkBuffer buffer, VulkanStorageBufferRange range) {
     if (set) return;
@@ -306,17 +308,17 @@ void VulkanRender::DestroyTextures() {
   for (auto& [key, entry] : textures_) Unwatch(entry);
   textures_.clear();
   null_textures_.fill({});
-  for (auto& [key, sampler] : samplers_) device_.functions().vkDestroySampler(device_.device(), sampler, nullptr);
+  for (auto& [key, sampler] : samplers_) device_.GetFunctions().vkDestroySampler(device_.GetDevice(), sampler, nullptr);
   samplers_.clear();
   for (auto& [shader, layout] : texture_layouts_)
-    device_.functions().vkDestroyDescriptorSetLayout(device_.device(), layout, nullptr);
+    device_.GetFunctions().vkDestroyDescriptorSetLayout(device_.GetDevice(), layout, nullptr);
   texture_layouts_.clear();
 }
-VkDescriptorSetLayout VulkanRender::TextureLayout(SpirvShader* shader) {
+VkDescriptorSetLayout VulkanRender::TextureLayout(SPIRVShader* shader) {
   if (auto found = texture_layouts_.find(shader); found != texture_layouts_.end()) return found->second;
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   if (shader) {
-    const auto stage = shader->type() == ShaderType::kVertex ? VkShaderStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) : VkShaderStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+    const auto stage = shader->GetType() == ShaderType::kVertex ? VkShaderStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) : VkShaderStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
     const auto images = shader->GetTextureBindingsAfterTranslation().size();
     const auto samplers = shader->GetSamplerBindingsAfterTranslation().size();
     for (uint32_t i = 0; i < images + samplers; ++i)
@@ -327,16 +329,16 @@ VkDescriptorSetLayout VulkanRender::TextureLayout(SpirvShader* shader) {
   info.bindingCount = uint32_t(bindings.size());
   info.pBindings = bindings.data();
   VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-  CheckVulkan(device_.functions().vkCreateDescriptorSetLayout(device_.device(), &info, nullptr, &layout),
+  CheckVulkan(device_.GetFunctions().vkCreateDescriptorSetLayout(device_.GetDevice(), &info, nullptr, &layout),
               "create Native texture descriptor layout");
   texture_layouts_.emplace(shader, layout);
   return layout;
 }
-void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shader) {
+void VulkanRender::SyncTextureReads(const RegisterFile& regs, SPIRVShader* shader) {
   if (!shader || !HasGuestWrites()) return;
   for (const auto& binding : shader->GetTextureBindingsAfterTranslation()) {
     const auto fetch = regs.GetTextureFetch(binding.fetch_constant);
-    if (!TextureViewActive(fetch, binding.dimension, binding.is_signed)) continue;
+    if (!TextureViewActive(fetch, binding.dimension, binding.is_signed, settings_.allow_invalid_fetch_constants.Get())) continue;
     // GPU loads consume the resident guest buffer directly, with UseBuffer
     // ordering the preceding resolve before the load dispatch. Publishing that
     // resolve to CPU memory here would submit and wait in the middle of an
@@ -344,19 +346,19 @@ void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shade
     // snapshots) still need their bytes before any draw bindings are allocated.
     if (!NeedsCpuConversion(fetch.format, binding.is_signed, false)) continue;
     uint32_t w, h, d, base, mip, low, high;
-    texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
+    rex::xenos::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
     uint32_t guest_pitch = fetch.pitch;
-    if (fetch.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(w, h, guest_pitch, high);
-    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, guest_pitch,
+    if (fetch.dimension == DataDimension::k1D) rex::xenos::RemapWide1DTexture(w, h, guest_pitch, high);
+    const auto layout = rex::xenos::GetGuestTextureLayout(fetch.dimension, guest_pitch,
         w + 1, h + 1, d + 1, fetch.tiled, fetch.format, fetch.packed_mips, base != 0, high);
     if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3) & ~3u, 0xFF);
     if (mip && high) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3) & ~3u, 0xFF);
   }
 }
-VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory::Memory& memory, SpirvShader* shader) {
+VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::IPhysicalMemory& memory, SPIRVShader* shader) {
   const auto set = AllocateDescriptors(TextureLayout(shader));
   if (!shader) return set;
-  const auto& fn = device_.functions();
+  const auto& fn = device_.GetFunctions();
   const auto& bindings = shader->GetTextureBindingsAfterTranslation();
   const auto& sampler_bindings = shader->GetSamplerBindingsAfterTranslation();
   auto& arena = arenas_[submissions_.current_slot()];
@@ -382,12 +384,12 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     const auto& binding = bindings[i];
     const auto fetch = regs.GetTextureFetch(binding.fetch_constant);
     uint32_t w = 0, h = 0, d = 0, base = 0, mip = 0, low = 0, high = 0;
-    bool active = TextureViewActive(fetch, binding.dimension, binding.is_signed);
-    if (active) texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
+    bool active = TextureViewActive(fetch, binding.dimension, binding.is_signed, settings_.allow_invalid_fetch_constants.Get());
+    if (active) rex::xenos::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
     active &= base || mip || (fetch.swizzle & 0b110110110110) == 0b100100100100;
     uint32_t guest_pitch = fetch.pitch;
     if (active && fetch.dimension == DataDimension::k1D)
-      texture_util::RemapWide1DTexture(w, h, guest_pitch, high);
+      rex::xenos::RemapWide1DTexture(w, h, guest_pitch, high);
     // The console's 1D encoding is linear and unpacked. Invalid 1D fetches
     // produce the same zero view used by the shared Native texture contract.
     if (fetch.dimension == DataDimension::k1D && (fetch.tiled || fetch.packed_mips))
@@ -442,7 +444,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
           (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
       const char* unscaled = !scaled_data ? nullptr : input.host_volume ? "volume view" :
           scale_format->block_width != 1 || scale_format->block_height != 1 ? "compressed format" :
-          format.bytes != scale_format->bytes_per_block() || format.block != 1 ||
+          format.bytes != scale_format->GetBytesPerBlock() || format.block != 1 ||
           GpuLoadShader(input) == LoadShader::kUnknown ? "CPU-converted format" : nullptr;
       const bool scaled_texture = scaled_data && !unscaled;
       if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_;
@@ -472,7 +474,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         image.imageType = volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
         image.format = format.vk;
         image.extent = {(w + 1)*input.scale_x, (h + 1)*input.scale_y, volume ? d + 1 : 1};
-        if (image.extent.width>device_.properties().maxImageDimension2D || image.extent.height>device_.properties().maxImageDimension2D)
+        if (image.extent.width>device_.GetProperties().maxImageDimension2D || image.extent.height>device_.GetProperties().maxImageDimension2D)
           throw std::runtime_error("Native: scaled texture exceeds Vulkan image dimensions");
         image.mipLevels = levels;
         image.arrayLayers = layers;
@@ -499,7 +501,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         auto& entry = textures_.emplace(key, TextureEntry{resource, false, ++texture_use_}).first->second;
         texture_bytes_ += resource->bytes;
         {
-          auto lock = GuestMemoryMirror::Lock();
+          auto lock = mirror_->Lock();
           if (base_bytes) entry.watches[0] = mirror_->Watch(input.base, base_bytes, TextureWatch, this, &entry, 0);
           if (mip_bytes) entry.watches[1] = mirror_->Watch(input.mip, mip_bytes, TextureWatch, this, &entry, 1);
         }
@@ -510,14 +512,14 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         // The shared load shaders write the guest block layout, which equals the
         // CPU conversion output whenever GpuLoadShader selects one.
         const auto* guest_format = FormatInfo::Get(input.format);
-        const auto shader_index = format.bytes != guest_format->bytes_per_block() ||
+        const auto shader_index = format.bytes != guest_format->GetBytesPerBlock() ||
             format.block != guest_format->block_width ? LoadShader::kUnknown : GpuLoadShader(input);
         if (!base_bytes && !mip_bytes) {
           // Only ZERO/ONE view components are sampled; no guest bytes are read.
           transition(resource->image, levels, layers, false);
           transition(resource->image, levels, layers, true);
         } else if (scaled_texture) {
-          const unsigned pixel_log2 = std::countr_zero(guest_format->bytes_per_block());
+          const unsigned pixel_log2 = std::countr_zero(guest_format->GetBytesPerBlock());
           if (base_bytes) ReplicateScaled(input.base, base_bytes, pixel_log2, true);
           if (mip_bytes) ReplicateScaled(input.mip, mip_bytes, pixel_log2, true);
           const ScaledSource source{input.base, base_bytes, input.mip, mip_bytes};
@@ -556,8 +558,8 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
             bytes += uint64_t(row) * ((height + format.block - 1) / format.block) * depth;
           }
           std::vector<uint8_t> linear(size_t(bytes), 0);
-          const std::span<const uint8_t> base_source(base_bytes ? memory.TranslatePhysical<const uint8_t*>(input.base) : nullptr, base_bytes);
-          const std::span<const uint8_t> mip_source(mip_bytes ? memory.TranslatePhysical<const uint8_t*>(input.mip) : nullptr, mip_bytes);
+          const std::span<const uint8_t> base_source(base_bytes ? reinterpret_cast<const uint8_t*>(memory.GetReadOnlyPhysicalSpan({input.base, base_bytes}).value().data()) : nullptr, base_bytes);
+          const std::span<const uint8_t> mip_source(mip_bytes ? reinterpret_cast<const uint8_t*>(memory.GetReadOnlyPhysicalSpan({input.mip, mip_bytes}).value().data()) : nullptr, mip_bytes);
           ConvertTextureCpu(input, base_source, mip_source, footprints, linear.data());
           const auto upload = Upload(linear.data(), bytes, 512);
           for (auto& copy : copies) copy.bufferOffset += upload.offset;
@@ -583,22 +585,22 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     info.minFilter = min == TextureFilter::kLinear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     info.mipmapMode = mip == TextureFilter::kLinear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     ClampMode cx, cy, cz;
-    texture_util::GetClampModesForDimension(fetch, cx, cy, cz);
-    info.addressModeU = AddressMode(cx, device_.properties().samplerMirrorClampToEdge);
-    info.addressModeV = AddressMode(cy, device_.properties().samplerMirrorClampToEdge);
-    info.addressModeW = AddressMode(cz, device_.properties().samplerMirrorClampToEdge);
+    rex::xenos::GetClampModesForDimension(fetch, cx, cy, cz);
+    info.addressModeU = AddressMode(cx, device_.GetProperties().samplerMirrorClampToEdge);
+    info.addressModeV = AddressMode(cy, device_.GetProperties().samplerMirrorClampToEdge);
+    info.addressModeW = AddressMode(cz, device_.GetProperties().samplerMirrorClampToEdge);
     const auto aniso = NativeAnisotropy(std::min(binding.aniso_filter == AnisoFilter::kUseFetchConst ? fetch.aniso_filter : binding.aniso_filter,
-                               AnisoFilter::kMax_16_1));
+                               AnisoFilter::kMax161));
     info.maxAnisotropy = 1;
     if (aniso != AnisoFilter::kDisabled) {
-      if (!device_.properties().samplerAnisotropy) throw std::runtime_error("Native Vulkan: anisotropy unavailable");
+      if (!device_.GetProperties().samplerAnisotropy) throw std::runtime_error("Native Vulkan: anisotropy unavailable");
       info.anisotropyEnable = VK_TRUE;
-      info.maxAnisotropy = std::min(float(1u << (uint32_t(aniso) - 1)), device_.properties().maxSamplerAnisotropy);
+      info.maxAnisotropy = std::min(float(1u << (uint32_t(aniso) - 1)), device_.GetProperties().maxSamplerAnisotropy);
       info.magFilter = info.minFilter = VK_FILTER_LINEAR;
       info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     }
     uint32_t low, high;
-    texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, nullptr, nullptr, &low, &high);
+    rex::xenos::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, nullptr, nullptr, &low, &high);
     info.minLod = float(low);
     info.maxLod = mip == TextureFilter::kBaseMap ? info.minLod + 0.25f : float(high);
     const bool border = info.addressModeU == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER ||
@@ -610,7 +612,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
       throw std::runtime_error("Native Vulkan: YCbCr sampler border color is not implemented");
     const std::string key(reinterpret_cast<const char*>(&info), sizeof(info));
     auto [it, created] = samplers_.try_emplace(key, VK_NULL_HANDLE);
-    if (created) CheckVulkan(fn.vkCreateSampler(device_.device(), &info, nullptr, &it->second), "create Native texture sampler");
+    if (created) CheckVulkan(fn.vkCreateSampler(device_.GetDevice(), &info, nullptr, &it->second), "create Native texture sampler");
     infos[bindings.size() + i].sampler = it->second;
   }
   for (size_t i = 0; i < writes.size(); ++i) {
@@ -622,7 +624,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     write.descriptorType = i < bindings.size() ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLER;
     write.pImageInfo = &infos[i];
   }
-  fn.vkUpdateDescriptorSets(device_.device(), uint32_t(writes.size()), writes.data(), 0, nullptr);
+  fn.vkUpdateDescriptorSets(device_.GetDevice(), uint32_t(writes.size()), writes.data(), 0, nullptr);
   return set;
 }
 }

@@ -1,71 +1,142 @@
-diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
-index 3f28d19..bf5a9d9 100644
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -475,17 +475,37 @@ u32 XamUserAreUsersFriends_entry(u32 user_index, u32 unk1, u32 unk2, mapped_u32
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -20,6 +20,7 @@
+ #include <rex/memory/mapped_ptr.h>
+ #include <rex/xam/achievement_manager.h>
+ #include <rex/xam/content_manager.h>
++#include <rex/xam/app_manager.h>
+ #include <rex/xam/user_profile.h>
+ #include <rex/kernel/thread_registry.h>
+ #include <rex/types.h>
+@@ -476,12 +477,29 @@
    }
  }
  
--u32 XamShowSigninUI_entry(u32 unk, u32 unk_mask) {
--  // Mask values vary. Probably matching user types? Local/remote?
--
--  // To fix game modes that display a 4 profile signin UI (even if playing
--  // alone):
+-u32 XamShowSigninUI_entry([[maybe_unused]] u32 unk, [[maybe_unused]] u32 unk_mask) {
 -  // XN_SYS_SIGNINCHANGED
--  REX_KERNEL_STATE()->BroadcastNotification(0x0000000A, 1);
--  // Games seem to sit and loop until we trigger this notification:
--  // XN_SYS_UI (off)
--  REX_KERNEL_STATE()->BroadcastNotification(0x00000009, 0);
--  return X_ERROR_SUCCESS;
-+// Original XAM 17559 wrappers: 816C19C8/816C1868 (signin) and
-+// 816C40F0 (gamer card). UI submission is separate from a real user-state change.
-+static uint32_t DispatchProfileUi(uint32_t message, const uint32_t* words, size_t count) {
-+  auto* kernel = REX_KERNEL_STATE();
-+  auto* memory = REX_KERNEL_MEMORY();
-+  const auto buffer = memory->SystemHeapAlloc(static_cast<uint32_t>(count * 4));
+-  CurrentTitle().notifier.BroadcastNotification(0x0000000A, 1);
+-  // XN_SYS_UI with the UI off.
+-  CurrentTitle().notifier.BroadcastNotification(0x00000009, 0);
+-  return kernel::X_ERROR_SUCCESS;
++static u32 DispatchProfileUi(u32 message, const u32* words, size_t count) {
++  auto& heap = CurrentTitle().heap;
++  const auto bytes = static_cast<u32>(count * 4);
++  const auto buffer = heap.SystemHeapAlloc(bytes);
 +  if (!buffer) return 14;
-+  auto* out = memory->TranslateVirtual<be<uint32_t>*>(buffer);
-+  for (size_t i = 0; i < count; ++i) out[i] = words[i];
-+  const auto status = kernel->app_manager()->DispatchMessageSync(0xFE, message, buffer,
-+                                                               static_cast<uint32_t>(count * 4));
-+  memory->SystemHeapFree(buffer);
-+  // 816C16C8 maps a failed system-UI dispatch to 1627 (or 14 for OOM).
-+  const uint32_t result = XFAILED(status) ? (status == 0x8007000Eu ? 14u : 1627u) : 0u;
-+  REXKRNL_INFO("Profile UI: app=FE message={:08X} bytes={} dispatch={:08X} result={}; user={} state={}",
-+               message, count * 4, uint32_t(status), result, kernel->user_profile()->name(),
-+               kernel->user_profile()->signin_state());
++  rex::ScopeGuard release([&] { heap.SystemHeapFree(buffer); });
++  auto* output = CurrentTitle().membase.TranslateVirtual<be_u32*>(buffer);
++  for (size_t i = 0; i < count; ++i) output[i] = words[i];
++  const auto status = CurrentXAM().GetAppManager().DispatchMessageSync(0xFE, message, buffer, bytes);
++  const u32 result = kernel::XFAILED(status) ? (status == 0x8007000Eu ? 14u : 1627u) : 0u;
++  REXXAM_INFO("Profile UI: app=FE message={:08X} bytes={} dispatch={:08X} result={}; user={} state={}",
++      message, bytes, status, result, CurrentXAM().GetUserProfile().GetName(), CurrentXAM().GetUserProfile().GetSigninState());
 +  return result;
 +}
 +
 +u32 XamShowSigninUI_entry(u32 user_count, u32 flags) {
-+  const uint32_t request[] = {0, 0xFF, user_count, flags, 0};
-+  // The UI service must open the original selection and change user state.
-+  // Never announce SIGNINCHANGED/UI-closed just to release a title's wait.
++  const u32 request[] = {0, 0xFF, user_count, flags, 0};
 +  return DispatchProfileUi(0x21001, request, 5);
 +}
-+
 +u32 XamShowGamerCardUI_entry(u32 user_index) {
-+  uint32_t request[544 / 4]{};
++  u32 request[544 / 4]{};
 +  request[0] = user_index;
 +  return DispatchProfileUi(0x21008, request, 544 / 4);
  }
  
- // TODO(gibbed): probably a FILETIME/LARGE_INTEGER, unknown currently
-@@ -851,3 +871,5 @@ REX_EXPORT_STUB(__imp__XamUserUpdateRecentPlayer);
- REX_EXPORT_STUB(__imp__XamUserValidateAvatarManifest);
- REX_EXPORT_STUB(__imp__XamUserWriteUserPreference);
- REX_EXPORT_STUB(__imp__XamVerifyPasscode);
+ struct X_ACHIEVEMENT_UNLOCK_TIME {
+@@ -864,3 +882,5 @@
+ REX_XAM_BODY(__imp__XamUserGetDeviceId, rex::xam::XamUserGetDeviceId_entry)
+ 
+ REX_XAM_BODY(__imp__XamUserFlushLogonQueue, rex::xam::XamUserFlushLogonQueue_entry)
 +
-+REX_EXPORT(__imp__XamShowGamerCardUI, rex::kernel::xam::XamShowGamerCardUI_entry)
-diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
-index 5a572ce..d190068 100644
---- a/src/kernel/xam/xam_ui.cpp
-+++ b/src/kernel/xam/xam_ui.cpp
-@@ -613,7 +613,6 @@ REX_EXPORT_STUB(__imp__XamShowFriendsUI);
++REX_XAM_BODY(__imp__XamShowGamerCardUI, rex::xam::XamShowGamerCardUI_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1377,7 +1377,7 @@
  REX_EXPORT_STUB(__imp__XamShowFriendsUIp);
  REX_EXPORT_STUB(__imp__XamShowGameInviteUI);
  REX_EXPORT_STUB(__imp__XamShowGameVoiceChannelUI);
 -REX_EXPORT_STUB(__imp__XamShowGamerCardUI);
++
  REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUID);
  REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUIDp);
  REX_EXPORT_STUB(__imp__XamShowGamesUI);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -330,3 +330,5 @@
+ REX_XAM_FORWARD(__imp__XamRegisterSysApp)
+ 
+ REX_XAM_FORWARD(__imp__XamUnregisterSysApp)
++
++REX_XAM_FORWARD(__imp__XamShowGamerCardUI)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -774,3 +774,64 @@
+     CHECK(caller.Kernel("NtClose", {second}) == 0);
+   });
+ }
++
++
++REX_TEST_CASE("system UI registrations and retail requests preserve the original host boundary", "[kernel][xam][system-ui-transport]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    CHECK(caller.XAM("XamRegisterSysApp", {0, 2, 0x1234, 9}) == 1627);
++    CHECK(caller.XAM("XamRegisterSysApp", {5, 2, 0, 9}) == 1627);
++    REQUIRE(caller.XAM("XamRegisterSysApp", {5, 2, 0x1234, 9}) == 0);
++    CHECK(caller.XAM("XamRegisterSysApp", {6, 2, 0x5678, 10}) == 1627);
++    REQUIRE(ui.FindSystemApp(2).has_value());
++    CHECK(ui.FindSystemApp(2)->module == 5);
++    CHECK(ui.FindSystemApp(2)->callback == 0x1234);
++    CHECK(caller.XAM("XamUnregisterSysApp", {6, 2, 0}) == 0);
++    CHECK(ui.FindSystemApp(2).has_value());
++    CHECK(caller.XAM("XamUnregisterSysApp", {5, 2, 0}) == 0);
++    CHECK_FALSE(ui.FindSystemApp(2).has_value());
++    CHECK(caller.XAM("XamUnregisterSysApp", {5, 2, 0}) == 1627);
++    CHECK(caller.XAM("XamShowSigninUI", {1, 0x123}) == 1627);
++    const auto id = caller.Alloc(4), data = caller.Alloc(4);
++    const auto listener = caller.XAM("XamNotifyCreateListener", {1, 0});
++    REQUIRE(listener != 0);
++    // Consume only the established startup UI pair before testing request delivery.
++    CHECK(caller.XAM("XNotifyGetNext", {listener, 9, id, data}) == 1);
++    CHECK(caller.Load32(data) == 1);
++    CHECK(caller.XAM("XNotifyGetNext", {listener, 9, id, data}) == 1);
++    CHECK(caller.Load32(data) == 0);
++    CHECK(caller.XAM("XNotifyGetNext", {listener, 9, id, data}) == 0);
++    u32 delivered = 0, delivered_buffer = 0;
++    ui.system_ui_request = [&](u32 message, u32 buffer, u32 bytes) {
++      ++delivered; delivered_buffer = buffer;
++      if (message == 0x21001) {
++        CHECK(bytes == 20);
++        CHECK(caller.Load32(buffer) == 0);
++        CHECK(caller.Load32(buffer + 4) == 255);
++        CHECK(caller.Load32(buffer + 8) == 1);
++        CHECK(caller.Load32(buffer + 12) == 0x123);
++        CHECK(caller.Load32(buffer + 16) == 0);
++      } else {
++        CHECK(message == 0x21008);
++        CHECK(bytes == 544);
++        CHECK(caller.Load32(buffer) == 3);
++        for (u32 offset = 4; offset < bytes; offset += 4) CHECK(caller.Load32(buffer + offset) == 0);
++      }
++      return 0u;
++    };
++    rex::ScopeGuard clear([&] { ui.system_ui_request = {}; });
++    CHECK(caller.XAM("XamShowSigninUI", {1, 0x123}) == 0);
++    CHECK(rex::xam::CurrentTitle().heap.QueryAllocationSize(delivered_buffer) == 0);
++    CHECK(caller.XAM("XamShowGamerCardUI", {3}) == 0);
++    CHECK(delivered == 2);
++    CHECK(caller.XAM("XNotifyGetNext", {listener, 0xA, id, data}) == 0);
++    CHECK(caller.XAM("XNotifyGetNext", {listener, 9, id, data}) == 0);
++    CHECK(rex::xam::CurrentXAM().GetUserProfile().GetSigninState() == 0);
++    ui.system_ui_request = [](u32, u32, u32) { return 0x8007000Eu; };
++    CHECK(caller.XAM("XamShowSigninUI", {1, 0}) == 14);
++    ui.system_ui_request = [](u32, u32, u32) { return 0x80004005u; };
++    CHECK(caller.XAM("XamShowSigninUI", {1, 0}) == 1627);
++    CHECK(caller.Kernel("NtClose", {listener}) == 0);
++  });
++}

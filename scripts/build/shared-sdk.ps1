@@ -167,7 +167,7 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
         try {
             $arguments = "cmake -S `"$(Join-Path $Root 'cmake/sdk/shared')`" -B `"$generation`" -G Ninja -DX360N_ROOT=`"$Root`""
             foreach ($entry in $variables.GetEnumerator()) { $arguments += " -D$($entry.Key)=`"$($entry.Value)`"" }
-            foreach ($step in @(@{name='configure';command=$arguments}, @{name='build';command="cmake --build `"$generation`" --target rexglue rexgpu-xenos"})) {
+            foreach ($step in @(@{name='configure';command=$arguments}, @{name='build';command="cmake --build `"$generation`" --target x360n_shared_sdk"})) {
                 Write-Output "X360N_STAGE shared-sdk $($step.name)" | Out-Host
                 $log = Join-Path $generation "sdk-$($step.name).log"
                 if (Invoke-PreparationCommand $step.command $log) { throw "Shared SDK $($step.name) failed: $log" }
@@ -183,20 +183,20 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
             foreach ($patch in $locked.rexglue_sdk.patches) { foreach ($file in $patch.files.PSObject.Properties.Name) { [void]$ownedSources.Add([IO.Path]::GetFullPath((Join-Path $sdk $file))) } }
             Assert-SharedSdkSources $commands $sdk $generation $ownedSources
             if (-not (Test-ReceiptEntries $inputs)) { throw 'Shared SDK inputs changed while building; no receipt published' }
-            $nodes = @(Get-NinjaNodes $generation @('rexglue','rexgpu-xenos'))
+            $nodes = @(Get-NinjaNodes $generation @('x360n_shared_sdk'))
             $tool = @($nodes | Where-Object { $_ -match '[\\/]rexglue\.exe$' })[0]
             if (-not $tool) { throw 'Shared SDK codegen producer missing' }
             $producer = @($tool) + @($nodes | Where-Object { $_ -match '\.dll$' -and (Test-BuildFile $_) })
-            $exports = @('sdk.cmake','targets.cmake','rexglue-sdk/thirdparty/fmt/fmt-targets.cmake',
-                'rexglue-sdk/thirdparty/spdlog/spdlogConfigTargets.cmake','rexglue-sdk/thirdparty/sdl3/SDL3headersTargets.cmake',
-                'rexglue-sdk/thirdparty/sdl3/SDL3staticTargets.cmake') | ForEach-Object { Join-Path $generation $_ }
+            $exports = @('sdk.cmake','targets.cmake',
+                'rexglue-sdk/thirdparty/sdl3/SDL3headersTargets.cmake',
+                'rexglue-sdk/thirdparty/sdl3/SDL3sharedTargets.cmake') | ForEach-Object { Join-Path $generation $_ }
             $artifacts = @(Get-ReceiptEntries @(@($nodes | Where-Object { $_.StartsWith($generation,[StringComparison]::OrdinalIgnoreCase) -and $_ -match '\.(exe|dll|lib)$' -and (Test-BuildFile $_) }) + $exports | Sort-Object -Unique))
             $log = Join-Path $generation 'sdk-toolchain.log'
             if (Invoke-PreparationCommand "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$snapshotScript`" -Build `"$generation`"" $log) { throw 'Shared SDK final toolchain inventory failed' }
             # Keep the actual producer closure in title receipts. The complete
             # source/tool inventory above selects the generation; unrelated LLVM
             # utilities and SDK tests must not tax every subsequent game launch.
-            $closure = @(Get-ReceiptEntries @((Get-BuildInputs $Root '' $generation @('rexglue','rexgpu-xenos')) +
+            $closure = @(Get-ReceiptEntries @((Get-BuildInputs $Root '' $generation @('x360n_shared_sdk')) +
                 @((Join-Path $Root 'scripts/build/shared-sdk.ps1')) | Sort-Object -Unique))
             Assert-SharedSdkInputs $Root $closure
             $receipt = @{schema=1;identity=$identity;inputs=$closure;artifacts=$artifacts;tool=$tool;producer=$producer;globs=@(Get-BuildGlobs $generation)}

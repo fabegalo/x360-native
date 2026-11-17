@@ -1,0 +1,189 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -43,6 +43,8 @@
+   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+ endif ()
+ set(CMAKE_FOLDER "sdk")
++
++option(REXGLUE_CONTENT_ONLY "Build static base and filesystem services for content tools" OFF)
+ 
+ option(REXGLUE_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
+ option(REXGLUE_BUILD_PPC_TESTS "Build PPC instruction tests" OFF)
+@@ -282,6 +284,11 @@
+   list(APPEND CMAKE_MODULE_PATH "${REXGLUE_ROOT}/thirdparty/catch2/extras")
+ endif ()
+ 
++if (REXGLUE_CONTENT_ONLY)
++  set(REXGLUE_BUILD_TESTS OFF)
++  set(REXGLUE_ENABLE_TRACY OFF)
++endif ()
++
+ # Third party dependencies (vendored sources only)
+ add_subdirectory(thirdparty)
+ 
+@@ -297,6 +304,10 @@
+ )
+ 
+ add_subdirectory(src/base)
++if (REXGLUE_CONTENT_ONLY)
++  add_subdirectory(src/filesystem)
++  return()
++endif ()
+ add_subdirectory(src/xenos)
+ add_subdirectory(src/ppc)
+ add_subdirectory(src/filesystem)
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -45,7 +45,11 @@
+     sdl3
+ )
+ 
+-list(APPEND REQUIRED_SUBMODULES glslang)
++if (REXGLUE_CONTENT_ONLY)
++  set(REQUIRED_SUBMODULES libmspack excrypt tomlplusplus simde xxHash spdlog imgui)
++else ()
++  list(APPEND REQUIRED_SUBMODULES glslang)
++endif ()
+ 
+ if (REXGLUE_ENABLE_TRACY)
+   list(APPEND REQUIRED_SUBMODULES tracy)
+@@ -56,7 +60,9 @@
+ endif ()
+ 
+ foreach (submodule ${REQUIRED_SUBMODULES})
+-  if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${submodule}/.git")
++  # Content packaging exports verified Git trees without per-dependency Git metadata.
++  if ((NOT REXGLUE_CONTENT_ONLY AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${submodule}/.git")
++      OR NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${submodule}")
+     message(
+       FATAL_ERROR
+         "Git submodule '${submodule}' is not initialized.\n"
+@@ -99,12 +105,21 @@
+ 
+ # libmspack - LZX decompression for XEX images (lzxd.c only)
+ set(MSPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libmspack/libmspack/mspack")
+-add_library(mspack STATIC ${MSPACK_DIR}/lzxd.c)
++if (REXGLUE_CONTENT_ONLY)
++  # Keep the LGPL decoder separately replaceable in static desktop distributions.
++  set(REX_MSPACK_TARGET x360n-mspack)
++  add_library(${REX_MSPACK_TARGET} SHARED ${MSPACK_DIR}/lzxd.c)
++  add_library(mspack ALIAS ${REX_MSPACK_TARGET})
++  set_target_properties(${REX_MSPACK_TARGET} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
++else ()
++  set(REX_MSPACK_TARGET mspack)
++  add_library(${REX_MSPACK_TARGET} STATIC ${MSPACK_DIR}/lzxd.c)
++endif ()
+ target_include_directories(
+-  mspack PUBLIC $<BUILD_INTERFACE:${MSPACK_DIR}> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
++  ${REX_MSPACK_TARGET} PUBLIC $<BUILD_INTERFACE:${MSPACK_DIR}> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+ )
+ # Suppress warnings in third-party C code
+-target_compile_options(mspack PRIVATE -w)
++target_compile_options(${REX_MSPACK_TARGET} PRIVATE -w)
+ 
+ # ExCrypt - XeCrypt compatible primitives (git submodule, built from the sources it ships)
+ set(EXCRYPT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/excrypt/src")
+@@ -143,6 +158,7 @@
+ endif ()
+ target_compile_options(excrypt PRIVATE -w)
+ 
++if (NOT REXGLUE_CONTENT_ONLY)
+ # TLSF - two level segregated fit allocator (used by GuestAllocator)
+ add_library(tlsf STATIC tlsf/tlsf.c)
+ target_include_directories(
+@@ -150,6 +166,7 @@
+               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+ )
+ target_compile_options(tlsf PRIVATE -w)
++endif ()
+ 
+ # xxHash - extremely fast non-cryptographic hash (git submodule)
+ set(XXHASH_BUILD_XXHSUM OFF)
+@@ -172,6 +189,10 @@
+ set(SPDLOG_SYSTEM_INCLUDES ON)
+ add_subdirectory(spdlog)
+ target_compile_options(spdlog PRIVATE -w)
++
++if (REXGLUE_CONTENT_ONLY)
++  return()
++endif ()
+ 
+ # disasm - PowerPC disassembler (existing local library)
+ add_subdirectory(disasm)
+diff --git a/src/base/CMakeLists.txt b/src/base/CMakeLists.txt
+--- a/src/base/CMakeLists.txt
++++ b/src/base/CMakeLists.txt
+@@ -1,4 +1,9 @@
+-add_library(rexbase SHARED)
++if (REXGLUE_CONTENT_ONLY)
++  add_library(rexbase STATIC)
++  target_compile_definitions(rexbase PUBLIC REX_STATIC_BASE)
++else ()
++  add_library(rexbase SHARED)
++endif ()
+ 
+ # Each group below names the target it moves to when the library splits.
+ 
+diff --git a/src/filesystem/CMakeLists.txt b/src/filesystem/CMakeLists.txt
+--- a/src/filesystem/CMakeLists.txt
++++ b/src/filesystem/CMakeLists.txt
+@@ -37,7 +37,12 @@
+   PRIVATE excrypt mspack
+ )
+ 
+-add_library(rexfilesystem SHARED module_entry.cpp $<TARGET_OBJECTS:rexfilesystem-objects>)
++if (REXGLUE_CONTENT_ONLY)
++  set(_filesystem_kind STATIC)
++else ()
++  set(_filesystem_kind SHARED)
++endif ()
++add_library(rexfilesystem ${_filesystem_kind} module_entry.cpp $<TARGET_OBJECTS:rexfilesystem-objects>)
+ add_library(rex::filesystem ALIAS rexfilesystem)
+ rex_target_headers(rexfilesystem DIRS filesystem)
+ rexglue_link_host_allocator(rexfilesystem)
+diff --git a/include/rex/platform.h b/include/rex/platform.h
+--- a/include/rex/platform.h
++++ b/include/rex/platform.h
+@@ -167,7 +167,9 @@
+  * REX_API void Break();
+  * @endcode
+  */
+-#if REX_PLATFORM_WIN32
++#if defined(REX_STATIC_BASE)
++#define REX_API
++#elif REX_PLATFORM_WIN32
+ #if defined(REX_BUILDING_BASE)
+ #define REX_API __declspec(dllexport)
+ #else
+diff --git a/src/filesystem/xex.cpp b/src/filesystem/xex.cpp
+--- a/src/filesystem/xex.cpp
++++ b/src/filesystem/xex.cpp
+@@ -54,14 +54,26 @@
+ }
+ 
+ const Key& MasterKey(XEXKey key) {
++#if defined(REX_STATIC_BASE)
++  // Desktop distribution permits only the public XEX2 defaults; XEX1 uses local keys.
++  static constexpr std::array<Key, 2> content_keys = {kMasterKeys[0], kMasterKeys[1]};
++  static constexpr Key absent{};
++  const auto index = static_cast<size_t>(key);
++  return index < content_keys.size() ? content_keys[index] : absent;
++#else
+   return kMasterKeys[static_cast<size_t>(key)];
++#endif
+ }
+ 
+ Result<Key> ResolveMasterKey(XEXKey key) {
+   if (key == XEXKey::kRetail || key == XEXKey::kDevKit) return MasterKey(key);
+   auto path = XEXOptions().keys_file.Get();
+   if (path.empty()) path = platform::GetEnvironmentValue("X360N_XEX_KEYS").value_or("");
++#if defined(REX_STATIC_BASE)
++  if (path.empty()) return Err<Key>(ErrorCategory::kCrypto, "XEX1 requires a local wrapping-key file");
++#else
+   if (path.empty()) return MasterKey(key);
++#endif
+   std::ifstream in{string::to_path(path)};
+   if (!in) return Err<Key>(ErrorCategory::kCrypto, "Local XEX key file cannot be opened");
+   const std::string wanted = key == XEXKey::kRetailXEX1 ? "xex1-retail" : "xex1-devkit";

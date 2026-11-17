@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <fstream>
 #include <iterator>
@@ -35,10 +35,10 @@ TEST_CASE("Callbacks materialized by gap discovered code remain callable",
     if (variant == 1) config << "[functions]\n0x82010040={size=20}\n";
     if (variant == 5) config << "[functions]\n0x82010008={size=32}\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    CHECK(pipeline->context().graph.isEntryPoint(kXexText + 32) == (variant < 2));
+    CHECK(pipeline->GetContext().graph.IsEntryPoint(kXexText + 32) == (variant < 2));
     REQUIRE(pipeline->RunWrite().has_value());
     std::ifstream init(work.dir / "out" / "late_callback_init.cpp");
     REQUIRE(init.good());

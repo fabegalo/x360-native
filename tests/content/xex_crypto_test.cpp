@@ -1,5 +1,5 @@
 // The extractor's AES-128-CBC and SHA-1 (CNG on Windows, the pinned SDK's
-// aes_128/TinySHA1 elsewhere) against the same known answers on every system.
+// ExCrypt elsewhere) against the same known answers on every system.
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 #include "../../src/content/xex_crypto.h"

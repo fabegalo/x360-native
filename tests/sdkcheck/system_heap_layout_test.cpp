@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/system/xmemory.h>
+#include <rex/kernel/heap.h>
 #include <algorithm>
 
-using namespace rex::memory;
+using namespace rex::kernel;
 
 TEST_CASE("System objects share the virtual allocator and its reusable holes",
           "[sdk][system-heap-layout]") {
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   auto* heap = memory.LookupHeapByType(false, 4096);
   const auto free_before = heap->GetUnreservedPageCount();
@@ -21,7 +21,7 @@ TEST_CASE("System objects share the virtual allocator and its reusable holes",
   const auto system = memory.SystemHeapAlloc(8192, 4096);
   REQUIRE(system);
   CHECK(system == first);
-  HeapAllocationInfo info{};
+  HeapAllocation info{};
   REQUIRE(heap->QueryRegionInfo(system, &info));
   CHECK(info.allocation_size == 8192);
   CHECK((info.state & allocation) == allocation);
@@ -53,7 +53,7 @@ TEST_CASE("System objects share the virtual allocator and its reusable holes",
 
 TEST_CASE("Physical system objects preserve physical allocation and zeroing",
           "[sdk][system-heap-layout]") {
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   auto* heap = memory.LookupHeapByType(true, 4096);
   const auto free_before = heap->GetUnreservedPageCount();
@@ -73,7 +73,7 @@ TEST_CASE("Physical system objects preserve physical allocation and zeroing",
 
 TEST_CASE("System objects retain their reserve when the ordinary virtual range is full",
           "[sdk][system-heap-layout]") {
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   auto* heap = memory.LookupHeapByType(false, 4096);
   const auto free_before = heap->GetUnreservedPageCount();
@@ -87,7 +87,7 @@ TEST_CASE("System objects retain their reserve when the ordinary virtual range i
   const auto system = memory.SystemHeapAlloc(8192, 4096);
   REQUIRE(system);
   CHECK(system >= ordinary + ordinary_size);
-  HeapAllocationInfo info{};
+  HeapAllocation info{};
   REQUIRE(heap->QueryRegionInfo(system, &info));
   CHECK((info.state & kMemoryAllocationCommit) != 0);
   memory.SystemHeapFree(system);
@@ -100,7 +100,7 @@ TEST_CASE("Ordinary top-down allocations end at the inclusive range limit",
   // The ordinary limit is inclusive (0x2FFFFFFF, 0x6FFFFFFF). Rounding it up
   // admitted the first page above it: 17559 bootanim reserved 0x300000 bytes
   // at 2FD01000-30001000 and its 64 KiB heap arithmetic wrote at 30001002.
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   constexpr uint32_t allocation = kMemoryAllocationReserve | kMemoryAllocationCommit;
   constexpr uint32_t protect = kMemoryProtectRead | kMemoryProtectWrite;
@@ -114,7 +114,7 @@ TEST_CASE("Ordinary top-down allocations end at the inclusive range limit",
     REQUIRE(heap->Alloc(c.size, c.page_size, allocation, protect, true, &address));
     CHECK(address == c.limit - c.size);
     CHECK(address % 0x10000 == 0);
-    HeapAllocationInfo above{};
+    HeapAllocation above{};
     REQUIRE(heap->QueryRegionInfo(c.limit, &above));
     CHECK(above.state == 0);
     CHECK(heap->Release(address));

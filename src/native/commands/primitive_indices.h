@@ -1,12 +1,15 @@
 #pragma once
-#include <rex/graphics/xenos.h>
+#include <rex/xenos/state.h>
+#include <rex/xenos/fetch.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/packet.h>
 #include <span>
 #include <vector>
 #include "../textures/texture_block.h"
 namespace x360n::native {
 inline std::vector<uint32_t> ExpandIndices(std::span<const uint8_t> source, uint32_t count,
-    rex::graphics::xenos::IndexFormat format, rex::graphics::xenos::Endian endian) {
-  using namespace rex::graphics::xenos;
+    rex::xenos::IndexFormat format, rex::xenos::Endian endian) {
+  using namespace rex::xenos;
   if (!count) return {};
   const unsigned bytes = format == IndexFormat::kInt16 ? 2 : 4;
   // R16 word endian modes also exchange adjacent indices, including the
@@ -22,25 +25,25 @@ inline std::vector<uint32_t> ExpandIndices(std::span<const uint8_t> source, uint
     for (uint32_t i = 0; i < count; ++i) {
       uint16_t value;
       std::memcpy(&value, source.data() + ((size_t(i) * 2) ^ pair_xor), 2);
-      result[i] = swap ? GpuSwap(value, Endian::k8in16) : value;
+      result[i] = swap ? GPUSwap(value, Endian::k8in16) : value;
     }
   }
   return result;
 }
 struct IndexRange { uint32_t offset, count; };
 struct ConvertedIndices { std::vector<uint32_t> values; std::vector<IndexRange> ranges; };
-inline bool IsLinePrimitive(rex::graphics::xenos::PrimitiveType type) {
-  using P = rex::graphics::xenos::PrimitiveType;
+inline bool IsLinePrimitive(rex::xenos::PrimitiveType type) {
+  using P = rex::xenos::PrimitiveType;
   return type == P::kLineList || type == P::kLineStrip || type == P::kLineLoop || type == P::k2DLineStrip;
 }
-inline bool NeedsPrimitiveConversion(rex::graphics::xenos::PrimitiveType type) {
-  using P = rex::graphics::xenos::PrimitiveType;
+inline bool NeedsPrimitiveConversion(rex::xenos::PrimitiveType type) {
+  using P = rex::xenos::PrimitiveType;
   return type == P::kTriangleFan || type == P::kQuadList || type == P::kQuadStrip ||
       type == P::kPolygon || type == P::kLineStrip || type == P::kLineLoop || type == P::k2DLineStrip;
 }
 inline ConvertedIndices VertexOnlyIndices(std::span<const uint32_t> input,
-    rex::graphics::xenos::PrimitiveType type, bool restart, uint32_t reset) {
-  using P = rex::graphics::xenos::PrimitiveType;
+    rex::xenos::PrimitiveType type, bool restart, uint32_t reset) {
+  using P = rex::xenos::PrimitiveType;
   restart &= type == P::kTriangleStrip || type == P::kTriangleFan || type == P::kLineStrip ||
              type == P::kLineLoop || type == P::kQuadStrip || type == P::kPolygon ||
              type == P::k2DLineStrip || type == P::k2DTriStrip;
@@ -51,8 +54,8 @@ inline ConvertedIndices VertexOnlyIndices(std::span<const uint32_t> input,
   return out;
 }
 inline ConvertedIndices ConvertIndices(std::span<const uint32_t> input,
-    rex::graphics::xenos::PrimitiveType type, bool restart, uint32_t reset) {
-  using P = rex::graphics::xenos::PrimitiveType;
+    rex::xenos::PrimitiveType type, bool restart, uint32_t reset) {
+  using P = rex::xenos::PrimitiveType;
   ConvertedIndices out;
   // Like the pinned Xenos primitive processor, reset applies to strips/fans,
   // not independent list primitives. Compare before VGT index offset/clamp.

@@ -5,15 +5,17 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/runtime.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xthread.h>
-#include <rex/system/xevent.h>
+#include "kernel/title_fixture.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/object/event_object.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/types/io.h>
+#include <rex/xam/system_ui.h>
+#include "xam/xam_state.h"
 #include "offline_achievement_fixture.h"
 #include "synthetic_xex.h"
 
@@ -26,9 +28,10 @@ IMPORT(XamReadTile); IMPORT(XamReadTileEx); IMPORT(XamReadTileToTexture);
 IMPORT(NtClose);
 
 using namespace rex;
-using namespace rex::system;
+using namespace rex::kernel;
+using namespace rex::xam;
 namespace {
-using Result = OfflineAchievementResult;
+using LedgerResult = OfflineAchievementResult;
 constexpr uint32_t kTitleA = 0x1234C901, kTitleB = 0x1234C902;
 struct TestDirectory {
   std::filesystem::path path = std::filesystem::current_path() /
@@ -38,24 +41,23 @@ struct TestDirectory {
 };
 
 struct AchievementGuest {
-  Runtime runtime;
+  rex::test::KernelHost host;
+  TitleRuntime runtime{rex::ppc::PPCImage{}};
   std::filesystem::path root;
   uint32_t block = 0;
   uint32_t last_error = 0;
   uint8_t* base = nullptr;
   explicit AchievementGuest(const std::filesystem::path& path, uint32_t title = kTitleA)
-      : runtime(path, path), root(path) {
-    RuntimeConfig config{};
-    config.tool_mode = true;
-    config.kernel_init = kernel::InitializeKernel;
-    REQUIRE(runtime.Setup(std::move(config)) == 0);
+      : host((rex::test::ReleaseTestMemory(),path)), root(path) {
     SelectTitle(title);
-    block = runtime.memory()->SystemHeapAlloc(16384);
+    block = runtime.GetGuestHeap().SystemHeapAlloc(16384);
     REQUIRE(block);
-    base = runtime.memory()->virtual_membase();
+    base = runtime.GetMembase().GetBase();
     std::memset(base + block, 0, 16384);
   }
-  ~AchievementGuest() { runtime.memory()->SystemHeapFree(block); }
+  ~AchievementGuest() { runtime.GetGuestHeap().SystemHeapFree(block); runtime.Unload();
+    CHECK(runtime.GetTitlePaths().entry.Reset()); CHECK(runtime.GetTitlePaths().imports.Reset());
+    CHECK(runtime.GetTitlePaths().game_root.Reset()); }
   void SelectTitle(uint32_t title) {
     auto image = x360n::test::BuildXex({}, nullptr, 0, x360n::test::Entry::kReturnZero);
     memory::store_and_swap<uint32_t>(image.data() + 0x14, 4);
@@ -64,15 +66,16 @@ struct AchievementGuest {
     memory::store_and_swap<uint32_t>(image.data() + 0x6C, title);
     { std::ofstream out(root / "default.xex", std::ios::binary);
       out.write(reinterpret_cast<const char*>(image.data()), image.size()); }
-    auto module = object_ref<UserModule>(new UserModule(runtime.kernel_state()));
-    REQUIRE(module->LoadFromFile("game:\\default.xex") == X_STATUS_SUCCESS);
-    runtime.kernel_state()->SetExecutableModule(module);
-    REQUIRE(runtime.kernel_state()->title_id() == title);
+    REQUIRE(runtime.GetTitlePaths().game_root.Set(root));
+    REQUIRE(runtime.GetTitlePaths().entry.Set("default.xex")); REQUIRE(runtime.GetTitlePaths().imports.Set(""));
+    REQUIRE(runtime.Load()); REQUIRE(runtime.GetTitleID()==title);
+    REQUIRE(GetFunctionDispatcher(runtime).InitializeFunctionTable(0x8F000000,0x10000,0x8F000000,0x100000,true));
+    StartDPCQueue(runtime);
   }
-  uint32_t Call(PPCFunc* function, std::initializer_list<uint64_t> args) {
+  uint32_t Call(void (*function)(PPCContext&, uint8_t*), std::initializer_list<uint64_t> args) {
     uint32_t result = ~0u;
-    auto thread = object_ref<XHostThread>(new XHostThread(runtime.kernel_state(), 128 * 1024, 0, [&] {
-      auto& ctx = *XThread::GetCurrentThread()->thread_state()->context();
+    auto thread = runtime.GetThreadRegistry().LaunchHostThread("achievement contract",128*1024,[&] {
+      auto& ctx = *KernelThread::GetCallingThread()->GetThreadState()->GetContext();
       ctx.r1.u64 = block + 14336;  // Preserve the 16-byte PPC stack alignment.
       PPCRegister* regs[] = {&ctx.r3, &ctx.r4, &ctx.r5, &ctx.r6, &ctx.r7, &ctx.r8, &ctx.r9, &ctx.r10};
       unsigned i = 0;
@@ -83,12 +86,13 @@ struct AchievementGuest {
       }
       function(ctx, base);
       result = ctx.r3.u32;
-      last_error = XThread::GetLastError();
+      last_error = KernelThread::GetCallingThread()->GetLastError();
       return 0;
-    }));
-    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+    });
+    REQUIRE(thread);
     uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+    REQUIRE(runtime.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*thread,0,0,0,&timeout)==0);
+    CloseOwned(runtime.GetObjectTable(),*thread);
     return result;
   }
   void Put(uint32_t offset, uint32_t value) { memory::store_and_swap<uint32_t>(base + block + offset, value); }
@@ -147,16 +151,16 @@ TEST_CASE("Offline achievement XAM writes are durable atomic scoped and asynchro
   uint64_t first = 0, second = 0;
   {
     AchievementGuest guest(directory.path);
-    auto* state = guest.runtime.kernel_state();
-    REQUIRE(state->offline_achievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == Result::kSuccess);
-    REQUIRE(state->offline_achievements().ImportTitle(kTitleB, offline_achievement_fixture::Metadata(40)) == Result::kSuccess);
-    auto* profile = state->user_profile();
+    auto* state = (&rex::xam::CurrentXAM());
+    REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == LedgerResult::kSuccess);
+    REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleB, offline_achievement_fixture::Metadata(40)) == LedgerResult::kSuccess);
+    auto* profile = (&state->GetUserProfile());
     REQUIRE(profile->CreateLocal("Alpha", &first) == 0);
     REQUIRE(profile->CreateLocal("Bravo", &second) == 0);
     CHECK(guest.Write({{0, 1}}) == X_E_NO_SUCH_USER);
     REQUIRE(profile->SetLocalSession(first) == 0);
     unsigned notifications = 0;
-    auto xam = state->GetKernelModule<kernel::xam::XamModule>("xam.xex");
+    auto xam = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetSystemUI());
     xam->SetAchievementUnlockedCallback([&](uint64_t owner, uint32_t user, uint32_t title, uint32_t id) {
       CHECK(owner == first); CHECK(user == 0); CHECK(title == kTitleA); CHECK(id == 1);
       ++notifications;
@@ -187,15 +191,16 @@ TEST_CASE("Offline achievement XAM writes are durable atomic scoped and asynchro
     CHECK(guest.Call(__imp__XMsgInProcessCall, {0xFB, 0xB0008, 0, 8}) == X_E_INVALIDARG);
     CHECK(guest.Call(__imp__XMsgStartIORequest,
         {0xFB, 0xB0008, 0xFFFFFFFC, guest.block, 8}) == X_E_INVALIDARG);
-    auto event = make_object<XEvent>(state);
-    event->Initialize(false, false);
+    auto event=guest.runtime.GetObjectTable().Emplace<EventObject>(AddOptions{},false,false);
+    REQUIRE(event);
+    rex::ScopeGuard close_event([&] {CloseOwned(guest.runtime.GetObjectTable(),*event);});
     guest.Put(0, 1); guest.Put(4, guest.block + 64); guest.Put(64, 0); guest.Put(68, 1);
     std::memset(guest.base + guest.block + 256, 0, 32);
-    guest.Put(268, event->handle());
+    guest.Put(268, *event);
     CHECK(guest.Call(__imp__XMsgStartIORequest,
         {0xFB, 0xB0008, guest.block + 256, guest.block, 8}) == X_E_SUCCESS);
     uint64_t timeout = 0;
-    CHECK(event->Wait(0, 0, false, &timeout) == X_STATUS_SUCCESS);
+    CHECK(guest.runtime.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*event,0,0,0,&timeout) == X_STATUS_SUCCESS);
     CHECK(guest.Word(256) == 0);
     CHECK(guest.Call(__imp__XMsgStartIORequestEx,
         {0xFB, 0xB0008, 0, guest.block, 8, 0}) == X_E_SUCCESS);
@@ -210,7 +215,7 @@ TEST_CASE("Offline achievement XAM writes are durable atomic scoped and asynchro
   }
   {
     AchievementGuest guest(directory.path, kTitleB);
-    REQUIRE(guest.runtime.kernel_state()->user_profile()->SetLocalSession(first) == 0);
+    REQUIRE((&rex::xam::CurrentXAM().GetUserProfile())->SetLocalSession(first) == 0);
     CHECK(guest.Write({{0, 1}}) == X_E_SUCCESS);
     CHECK(guest.ReadCounters(kTitleB) == std::array<uint32_t, 4>{50, 2, 40, 1});
     CHECK(guest.ReadCounters(kTitleA, first, true) == std::array<uint32_t, 4>{50, 2, 10, 1});
@@ -226,13 +231,13 @@ TEST_CASE("Offline achievement XAM writes are durable atomic scoped and asynchro
 TEST_CASE("Offline achievement enumeration honors PPC XUID Title ID offsets strings and capacity", "[sdk][offline-achievement-api]") {
   TestDirectory directory;
   AchievementGuest guest(directory.path);
-  auto* state = guest.runtime.kernel_state();
-  REQUIRE(state->offline_achievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == Result::kSuccess);
-  REQUIRE(state->offline_achievements().ImportTitle(kTitleB, offline_achievement_fixture::Metadata(40)) == Result::kSuccess);
+  auto* state = (&rex::xam::CurrentXAM());
+  REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == LedgerResult::kSuccess);
+  REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleB, offline_achievement_fixture::Metadata(40)) == LedgerResult::kSuccess);
   uint64_t first = 0, second = 0;
-  REQUIRE(state->user_profile()->CreateLocal("Alpha", &first) == 0);
-  REQUIRE(state->user_profile()->CreateLocal("Bravo", &second) == 0);
-  REQUIRE(state->user_profile()->SetLocalSession(first) == 0);
+  REQUIRE((&state->GetUserProfile())->CreateLocal("Alpha", &first) == 0);
+  REQUIRE((&state->GetUserProfile())->CreateLocal("Bravo", &second) == 0);
+  REQUIRE((&state->GetUserProfile())->SetLocalSession(first) == 0);
   REQUIRE(guest.Write({{0, 1}}) == X_E_SUCCESS);
   REQUIRE(guest.Create(kTitleA, first) == X_ERROR_SUCCESS);
   CHECK(guest.Word(300) == 500);
@@ -287,8 +292,8 @@ TEST_CASE("Offline achievement enumeration honors PPC XUID Title ID offsets stri
   REQUIRE(guest.Enumerate(guest.Word(304), 36) == X_ERROR_SUCCESS);
   CHECK(guest.Word(1024) == 1); CHECK(guest.Word(1028) == 0);
   CHECK(guest.Create(kTitleA, first, 0, 1, 7, 4) == X_ERROR_INVALID_PARAMETER);
-  REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleA));
-  REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleB));
+  REQUIRE((&state->GetUserProfile())->RecordTitlePlayed(kTitleA));
+  REQUIRE((&state->GetUserProfile())->RecordTitlePlayed(kTitleB));
   REQUIRE(guest.Call(__imp__XamUserCreateTitlesPlayedEnumerator,
       {0, 0, first, 0, 2, guest.block + 300, guest.block + 304}) == 0);
   CHECK(guest.Word(300) == 336);
@@ -301,12 +306,12 @@ TEST_CASE("Offline achievement enumeration honors PPC XUID Title ID offsets stri
 
 TEST_CASE("Original direct enumeration flag preserves title and achievement pages", "[sdk][offline-achievement-api][enumerate-direct]") {
   TestDirectory directory; AchievementGuest guest(directory.path);
-  auto* state = guest.runtime.kernel_state();
-  REQUIRE(state->offline_achievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == Result::kSuccess);
+  auto* state = (&rex::xam::CurrentXAM());
+  REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == LedgerResult::kSuccess);
   uint64_t xuid = 0;
-  REQUIRE(state->user_profile()->CreateLocal("Direct", &xuid) == 0);
-  REQUIRE(state->user_profile()->SetLocalSession(xuid) == 0);
-  REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleA));
+  REQUIRE((&state->GetUserProfile())->CreateLocal("Direct", &xuid) == 0);
+  REQUIRE((&state->GetUserProfile())->SetLocalSession(xuid) == 0);
+  REQUIRE((&state->GetUserProfile())->RecordTitlePlayed(kTitleA));
   for (const bool titles : {false,true}) {
     if (titles) REQUIRE(guest.Call(__imp__XamUserCreateTitlesPlayedEnumerator,
         {0,0,xuid,0,1,guest.block+300,guest.block+304}) == 0);
@@ -345,12 +350,12 @@ TEST_CASE("Offline achievement tile APIs preserve encoded resources and decode r
       0x00, 0x11, 0x22, 0x33, 0xff, 0x02, 0x14, 0x01, 0x66,
       0xb9, 0xe1, 0xfa, 0xc1, 0x00, 0x00, 0x00, 0x00,
       0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
-  auto* state = guest.runtime.kernel_state();
-  REQUIRE(state->offline_achievements().ImportTitle(kTitleA,
-      offline_achievement_fixture::Metadata(10, 2, png)) == Result::kSuccess);
+  auto* state = (&rex::xam::CurrentXAM());
+  REQUIRE(state->GetOfflineAchievements().ImportTitle(kTitleA,
+      offline_achievement_fixture::Metadata(10, 2, png)) == LedgerResult::kSuccess);
   uint64_t xuid = 0;
-  REQUIRE(state->user_profile()->CreateLocal("Alpha", &xuid) == 0);
-  REQUIRE(state->user_profile()->SetLocalSession(xuid) == 0);
+  REQUIRE((&state->GetUserProfile())->CreateLocal("Alpha", &xuid) == 0);
+  REQUIRE((&state->GetUserProfile())->SetLocalSession(xuid) == 0);
   guest.Put(300, 0);
   CHECK(guest.Call(__imp__XamReadTile, {0, kTitleA, 100, 0, 0, guest.block + 300, 0}) == X_ERROR_INSUFFICIENT_BUFFER);
   CHECK(guest.Word(300) == png.size());

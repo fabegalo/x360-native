@@ -8,79 +8,100 @@
 #include <iostream>
 #include <memory>
 #include <map>
-#include <rex/ui/vulkan/device.h>
-#include <rex/ui/vulkan/instance.h>
-#include <rex/graphics/pipeline/render_target/scaled_resolve.h>
+#include <gpu/xenos/host/vulkan/vulkan_device.h>
+#include <gpu/xenos/host/vulkan/vulkan_settings.h>
+#include <gpu/xenos/host/vulkan/vulkan_instance.h>
+#include <gpu/xenos/pipeline/render_target/scaled_resolve.h>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <windows.h>
 #include <wrl/client.h>
 namespace dxbc {
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_msaa_scaled_16bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h"
-#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_msaa_scaled_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_cs.h"
+constexpr auto& resolve_full_128bpp_cs = kResolveFull128BPPCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_scaled_cs.h"
+constexpr auto& resolve_full_128bpp_scaled_cs = kResolveFull128BPPScaledCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_cs.h"
+constexpr auto& resolve_full_16bpp_cs = kResolveFull16BPPCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_scaled_cs.h"
+constexpr auto& resolve_full_16bpp_scaled_cs = kResolveFull16BPPScaledCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_cs.h"
+constexpr auto& resolve_full_32bpp_cs = kResolveFull32BPPCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_32bpp_scaled_cs.h"
+constexpr auto& resolve_full_32bpp_scaled_cs = kResolveFull32BPPScaledCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_cs.h"
+constexpr auto& resolve_full_64bpp_cs = kResolveFull64BPPCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_64bpp_scaled_cs.h"
+constexpr auto& resolve_full_64bpp_scaled_cs = kResolveFull64BPPScaledCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_cs.h"
+constexpr auto& resolve_full_8bpp_cs = kResolveFull8BPPCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_scaled_cs.h"
+constexpr auto& resolve_full_8bpp_scaled_cs = kResolveFull8BPPScaledCS;
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_scaled_cs.h"
 } // namespace dxbc
 namespace spirv {
-#include "src/graphics/shaders/vulkan_spirv/resolve_msaa_scaled_16bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_128bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_16bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_32bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_64bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_8bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_full_8bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_128bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_128bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_16bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_16bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_32bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_32bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_64bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_64bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_8bpp_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h"
-#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_8bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_msaa_scaled_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_128bpp_cs.h"
+constexpr auto& resolve_full_128bpp_cs = kResolveFull128BPPCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_128bpp_scaled_cs.h"
+constexpr auto& resolve_full_128bpp_scaled_cs = kResolveFull128BPPScaledCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_16bpp_cs.h"
+constexpr auto& resolve_full_16bpp_cs = kResolveFull16BPPCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_16bpp_scaled_cs.h"
+constexpr auto& resolve_full_16bpp_scaled_cs = kResolveFull16BPPScaledCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_32bpp_cs.h"
+constexpr auto& resolve_full_32bpp_cs = kResolveFull32BPPCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_32bpp_scaled_cs.h"
+constexpr auto& resolve_full_32bpp_scaled_cs = kResolveFull32BPPScaledCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_64bpp_cs.h"
+constexpr auto& resolve_full_64bpp_cs = kResolveFull64BPPCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_64bpp_scaled_cs.h"
+constexpr auto& resolve_full_64bpp_scaled_cs = kResolveFull64BPPScaledCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_8bpp_cs.h"
+constexpr auto& resolve_full_8bpp_cs = kResolveFull8BPPCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_full_8bpp_scaled_cs.h"
+constexpr auto& resolve_full_8bpp_scaled_cs = kResolveFull8BPPScaledCS;
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_128bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_128bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_128bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_128bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_16bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_16bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_16bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_32bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_32bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_64bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_64bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_8bpp_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h"
+#include "src/gpu/xenos/shaders/vulkan_spirv/resolve_fixed16_8bpp_scaled_cs.h"
 } // namespace spirv
 using namespace gamma_probe;
 using Microsoft::WRL::ComPtr;
@@ -464,8 +485,9 @@ public:
 };
 class Vk {
   std::filesystem::path resources_;
-  using Device = rex::ui::vulkan::VulkanDevice;
-  std::unique_ptr<rex::ui::vulkan::VulkanInstance> instance_;
+  using Device = rex::gpu::vulkan::VulkanDevice;
+  std::unique_ptr<rex::gpu::vulkan::VulkanInstance> instance_;
+  rex::gpu::vulkan::VulkanSettings settings_;
   std::unique_ptr<Device> device_;
   struct Buffer {
     VkBuffer handle = VK_NULL_HANDLE;
@@ -487,8 +509,8 @@ class Vk {
   double period_ = 0;
   VkPhysicalDeviceMemoryProperties memory_{};
   Buffer Make(unsigned size, VkBufferUsageFlags usage, bool host) {
-    const auto &f = device_->functions();
-    auto vk = device_->device();
+    const auto &f = device_->GetFunctions();
+    auto vk = device_->GetDevice();
     Buffer b;
     VkBufferCreateInfo i{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     i.size = size;
@@ -524,17 +546,17 @@ class Vk {
 public:
   Vk(std::filesystem::path resources = shader_directory)
       : resources_(std::move(resources)) {
-    instance_ = rex::ui::vulkan::VulkanInstance::Create(false, true);
+    instance_ = rex::gpu::vulkan::VulkanInstance::Create(false, true, false);
     Need(bool(instance_), "Vulkan instance");
     std::vector<VkPhysicalDevice> physical;
     instance_->EnumeratePhysicalDevices(physical);
     Need(!physical.empty(), "Vulkan GPU");
     device_ =
-        Device::CreateIfSupported(instance_.get(), physical[0], true, false);
+        Device::CreateIfSupported(instance_.get(), physical[0], true, false, settings_);
     Need(bool(device_), "Vulkan Xenos device");
-    const auto &f = device_->functions();
-    auto vk = device_->device();
-    const auto &inf = instance_->functions();
+    const auto &f = device_->GetFunctions();
+    auto vk = device_->GetDevice();
+    const auto &inf = instance_->GetFunctions();
     inf.vkGetPhysicalDeviceMemoryProperties(physical[0], &memory_);
     VkPhysicalDeviceProperties prop;
     inf.vkGetPhysicalDeviceProperties(physical[0], &prop);
@@ -619,7 +641,7 @@ public:
     }
     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    pci.queueFamilyIndex = device_->queue_family_graphics_compute();
+    pci.queueFamilyIndex = device_->GetQueueFamilyGraphicsCompute();
     Need(f.vkCreateCommandPool(vk, &pci, nullptr, &pool_) == VK_SUCCESS,
          "Vulkan pool");
     VkCommandBufferAllocateInfo ca{
@@ -641,8 +663,8 @@ public:
   ~Vk() {
     if (!device_)
       return;
-    const auto &f = device_->functions();
-    auto vk = device_->device();
+    const auto &f = device_->GetFunctions();
+    auto vk = device_->GetDevice();
     if (pool_)
       f.vkDestroyCommandPool(vk, pool_, nullptr);
     if (fence_)
@@ -678,8 +700,8 @@ public:
     auto upload_end = Clock::now();
     auto constants = c.Constants(legacy_layout);
     unsigned scaled = c.scale > 1;
-    const auto &f = device_->functions();
-    auto vk = device_->device();
+    const auto &f = device_->GetFunctions();
+    auto vk = device_->GetDevice();
     auto &pipeline = pipelines_[scaled][OptimizedCase(c) ? 15 : c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pipeline) {
       auto code = Code(c, true, resources_);
@@ -779,8 +801,8 @@ public:
     submit.pCommandBuffers = &cmd_;
     {
       auto queue =
-          device_->AcquireQueue(device_->queue_family_graphics_compute(), 0);
-      Need(f.vkQueueSubmit(queue.queue(), 1, &submit, fence_) == VK_SUCCESS,
+          device_->AcquireQueue(device_->GetQueueFamilyGraphicsCompute(), 0);
+      Need(f.vkQueueSubmit(queue.GetQueue(), 1, &submit, fence_) == VK_SUCCESS,
            "Vulkan submit");
     }
     auto submitted = Clock::now();

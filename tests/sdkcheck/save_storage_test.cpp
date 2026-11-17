@@ -5,14 +5,21 @@
 #include <fstream>
 #include <iostream>
 #include <thread>
-#include <fmt/format.h>
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xthread.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/xio.h>
+#include <format>
+#include "kernel/title_fixture.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/thread_registry.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/function_dispatcher.h>
+#include "kernel/title_state.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/types/io.h>
+#include <rex/kernel/types/content.h>
+#include <rex/kernel/guest_allocator.h>
+#include <rex/xam/user_profile.h>
+#include "xam/xam_state.h"
 #include "synthetic_xex.h"
 
 #define IMPORT(name) extern "C" void __imp__##name(PPCContext&, uint8_t*)
@@ -25,19 +32,17 @@ IMPORT(NtFlushBuffersFile);
 IMPORT(NtQueryVolumeInformationFile);
 IMPORT(XamContentAggregateCreateEnumerator);
 using namespace rex;
-using namespace rex::system;
-using namespace rex::system::xam;
+using namespace rex::kernel;
+using namespace rex::xam;
 
 namespace {
 struct SaveGuest {
-  Runtime rt;
+  rex::test::KernelHost host;
+  rex::kernel::TitleRuntime rt{rex::ppc::PPCImage{}};
   uint32_t mem;
   uint8_t* base;
   explicit SaveGuest(const std::filesystem::path& root, uint32_t title = 0x1234C800)
-      : rt(root, root) {
-    RuntimeConfig config{}; config.tool_mode = true;
-    config.kernel_init = kernel::InitializeKernel;
-    REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+      : host(root) {
     auto image = x360n::test::BuildXex({}, nullptr, 0, x360n::test::Entry::kReturnZero);
     // Add the real XEX execution-info header; KernelState obtains Title ID from it.
     memory::store_and_swap<uint32_t>(image.data() + 0x14, 4);
@@ -46,23 +51,33 @@ struct SaveGuest {
     memory::store_and_swap<uint32_t>(image.data() + 0x6C, title);
     { std::ofstream out(root / "default.xex", std::ios::binary);
       out.write(reinterpret_cast<char*>(image.data()), image.size()); }
-    auto module = object_ref<UserModule>(new UserModule(rt.kernel_state()));
-    REQUIRE(module->LoadFromFile("game:\\default.xex") == X_STATUS_SUCCESS);
-    rt.kernel_state()->SetExecutableModule(module);
-    REQUIRE(rt.kernel_state()->title_id() == title);
-    mem = rt.memory()->SystemHeapAlloc(8192);
-    REQUIRE(mem); base = rt.memory()->virtual_membase();
+    REQUIRE(rt.GetTitlePaths().game_root.Set(root));
+    REQUIRE(rt.GetTitlePaths().entry.Set("default.xex"));
+    REQUIRE(rt.GetTitlePaths().imports.Set(""));
+    REQUIRE(rt.Load());
+    REQUIRE(rex::xam::CurrentXAM().GetTitleID() == title);
+    REQUIRE(rex::kernel::GetFunctionDispatcher(rt).InitializeFunctionTable(
+        0x8F000000, 0x10000, 0x8F000000, 0x100000, true));
+    rex::kernel::StartDPCQueue(rt);
+    mem = rt.GetGuestHeap().SystemHeapAlloc(8192);
+    REQUIRE(mem); base = rt.GetMembase().GetBase();
     std::memset(base + mem, 0, 8192);
     std::strcpy(reinterpret_cast<char*>(base + mem), "save");
     auto* data = reinterpret_cast<XCONTENT_DATA*>(base + mem + 256);
     data->device_id = 1; data->content_type = XContentType::kSavedGame;
-    data->set_file_name("progress"); data->set_display_name(u"Progress");
+    data->SetFileName("progress"); data->SetDisplayName(u"Progress");
+  }
+  ~SaveGuest() {
+    rt.Unload();
+    CHECK(rt.GetTitlePaths().entry.Reset());
+    CHECK(rt.GetTitlePaths().imports.Reset());
+    CHECK(rt.GetTitlePaths().game_root.Reset());
   }
   uint32_t call(void (*fn)(PPCContext&, uint8_t*), std::initializer_list<uint64_t> args) {
     uint32_t result = ~0u;
-    auto thread = object_ref<XHostThread>(new XHostThread(rt.kernel_state(), 128*1024, 0, [&] {
-      auto& ctx = *XThread::GetCurrentThread()->thread_state()->context();
-      ctx.r1.u64 = mem + 7168;
+    auto thread = rt.GetThreadRegistry().LaunchHostThread("save contract", 128 * 1024, [&] {
+      auto& ctx = *rex::kernel::KernelThread::GetCallingThread()->GetThreadState()->GetContext();
+      ctx.r1.u64 = mem + 7168;  // Owned guest call frame includes stack-passed arguments.
       PPCRegister* regs[] = {&ctx.r3,&ctx.r4,&ctx.r5,&ctx.r6,&ctx.r7,&ctx.r8,&ctx.r9,&ctx.r10};
       unsigned i = 0;
       for (auto arg : args) {
@@ -71,17 +86,18 @@ struct SaveGuest {
         ++i;
       }
       fn(ctx, base); result = ctx.r3.u32; return 0;
-    }));
-    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+    });
+    REQUIRE(thread);
     uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+    REQUIRE(rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*thread, 0, 0, 0, &timeout) == 0);
+    rex::kernel::CloseOwned(rt.GetObjectTable(), *thread);
     return result;
   }
   uint32_t word(uint32_t offset) { return memory::load_and_swap<uint32_t>(base+mem+offset); }
   void select(uint64_t xuid) {
     std::memset(base+mem+4096, 0, 392*4);
     if (!xuid) {
-      memory::store_and_swap<uint64_t>(base+mem+4096, rt.kernel_state()->user_profile()->xuid());
+      memory::store_and_swap<uint64_t>(base+mem+4096, rex::xam::CurrentXAM().GetUserProfile().GetXUID());
       REQUIRE(call(__imp__XamUserLogon, {mem+4096, 0x28, 0}) == 0);
       return;
     }
@@ -144,9 +160,9 @@ TEST_CASE("Save storage routes separate volumes and enforces capacity through NT
   uint64_t owner = 0;
   for (int restart = 0; restart != 2; ++restart) {
     SaveGuest g(root);
-    auto* profile = g.rt.kernel_state()->user_profile();
+    auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
     if (!restart) REQUIRE(profile->CreateLocal("VolumeOwner") == 0);
-    owner = profile->xuid();
+    owner = profile->GetXUID();
     g.select(owner);
     auto* data = reinterpret_cast<XCONTENT_DATA*>(g.base + g.mem + 256);
     data->device_id = 7;
@@ -175,7 +191,7 @@ TEST_CASE("Save storage routes separate volumes and enforces capacity through NT
     REQUIRE(g.call(__imp__NtClose, {g.word(616)}) == 0);
     REQUIRE(g.call(__imp__XamContentCreateEnumerator, {0, 1, 1, 0, 8, g.mem + 612, g.mem + 616}) == 0);
     CHECK(g.enumerate(g.word(616)) != 0); // Nothing from device 7 leaks into HDD.
-    const auto package = root / "storage/00000007" / fmt::format("{:016X}", owner) /
+    const auto package = root / "storage/00000007" / std::format("{:016X}", owner) /
         "1234C800/00000001/progress/progress.bin";
     CHECK(std::filesystem::file_size(package) == std::string("volume-seven").size());
     if (!restart) {
@@ -194,16 +210,16 @@ TEST_CASE("Save storage reports real failures and completes overlapped operation
     ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path,ec); }
   } cleanup{root};
   SaveGuest g(root);
-  auto* profile = g.rt.kernel_state()->user_profile();
-  REQUIRE(profile->CreateLocal("StorageErrors") == 0); g.select(profile->xuid());
+  auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
+  REQUIRE(profile->CreateLocal("StorageErrors") == 0); g.select(profile->GetXUID());
   auto* data = reinterpret_cast<XCONTENT_DATA*>(g.base+g.mem+256);
   for (auto name : {"../escape", "..", "C:\\escape", "save:stream", "trailing.", ""}) {
-    data->set_file_name(name); REQUIRE(g.content(4) == X_ERROR_INVALID_PARAMETER);
+    data->SetFileName(name); REQUIRE(g.content(4) == X_ERROR_INVALID_PARAMETER);
   }
-  data->set_file_name("progress");
+  data->SetFileName("progress");
   data->device_id = 99; REQUIRE(g.content(4) == X_ERROR_DEVICE_NOT_CONNECTED); data->device_id = 1;
   REQUIRE(g.content(0) == X_ERROR_INVALID_PARAMETER);
-  const auto title = root / fmt::format("{:016X}/1234C800", profile->xuid());
+  const auto title = root / std::format("{:016X}/1234C800", profile->GetXUID());
   std::filesystem::create_directories(title);
   { std::ofstream blocked(title / "00000001"); blocked << "existing data must survive"; }
   REQUIRE(g.content(4) == X_ERROR_ACCESS_DENIED);
@@ -260,7 +276,7 @@ TEST_CASE("Save storage uses XAM and NT file contracts across profiles and resta
   uint64_t p1 = 0, p2 = 0;
   if (!phase || std::string(phase) != "read") {
     SaveGuest g(root);
-    auto* profile = g.rt.kernel_state()->user_profile();
+    auto* profile = &rex::xam::CurrentXAM().GetUserProfile();
     REQUIRE(profile->CreateLocal("Player1", &p1) == 0);
     REQUIRE(profile->CreateLocal("Player2", &p2) == 0);
     REQUIRE(g.content(4) == X_ERROR_NO_SUCH_USER);
@@ -295,12 +311,12 @@ TEST_CASE("Save storage uses XAM and NT file contracts across profiles and resta
   if (!phase || std::string(phase) != "write") {
     {
       SaveGuest g(root);
-      const auto profiles = g.rt.kernel_state()->user_profile()->local_profiles();
+      const auto profiles = rex::xam::CurrentXAM().GetUserProfile().local_profiles();
       // Profiles are found by scanning the device, so match them by gamertag.
       REQUIRE(profiles.size() == 2);
       for (const auto& account : profiles) (account.name == "Player1" ? p1 : p2) = account.xuid;
-      REQUIRE(g.rt.kernel_state()->user_profile()->FindLocal(p1).name == "Player1");
-      REQUIRE(g.rt.kernel_state()->user_profile()->FindLocal(p2).name == "Player2");
+      REQUIRE(rex::xam::CurrentXAM().GetUserProfile().FindLocal(p1).name == "Player1");
+      REQUIRE(rex::xam::CurrentXAM().GetUserProfile().FindLocal(p2).name == "Player2");
       for (auto [id, bytes] : {std::pair{p1,first},std::pair{p2,second}}) {
         g.select(id); REQUIRE(g.content(3) == 0);
         auto f = g.open(1); g.read(f,bytes); g.close(f);

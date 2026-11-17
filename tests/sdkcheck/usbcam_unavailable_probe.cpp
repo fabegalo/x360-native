@@ -1,7 +1,7 @@
 // The real SDK exports, without any dashboard or title-specific definitions.
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
-#include <rex/system/xtypes.h>
+#include <rex/ppc/recompiled_code.h>
+#include <rex/kernel/types/status.h>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -53,8 +53,7 @@ int main(int argc, char** argv) {
     return 101;
   }
   __imp__XUsbcamCreate(ctx, memory.data());
-  using rex::X_STATUS;
-  if (ctx.r3.u32 != X_STATUS_NOT_IMPLEMENTED || ctx.r4.u32 != 64 || ctx.r5.u32 != 96 ||
+  if (ctx.r3.u32 != rex::kernel::X_STATUS_NOT_IMPLEMENTED || ctx.r4.u32 != 64 || ctx.r5.u32 != 96 ||
       ctx.lr != 0x12345678 || ctx.r31.u64 != 0x1122334455667788 || memory != before) return 1;
   __imp__XUsbcamGetState(ctx, memory.data());
   if (ctx.r3.u64 != 0 || memory != before) return 2;

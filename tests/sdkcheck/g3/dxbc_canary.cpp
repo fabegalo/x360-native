@@ -1,11 +1,12 @@
+#include <format>
 // patch 0189: stacked texture layer clamp in DXBC (Xenia Canary 04085efaa).
 // patch 0193: locked mip grid for unnormalized fetches (8486e97a0).
 // patch 0194: out-of-bounds vertex fetch words read 0 (9e9d3cdd3).
 // CPU-only: translate real tfetch3D microcode and look for the emitted
 // max(z, 0.5) / add(size, -0.5) / min sequence in the shader program.
-#include <rex/graphics/format/ucode.h>
-#include <rex/graphics/pipeline/shader/dxbc_translator.h>
-#include <rex/string/buffer.h>
+#include <rex/xenos/ucode.h>
+#include <gpu/xenos/pipeline/shader/dxbc_translator.h>
+#include <rex/string/text.h>
 
 #include <algorithm>
 #include <bit>
@@ -16,7 +17,9 @@
 #include <d3dcompiler.h>
 #include <windows.h>
 
-using namespace rex::graphics;
+using namespace rex::gpu;
+namespace xenos=rex::xenos;
+namespace ucode=rex::xenos::ucode;
 void CheckUnorm8Gpu(const std::vector<uint8_t>& baseline, const std::vector<uint8_t>& candidate);
 
 namespace {
@@ -25,7 +28,7 @@ std::vector<uint32_t> Microcode(bool unnormalized, bool offset_z,
                                 xenos::FetchOpDimension dimension =
                                     xenos::FetchOpDimension::k3DOrStacked,
                                 bool point = false) {
-  using namespace rex::graphics::ucode;
+  using namespace rex::xenos::ucode;
   const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
                          (uint64_t(ControlFlowOpcode::kAlloc) << 44);
   const uint64_t exec = 1 | (uint64_t(2) << 12) | (uint64_t(1) << 16) |
@@ -109,7 +112,7 @@ uint32_t CountLockedMipSizes(const std::vector<uint8_t>& blob) {
 
 // vfetch_full r1.xyzw, r0.x, vf0, k_32_32_32_32_FLOAT, stride 4 dwords.
 std::vector<uint32_t> VertexFetchMicrocode() {
-  using namespace rex::graphics::ucode;
+  using namespace rex::xenos::ucode;
   const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(1) << 16) |
                         (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
   return {uint32_t(exec), uint32_t(exec >> 32), 0,
@@ -132,24 +135,26 @@ uint32_t CountVertexFetchBounds(const std::vector<uint8_t>& blob) {
 
 std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
                                 xenos::ShaderType type = xenos::ShaderType::kPixel,
-                                bool rov = false, bool param_gen = false, rex::graphics::ShaderModificationKey extra = 0) {
+                                bool rov = false, bool param_gen = false, rex::gpu::ShaderModificationKey extra = 0) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
-  shader.AnalyzeUcode(disassembly);
-  DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, rov);
-  rex::graphics::ShaderModificationKey modification = type == xenos::ShaderType::kPixel
+  shader.AnalyzeUcode(disassembly, {});
+  struct Settings final : XenosSettings {} ;
+  const Settings settings;
+  DXBCShaderTranslator translator(settings, DXBCOptions{}, rex::gpu::GraphicsProvider::GPUVendorID::kNvidia, false, rov);
+  rex::gpu::ShaderModificationKey modification = type == xenos::ShaderType::kPixel
       ? translator.GetDefaultPixelShaderModification(2) : translator.GetDefaultVertexShaderModification(2);
   if (param_gen && type == xenos::ShaderType::kPixel) {
-    DxbcShaderTranslator::Modification m(modification);
+    DXBCShaderTranslator::Modification m(modification);
     m.pixel.param_gen_enable = 1;
     m.pixel.param_gen_interpolator = 0;
     modification = m.value;
   }
   // Keep baseline/candidate comparisons independent of the configured default.
-  modification &= ~DxbcShaderTranslator::Modification::kUnorm8Fixed16;
+  modification &= ~DXBCShaderTranslator::Modification::kUnorm8Fixed16;
   auto& translation = *shader.GetOrCreateTranslation(modification | extra);
-  if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
-  return translation.translated_binary();
+  if (!translator.TranslateAnalyzedShader(translation) || !translation.IsValid()) return {};
+  return translation.GetTranslatedBinary();
 }
 std::vector<uint32_t> ScalarMicrocode(ucode::AluScalarOpcode opcode) {
   using namespace ucode;
@@ -170,7 +175,7 @@ int main(int argc, char** argv) {
     try {
       const auto point = Microcode(false, false, xenos::FetchOpDimension::k2D, true);
       CheckUnorm8Gpu(Translate(point), Translate(point, xenos::ShaderType::kPixel, false, false,
-          DxbcShaderTranslator::Modification::kUnorm8Fixed16));
+          DXBCShaderTranslator::Modification::kUnorm8Fixed16));
       return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
   }
@@ -184,7 +189,7 @@ int main(int argc, char** argv) {
     }
   };
   {
-    using M = DxbcShaderTranslator::Modification;
+    using M = DXBCShaderTranslator::Modification;
     M m;
     m.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kSrcAlpha;
     m.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
@@ -208,16 +213,16 @@ int main(int argc, char** argv) {
   {
     const auto code = Microcode(false, false);
     Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
-    DxbcShaderTranslator::Modification counter;
+    DXBCShaderTranslator::Modification counter;
     counter.pixel.rov_sample_counts = 1;
     check(counter.value.low == 0 && counter.value.high == (uint64_t(1) << 16),
           "Native sample counter occupies only its local word");
     const ShaderModificationKey upstream{uint64_t(1) << 63, 0};
-    const auto local = DxbcShaderTranslator::Modification::kMemExportDynamicAddress;
+    const auto local = DXBCShaderTranslator::Modification::kMemExportDynamicAddress;
     auto* a = shader.GetOrCreateTranslation(upstream);
     auto* b = shader.GetOrCreateTranslation(local);
     auto* both = shader.GetOrCreateTranslation(upstream | local);
-    check(a != b && a != both && b != both && shader.translations().size() == 3,
+    check(a != b && a != both && b != both && shader.GetTranslations().size() == 3,
           "both words distinguish cached translations");
     check(shader.GetTranslation(upstream) == a && shader.GetTranslation(local) == b,
           "both words survive cache lookup");
@@ -226,7 +231,7 @@ int main(int argc, char** argv) {
     std::memcpy(&restored, &original, sizeof(restored));
     check(restored == original && restored.low == upstream.low && restored.high == local.high,
           "portable two-word cache storage round trip");
-    check(fmt::format("{:016X}", original) == "00000000000000018000000000000000",
+    check(std::format("{:016X}", original) == "00000000000000018000000000000000",
           "diagnostic identity includes both words");
     shader.DestroyTranslation(local);
     check(!shader.GetTranslation(local) && shader.GetTranslation(upstream) == a,
@@ -237,19 +242,21 @@ int main(int argc, char** argv) {
       const auto code = Microcode(unnormalized, offset_z);
       Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
       rex::string::StringBuffer disassembly;
-      shader.AnalyzeUcode(disassembly);
-      DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false,
+      shader.AnalyzeUcode(disassembly, {});
+      struct Settings final : XenosSettings {} ;
+  const Settings settings;
+  DXBCShaderTranslator translator(settings, DXBCOptions{}, rex::gpu::GraphicsProvider::GPUVendorID::kNvidia, false,
                                       false);
       auto& translation =
           *shader.GetOrCreateTranslation(translator.GetDefaultPixelShaderModification(1));
       const bool translated =
-          translator.TranslateAnalyzedShader(translation) && translation.is_valid();
+          translator.TranslateAnalyzedShader(translation) && translation.IsValid();
       check(translated, "tfetch3D DXBC translation");
       const char* name = unnormalized ? (offset_z ? "unnormalized offset Z clamped"
                                                   : "unnormalized Z clamped")
                                       : (offset_z ? "normalized offset Z clamped"
                                                   : "normalized Z clamped");
-      check(translated && CountLayerClamps(translation.translated_binary()) >= 1, name);
+      check(translated && CountLayerClamps(translation.GetTranslatedBinary()) >= 1, name);
     }
   }
   {
@@ -271,10 +278,10 @@ int main(int argc, char** argv) {
   }
   if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
     auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));
-    for (auto mode : {DxbcShaderTranslator::Modification::DepthStencilMode::kPolygonOffset,
-                     DxbcShaderTranslator::Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset,
-                     DxbcShaderTranslator::Modification::DepthStencilMode::kFloat24RoundingPolygonOffset}) {
-      DxbcShaderTranslator::Modification modification(0);
+    for (auto mode : {DXBCShaderTranslator::Modification::DepthStencilMode::kPolygonOffset,
+                     DXBCShaderTranslator::Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset,
+                     DXBCShaderTranslator::Modification::DepthStencilMode::kFloat24RoundingPolygonOffset}) {
+      DXBCShaderTranslator::Modification modification(0);
       modification.pixel.depth_stencil_mode = mode;
       const auto binary = Translate(Microcode(false, false), xenos::ShaderType::kPixel,
                                     false, false, modification.value);
@@ -296,7 +303,7 @@ int main(int argc, char** argv) {
     {
       const auto point = Microcode(false, false, xenos::FetchOpDimension::k2D, true);
       const auto baseline = Translate(point);
-      const auto option = DxbcShaderTranslator::Modification::kUnorm8Fixed16;
+      const auto option = DXBCShaderTranslator::Modification::kUnorm8Fixed16;
       const auto candidate = Translate(point, xenos::ShaderType::kPixel, false, false, option);
       const auto filtered = Microcode(false, false, xenos::FetchOpDimension::k2D);
       check(Translate(filtered) == Translate(filtered, xenos::ShaderType::kPixel, false, false, option),
@@ -311,25 +318,27 @@ int main(int argc, char** argv) {
       check(text.find("l(2, 10, 6, 0)") != std::string::npos,
             "fixed16 rounding is guarded by R8/RG8/RGBA8 resource formats");
       if (assembly) assembly->Release();
-      DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
+      struct Settings final : XenosSettings {} ;
+  const Settings settings;
+  DXBCShaderTranslator translator(settings, DXBCOptions{}, rex::gpu::GraphicsProvider::GPUVendorID::kNvidia, false, false);
       check(!(translator.GetDefaultPixelShaderModification(2) & option) &&
             !(translator.GetDefaultVertexShaderModification(2) & option),
             "Canary rounding is the default in both VS/PS persistent keys");
-      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
+      DXBCOptions options; options.unorm8_fixed16=true; translator.SetOptions(options);
       check((translator.GetDefaultPixelShaderModification(2) & option) &&
             (translator.GetDefaultVertexShaderModification(2) & option),
             "fixed16 experiment has independent VS/PS persistent keys");
-      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "false");
+      options.unorm8_fixed16=false; translator.SetOptions(options);
       check(!(translator.GetDefaultPixelShaderModification(2) & option) &&
             !(translator.GetDefaultVertexShaderModification(2) & option),
             "disabling the experiment restores canonical persistent keys");
     }
     {
-      DxbcShaderTranslator::Modification counted(0);
+      DXBCShaderTranslator::Modification counted(0);
       counted.pixel.rov_sample_counts=1;
       const auto scalar=Translate(Microcode(false,false),xenos::ShaderType::kPixel,true,false,counted.value);
       const auto striped=Translate(Microcode(false,false),xenos::ShaderType::kPixel,true,false,
-          counted.value | DxbcShaderTranslator::Modification::kNativeStripedSampleCounts);
+          counted.value | DXBCShaderTranslator::Modification::kNativeStripedSampleCounts);
       ID3DBlob* assembly=nullptr;
       const bool valid=disassemble&&!striped.empty()&&SUCCEEDED(disassemble(striped.data(),striped.size(),0,nullptr,&assembly));
       check(valid,"striped sample counter DXBC disassembles");
@@ -340,7 +349,7 @@ int main(int argc, char** argv) {
     // quantized color target and coverage output for the host render target.
     {
       const auto ordinary = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true);
-      const auto hybrid = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true, false, DxbcShaderTranslator::Modification::kNativeHardwareColor);
+      const auto hybrid = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true, false, DXBCShaderTranslator::Modification::kNativeHardwareColor);
       ID3DBlob* assembly = nullptr;
       const bool valid = disassemble && !hybrid.empty() && SUCCEEDED(disassemble(hybrid.data(), hybrid.size(), 0, nullptr, &assembly));
       check(valid, "hybrid color DXBC disassembles");
@@ -373,7 +382,7 @@ int main(int argc, char** argv) {
       check(valid,"PsParamGen RTV/ROV DXBC validates");
       if(assembly) {
         std::string text(static_cast<const char*>(assembly->GetBufferPointer()),assembly->GetBufferSize());
-        const unsigned slot=offsetof(DxbcShaderTranslator::SystemConstants,param_gen_window_offset)/16;
+        const unsigned slot=offsetof(DXBCShaderTranslator::SystemConstants,param_gen_window_offset)/16;
         const std::string operand="]["+std::to_string(slot)+"].xy";
         bool adds=false;
         for(size_t pos=0;pos<text.size();) {

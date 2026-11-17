@@ -1,9 +1,11 @@
+#include "../quality/settings.h"
+#include <format>
 #include "d3d12_render.h"
 #include "d3d12_hybrid.h"
 #include <atomic>
-#include <rex/graphics/pipeline/render_target/cache.h>
-#include <rex/logging.h>
-#include <rex/graphics/flags.h>
+#include <gpu/xenos/pipeline/render_target/cache.h>
+#include <rex/logging/log_category.h>
+#include <gpu/xenos/xenos_settings.h>
 #include <d3dcompiler.h>
 #include <stdexcept>
 #include <bit>
@@ -12,17 +14,17 @@
 #include <fstream>
 #include <utility>
 #include "../../supervisor/fs_io.h"
-REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
-REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
-REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
-REXCVAR_DEFINE_BOOL(native_d3d12_striped_sample_counts, true, "GPU/Native",
-    "Distributed GPU sample counters with exact reduction at guest read/snapshot boundaries (false selects scalar counters)");
-REXCVAR_DECLARE(std::string, native_pso_dump);
-REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
-    "Limit of one Native GPU fence wait before reporting a timeout (minimum 1000; software adapters may need more)");
+
+
+
+
+
+
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
 namespace {
 // The renderer's debug info queue (d3d12_debug=true), so that a failed call
 // reports the debug layer's reason instead of only its HRESULT.
@@ -44,7 +46,7 @@ std::string DebugLayerMessages() {
 }
 void Check(HRESULT hr, const char* what) {
   if (FAILED(hr))
-    throw std::runtime_error(fmt::format("Native render: {} HRESULT={:08X}{}", what, uint32_t(hr), DebugLayerMessages()));
+    throw std::runtime_error(std::format("Native render: {} HRESULT={:08X}{}", what, uint32_t(hr), DebugLayerMessages()));
 }
 void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::string("Native: ") + what); }
 }
@@ -138,13 +140,15 @@ D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::MemoryTable(bool memexport) {
   device_->CreateUnorderedAccessView(edram_.Get(),nullptr,&uav,Cpu(base+2));
   return Gpu(base);
 }
-D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider), device_(provider.GetDevice()) {
+D3D12Render::D3D12Render(rex::gpu::d3d12::D3D12Provider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch)
+    : settings_(settings), watch_(watch), shaders(settings, provider.GetSettings(), scale_x_, scale_y_, edram_tile_count_),
+      provider_(provider), device_(provider.GetDevice()) {
   REXLOG_INFO("Native D3D12 early submission: threshold={} queued_depth={}", eager_threshold_, eager_depth_);
-  stats_enabled_ = REXCVAR_GET(native_stats);
-  texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
-  texture_cpu_ = REXCVAR_GET(native_texture_cpu);
-  striped_counts_ = REXCVAR_GET(native_d3d12_striped_sample_counts);
-  static_assert(DxbcShaderTranslator::Modification::kNativeSampleCountBuckets==256);
+  stats_enabled_ = GetNativeSettings().stats.Get();
+  texture_cache_enabled_ = GetNativeSettings().texture_cache.Get();
+  texture_cpu_ = GetNativeSettings().texture_cpu.Get();
+  striped_counts_ = GetNativeSettings().d3d12_striped_sample_counts.Get();
+  static_assert(DXBCShaderTranslator::Modification::kNativeSampleCountBuckets==256);
   REXLOG_INFO("Native D3D12 sample counter buckets={}",striped_counts_?256:1);
   pipeline_workers_ = std::make_unique<PipelineWorkers>(NativePipelineThreads());
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
@@ -191,7 +195,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   D3D12_ROOT_SIGNATURE_DESC rd{10, p, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");
-  const auto pso_dump = REXCVAR_GET(native_pso_dump);
+  const auto pso_dump = GetNativeSettings().pso_dump.Get();
   if (!pso_dump.empty()) {
     x360n::io::create_directories(pso_dump);
     x360n::io::ofstream out(std::filesystem::path(pso_dump) / "root.bin", std::ios::binary);
@@ -282,13 +286,13 @@ void D3D12Render::LogSubmissionStats() {
   REXLOG_INFO("Native EDRAM barriers edram_barriers={} edram_layout_barriers={} draws={}",
       edram_barriers_, edram_layout_barriers_, draw_count_);
   std::string causes;
-  for (unsigned i = 0; i < kFlushCauses; ++i) causes += fmt::format(" {}", flush_causes_[i]);
+  for (unsigned i = 0; i < kFlushCauses; ++i) causes += std::format(" {}", flush_causes_[i]);
   REXLOG_INFO("Native flush causes (guest_sync present overlap capacity drain){}", causes);
 }
 void D3D12Render::EndFrame() {
   // Pinned clear_memory_page_state contract: CPU-uploaded pages are reloaded
   // on their next request after a frame, GPU-written pages stay resident.
-  if (mirror_ && REXCVAR_GET(clear_memory_page_state)) mirror_->InvalidateCpuPages();
+  if (mirror_ && settings_.clear_memory_page_state.Get()) mirror_->InvalidateCpuPages();
 }
 void D3D12Render::CountPresent() {
   ++present_count_;
@@ -320,7 +324,7 @@ void D3D12Render::CountPresent() {
   REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} eager={} wait_ms={} redundant_state_skipped={}",
       flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_causes_[kFlushEager], flush_wait_ns_ / 1000000, cmd_.filtered());
   std::string opcodes;
-  for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
+  for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += std::format(" {:02X}:{}", i, sync_opcodes_[i]);
   REXLOG_INFO("Native guest sync opcodes{}", opcodes);
   REXLOG_INFO("Native overlap sites indices={} cpu_texture={} resolve_rect={} packet={} mirror_upload_bytes={}", overlap_sites_[kReadIndices], overlap_sites_[kReadCpuTexture], overlap_sites_[kReadResolveRect], overlap_sites_[kReadPacket], mirror_ ? mirror_->uploaded_bytes() : 0);
   frame_ms_.clear(); window_start_ = now;
@@ -512,9 +516,9 @@ void D3D12Render::Wait(uint64_t serial) {
   Timer wait(stats_enabled_, flush_wait_ns_);
   if (stats_enabled_) ++fence_waits_;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence completion");
-  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  const DWORD limit = std::max<DWORD>(1000, GetNativeSettings().gpu_timeout_ms.Get());
   if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
-    throw std::runtime_error(fmt::format("Native: render GPU timeout ({} ms, fence {} of {}){}", limit,
+    throw std::runtime_error(std::format("Native: render GPU timeout ({} ms, fence {} of {}){}", limit,
                                          fence_->GetCompletedValue(), serial, DebugLayerMessages()));
 }
 void D3D12Render::RecycleBatch() {
@@ -602,9 +606,9 @@ void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length, const std::
   writeback_.Add(address, length, readback_used_, std::move(cpu_generations));
   readback_used_ += slot;
 }
-GuestMemoryMirror& D3D12Render::Mirror(rex::memory::Memory& memory) {
+GuestMemoryMirror& D3D12Render::Mirror(rex::IPhysicalMemory& memory) {
   guest_memory_ = &memory;
-  if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory, [this](uint32_t a, uint32_t n) { UploadGuest(a, n); });
+  if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory, watch_, [this](uint32_t a, uint32_t n) { UploadGuest(a, n); });
   scaled_.Attach(*mirror_);
   return *mirror_;
 }
@@ -615,7 +619,7 @@ void D3D12Render::UploadGuest(uint32_t address, uint32_t bytes) {
   // Only pages the CPU wrote since they were valid: never the GPU-written
   // pages of a pending resolve, which stay valid in the mirror.
   if (stats_enabled_) guest_upload_bytes_ += bytes;
-  auto data = Upload(guest_memory_->TranslatePhysical(address), bytes);
+  auto data = Upload(guest_memory_->GetReadOnlyPhysicalSpan({address, bytes}).value().data(), bytes);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_DEST);
   cmd_.CopyBufferRegion(memory_.Get(), address, data.resource.Get(), data.offset, bytes);
 }

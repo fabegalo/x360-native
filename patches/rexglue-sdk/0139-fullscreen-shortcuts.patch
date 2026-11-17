@@ -1,0 +1,147 @@
+diff --git a/include/rex/ui/ui_event.h b/include/rex/ui/ui_event.h
+--- a/include/rex/ui/ui_event.h
++++ b/include/rex/ui/ui_event.h
+@@ -19,6 +19,14 @@
+ #include <rex/types.h>
+ 
+ namespace rex::ui {
++
++/** Fullscreen shortcut, including repeats so callers can consume them. */
++inline bool IsFullscreenToggleKey(const InputEvent& event) {
++  return event.type == InputEvent::Type::kKeyDown &&
++      (event.key == VirtualKey::kF11 ||
++       (event.key == VirtualKey::kReturn && HasFlags(event.modifiers, KeyModifiers::kAlt)));
++}
++
+ 
+ /** Base of every window event. */
+ class UIEvent {
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -1,5 +1,8 @@
+ #include <algorithm>
+ #include <chrono>
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#endif
+ 
+ #include <rex/logging/log_category.h>
+ #include <rex/apu/audio_system.h>
+@@ -95,6 +98,26 @@
+     RefreshCapture();
+     return;
+   }
++  if (ui::IsFullscreenToggleKey(event)) {
++    event.handled = true;
++    if (event.repeat) return;
++#if REX_PLATFORM_WIN32
++    const auto native = driver->GetNativeWindow();
++    if (native && native->type == NativeWindow::Type::kWin32) {
++      const auto child = static_cast<HWND>(native->window);
++      if (GetWindowLongPtrW(child, GWL_STYLE) & WS_CHILD) {
++        if (const auto parent = GetParent(child)) {
++          PostMessageW(parent, WM_APP + 0x362, 0, 0);
++          return;
++        }
++      }
++    }
++#endif
++    auto& fullscreen = owner.GetSettings().fullscreen;
++    if (auto changed = fullscreen.Set(!fullscreen.Get()); !changed)
++      REXUI_WARN("Fullscreen shortcut refused: {}", changed.error().message);
++    return;
++  }
+   if (!IsHeldByOverlay(event)) {
+     std::lock_guard delivery(delivery_mutex);
+     std::vector<rex::ui::IUIEventListener*> snapshot;
+diff --git a/tests/unit/ui/ui_harness.h b/tests/unit/ui/ui_harness.h
+--- a/tests/unit/ui/ui_harness.h
++++ b/tests/unit/ui/ui_harness.h
+@@ -49,6 +49,7 @@
+   bool has_display = true;
+   bool open_fails = false;
+   bool window_open = false;
++  rex::NativeWindow native_window{};
+   bool focus = true;
+   bool quit = false;
+   bool woken = false;
+@@ -146,6 +147,7 @@
+     if (!g_ui.window_open) {
+       return Err<rex::NativeWindow>(ErrorCategory::kNotFound, "closed");
+     }
++    if (g_ui.native_window.type != rex::NativeWindow::Type::kNone) return g_ui.native_window;
+     rex::NativeWindow window;
+     window.type = rex::NativeWindow::Type::kX11;
+     window.window = reinterpret_cast<void*>(0x1234);
+diff --git a/tests/unit/ui/ui_system_test.cpp b/tests/unit/ui/ui_system_test.cpp
+--- a/tests/unit/ui/ui_system_test.cpp
++++ b/tests/unit/ui/ui_system_test.cpp
+@@ -9,6 +9,9 @@
+  */
+ 
+ #include "rex_test.h"
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#endif
+ 
+ #include <atomic>
+ #include <chrono>
+@@ -663,3 +666,57 @@
+   CHECK(app.Pump());
+   app.Shutdown();
+ }
++
++
++REX_TEST_CASE("fullscreen shortcuts toggle once and preserve plain Enter", "[ui][hid][fullscreen-toggle]") {
++  UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& settings = app.GetUI().GetSettings();
++  REQUIRE(settings.fullscreen.Set(false)); app.Pump();
++  const auto key = [&](rex::VirtualKey code, rex::KeyModifiers modifiers = {}, bool repeat = false) {
++    rex::test_ui::Deliver([=](rex::ui::IUIEventListener& listener) {
++      rex::InputEvent e{.type = rex::InputEvent::Type::kKeyDown, .key = code, .modifiers = modifiers, .repeat = repeat};
++      listener.OnInputEvent(e);
++      if (rex::ui::IsFullscreenToggleKey(e)) CHECK(e.handled);
++    });
++    app.Pump();
++  };
++  key(rex::VirtualKey::kF11); CHECK(settings.fullscreen.Get()); CHECK(g_ui.fullscreen);
++  const int changes = g_ui.set_fullscreen_calls;
++  key(rex::VirtualKey::kF11, {}, true); CHECK(g_ui.set_fullscreen_calls == changes);
++  key(rex::VirtualKey::kReturn); CHECK(settings.fullscreen.Get());
++  key(rex::VirtualKey::kF10); CHECK(settings.fullscreen.Get());
++  key(rex::VirtualKey::kReturn, rex::KeyModifiers::kAlt);
++  CHECK_FALSE(settings.fullscreen.Get()); CHECK_FALSE(g_ui.fullscreen);
++  app.Shutdown();
++}
++
++#if REX_PLATFORM_WIN32
++REX_TEST_CASE("embedded fullscreen shortcuts notify the persistent host without changing the child", "[ui][hid][fullscreen-toggle]") {
++  UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  const auto parent = CreateWindowExW(0, L"STATIC", L"Fullscreen host fixture", WS_OVERLAPPEDWINDOW,
++      0, 0, 400, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
++  REQUIRE(parent);
++  rex::ScopeGuard destroy([&] { DestroyWindow(parent); });
++  const auto child = CreateWindowExW(0, L"STATIC", L"Embedded fixture", WS_CHILD,
++      0, 0, 400, 240, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
++  REQUIRE(child);
++  g_ui.native_window = {rex::NativeWindow::Type::kWin32, child};
++  const bool fullscreen = app.GetUI().GetSettings().fullscreen.Get();
++  const int changes = g_ui.set_fullscreen_calls;
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kF11);
++  app.Pump();
++  MSG message{};
++  REQUIRE(PeekMessageW(&message, parent, WM_APP + 0x362, WM_APP + 0x362, PM_REMOVE));
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kF11, true);
++  app.Pump();
++  CHECK_FALSE(PeekMessageW(&message, parent, WM_APP + 0x362, WM_APP + 0x362, PM_REMOVE));
++  CHECK(GetParent(child) == parent);
++  CHECK(app.GetUI().GetSettings().fullscreen.Get() == fullscreen);
++  CHECK(g_ui.set_fullscreen_calls == changes);
++  app.Shutdown();
++}
++#endif

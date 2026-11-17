@@ -1,6 +1,10 @@
 #pragma once
 
-#include <rex/system/xthread.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/thread_registry.h>
+#include <rex/logging/log_category.h>
 #include <mutex>
 
 namespace x360n {
@@ -12,21 +16,34 @@ class SystemUiExecution {
   bool Begin() {
     std::lock_guard lock(mutex_);
     if (caller_) return false;
-    caller_ = rex::system::retain_object(rex::system::XThread::GetCurrentThread());
+    auto* caller = rex::kernel::KernelThread::GetCallingThread();
+    if (!caller) return false;
+    auto& runtime = caller->GetRuntime();
+    auto handle = runtime.GetObjectTable().Duplicate(caller->GetHandle());
+    if (!handle) return false;
+    runtime_ = &runtime;
+    caller_ = *handle;
     return true;
   }
   void End() {
     std::lock_guard lock(mutex_);
-    caller_.reset();
+    if (caller_) {
+      auto closed = runtime_->GetObjectTable().Close(caller_);
+      REX_CHECK(closed.has_value(), "Cannot release the system UI caller handle");
+      caller_ = 0;
+      runtime_ = nullptr;
+    }
   }
   void WaitForCallerExit() {
-    rex::system::object_ref<rex::system::XThread> caller;
+    rex::kernel::ThreadPin caller;
     {
       std::lock_guard lock(mutex_);
-      caller = caller_;
+      if (caller_) caller = runtime_->GetThreadRegistry().FindByHandle(caller_);
     }
-    if (caller && !rex::system::XThread::IsInThread(caller.get()))
-      caller->Wait(0, 0, 0, nullptr);
+    if (caller && !rex::kernel::KernelThread::IsInThread(caller.GetThread())) {
+      auto waited = rex::platform::Wait(caller->GetThread(), false);
+      REX_CHECK(waited == rex::platform::WaitResult::kSuccess, "Cannot join the system UI caller");
+    }
     End();
   }
   class Scope {
@@ -43,6 +60,7 @@ class SystemUiExecution {
   };
  private:
   std::mutex mutex_;
-  rex::system::object_ref<rex::system::XThread> caller_;
+  rex::kernel::TitleRuntime* runtime_ = nullptr;
+  rex::kernel::X_HANDLE caller_ = 0;
 };
 }  // namespace x360n

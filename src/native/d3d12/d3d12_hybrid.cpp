@@ -1,24 +1,28 @@
+#include "../quality/settings.h"
+#include <format>
 #include "d3d12_hybrid.h"
 #include "d3d12_render.h"
-#include <rex/cvar.h>
-#include <rex/logging.h>
+
+#include <rex/logging/log_category.h>
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <stdexcept>
 
-REXCVAR_DEFINE_BOOL(native_d3d12_hybrid_color, false, "GPU/Native",
-    "Experimental D3D12 opaque HDR host targets with explicit ROV depth/stencil and other-case routing");
+
 
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
-static_assert(kEdramTileWidthSamples == 80 && kEdramTileHeightSamples == 16 && kEdramTileCount == 2048,
+namespace draw_util = rex::gpu::draw_state;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
+static_assert(kEDRAMTileWidthSamples == 80 && kEDRAMTileHeightSamples == 16 && kEDRAMTileCount == 2048,
     "Hybrid bridge must follow the pinned EDRAM layout");
 namespace {
 void Check(HRESULT result, const char* what) {
-  if (FAILED(result)) throw std::runtime_error(fmt::format("Native hybrid: {} HRESULT={:08X}", what, uint32_t(result)));
+  if (FAILED(result)) throw std::runtime_error(std::format("Native hybrid: {} HRESULT={:08X}", what, uint32_t(result)));
 }
 // EDRAM layout and 7e3 conversion follow pinned Xenia/ReXGlue (BSD-3-Clause).
 // Copyright 2021, 2022 Ben Vanik; ReXGlue adaptation Tom Clay, 2026.
@@ -98,7 +102,7 @@ Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* entry, const char* profile,
   return code;
 }
 }
-bool NativeHybridColorEnabled() { return REXCVAR_GET(native_d3d12_hybrid_color); }
+bool NativeHybridColorEnabled() { return GetNativeSettings().d3d12_hybrid_color.Get(); }
 void D3D12Render::EndHybridColor() { if (hybrid_color_) hybrid_color_->End(); }
 
 D3D12HybridColor::D3D12HybridColor(D3D12Render& render) : render_(render) {
@@ -113,7 +117,7 @@ std::optional<HybridColorKey> D3D12HybridColor::Classify(const RegisterFile& reg
   auto info = regs.Get<reg::RB_COLOR_INFO>();
   if (info.color_format != ColorRenderTargetFormat::k_2_10_10_10_FLOAT &&
       info.color_format != ColorRenderTargetFormat::k_2_10_10_10_FLOAT_AS_16_16_16_16) return {};
-  if ((regs[reg::RB_BLENDCONTROL::rt_register_indices[0]] & 0x1fff1fff) != 0x00010001) return {};
+  if ((regs[reg::RB_BLENDCONTROL::kRTRegisterIndices[0]] & 0x1fff1fff) != 0x00010001) return {};
   auto surface = regs.Get<reg::RB_SURFACE_INFO>();
   const unsigned msaa = unsigned(surface.msaa_samples);
   if (!surface.surface_pitch || msaa > 2 || (msaa && !msaa4_)) return {};

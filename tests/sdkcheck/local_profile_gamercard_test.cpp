@@ -9,12 +9,13 @@
 #if defined(_WIN32)
 #include <windows.h>
 #endif
-#include <rex/kernel/init.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xthread.h>
+#include "kernel/kernel_fixture.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/types/io.h>
+#include <rex/ppc/recompiled_code.h>
+#include <rex/xam/title_lifecycle.h>
+#include <rex/xam/user_profile.h>
+#include <rex/memory/endian.h>
 
 extern "C" void __imp__XamUserReadProfileSettingsEx(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserReadProfileSettings(PPCContext&, uint8_t*);
@@ -24,8 +25,7 @@ extern "C" void __imp__XamReadTileToTexture(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserIsGuest(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetCachedUserFlags(PPCContext&, uint8_t*);
 
-using rex::X_RESULT;
-using rex::X_STATUS;
+using namespace rex::kernel;
 
 namespace {
 struct GamercardStore {
@@ -34,12 +34,6 @@ struct GamercardStore {
   GamercardStore() { std::filesystem::create_directories(path); }
   ~GamercardStore() { std::error_code ec; std::filesystem::remove_all(path, ec); }
 };
-void SetupGamercard(rex::Runtime& rt) {
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-}
 constexpr uint32_t kTitlesPlayed = 0x10040012;
 constexpr uint32_t kCred = 0x10040006;
 constexpr uint32_t kAchievements = 0x10040013;
@@ -48,19 +42,22 @@ constexpr uint32_t kAchievements = 0x10040013;
 TEST_CASE("Profile settings sizing works before sign-in without reading account data",
           "[sdk][local-profile][profile-sizing]") {
   GamercardStore store;
-  rex::Runtime rt(store.path, store.path);
-  SetupGamercard(rt);
-  auto* profile = rt.kernel_state()->user_profile();
-  REQUIRE(profile->signin_state() == 0);
-  auto* memory = rt.memory();
-  auto* base = memory->virtual_membase();
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
+  auto& rt = fixture.GetRuntime();
+  auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
+  REQUIRE(profile->GetSigninState() == 0);
+  auto* memory = &rt.GetGuestHeap();
+  auto* base = rt.GetMembase().GetBase();
   const auto block = memory->SystemHeapAlloc(4096);
   REQUIRE(block);
   const uint32_t ids = block, size = block + 16, buffer = block + 64;
   rex::memory::store_and_swap<uint32_t>(base + ids, kCred);
   auto read = [&](bool ex, uint32_t user, uint32_t capacity, uint32_t output) {
     rex::memory::store_and_swap<uint32_t>(base + size, capacity);
-    PPCContext ctx{};
+    uint32_t result=~0u;
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    auto& ctx=caller.GetContext();
+    ctx.r5.u64=ctx.r6.u64=ctx.r9.u64=0;
     ctx.r1.u64 = block + 2048;
     ctx.r3.u64 = 0xFFFE07D1; ctx.r4.u64 = user;
     ctx.r7.u64 = 1; ctx.r8.u64 = ids;
@@ -74,7 +71,9 @@ TEST_CASE("Profile settings sizing works before sign-in without reading account 
       rex::memory::store_and_swap<uint32_t>(base + ctx.r1.u32 + 0x54, 0);
       __imp__XamUserReadProfileSettings(ctx, base);
     }
-    return ctx.r3.u32;
+    result=ctx.r3.u32;
+    });
+    return result;
   };
   for (bool ex : {false, true}) {
     for (uint32_t user : {0u, 255u}) {
@@ -102,9 +101,10 @@ TEST_CASE("Gamercard statistics follow the signed-in local account and its playe
           "[sdk][local-profile][gamercard]") {
   GamercardStore store;
   uint64_t first = 0, second = 0;
-  auto read_settings = [](rex::Runtime& rt, bool ex) {
-    auto* memory = rt.memory();
-    auto* base = memory->virtual_membase();
+  auto read_settings = [](rex::test::KernelFixture& fixture, bool ex) {
+    auto& rt = fixture.GetRuntime();
+    auto* memory = &rt.GetGuestHeap();
+    auto* base = rt.GetMembase().GetBase();
     const auto block = memory->SystemHeapAlloc(4096);
     const auto stack = memory->SystemHeapAlloc(512);
     REQUIRE(block);
@@ -114,7 +114,8 @@ TEST_CASE("Gamercard statistics follow the signed-in local account and its playe
       rex::memory::store_and_swap<uint32_t>(base + ids + i * 4,
                                             i == 0 ? kTitlesPlayed : i == 1 ? kCred : kAchievements);
     rex::memory::store_and_swap<uint32_t>(base + size, 1024);
-    PPCContext ctx{};
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+    auto& ctx=caller.GetContext();
     ctx.r1.u64 = stack + 128;
     ctx.r3.u64 = 0xFFFE07D1; ctx.r4.u64 = 0; ctx.r5.u64 = 0; ctx.r6.u64 = 0;
     ctx.r7.u64 = 3; ctx.r8.u64 = ids;
@@ -131,6 +132,7 @@ TEST_CASE("Gamercard statistics follow the signed-in local account and its playe
       __imp__XamUserReadProfileSettings(ctx, base);
     }
     REQUIRE(ctx.r3.u32 == 0);
+    });
     std::array<int32_t, 3> values{};
     // X_USER_READ_PROFILE_SETTINGS header (8 bytes), then 40-byte settings
     // with the setting ID at +16 and the data value at +32.
@@ -145,53 +147,49 @@ TEST_CASE("Gamercard statistics follow the signed-in local account and its playe
     return values;
   };
   {
-    rex::Runtime rt(store.path, store.path);
-    SetupGamercard(rt);
-    auto* p = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
+    auto* p = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
     REQUIRE(p->CreateLocal("Alpha", &first) == 0);
     REQUIRE(p->CreateLocal("Bravo", &second) == 0);
     REQUIRE(p->SetLocalSession(first) == 0);
-    CHECK(read_settings(rt, true) == std::array<int32_t, 3>{0, 0, 0});
+    CHECK(read_settings(fixture, true) == std::array<int32_t, 3>{0, 0, 0});
     CHECK_FALSE(p->RecordTitlePlayed(0xFFFE07D1));  // the dashboard is not a game
     CHECK(p->RecordTitlePlayed(0x4D5309C9));
     CHECK(p->RecordTitlePlayed(0x58410A5D));
     CHECK(p->RecordTitlePlayed(0x4D5309C9));  // once per title
-    CHECK(read_settings(rt, true) == std::array<int32_t, 3>{2, 0, 0});
-    CHECK(read_settings(rt, false) == std::array<int32_t, 3>{2, 0, 0});
+    CHECK(read_settings(fixture, true) == std::array<int32_t, 3>{2, 0, 0});
+    CHECK(read_settings(fixture, false) == std::array<int32_t, 3>{2, 0, 0});
     REQUIRE(p->SetLocalSession(second) == 0);
-    CHECK(read_settings(rt, true) == std::array<int32_t, 3>{0, 0, 0});
+    CHECK(read_settings(fixture, true) == std::array<int32_t, 3>{0, 0, 0});
     REQUIRE(p->SetLocalSession(0) == 0);
     CHECK_FALSE(p->RecordTitlePlayed(0x4D5309C9));  // nobody signed in
     REQUIRE(p->SetLocalSession(first) == 0);
   }
   {
-    rex::Runtime rt(store.path, store.path);
-    SetupGamercard(rt);
-    auto* p = rt.kernel_state()->user_profile();
-    CHECK(p->xuid() == first);
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
+    auto* p = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
+    CHECK(p->GetXUID() == first);
     CHECK(p->TitlesPlayed(first) == std::vector<uint32_t>{0x4D5309C9, 0x58410A5D});
     CHECK(p->TitlesPlayed(second).empty());
-    CHECK(read_settings(rt, true) == std::array<int32_t, 3>{2, 0, 0});
+    CHECK(read_settings(fixture, true) == std::array<int32_t, 3>{2, 0, 0});
   }
 }
 
 TEST_CASE("Local account tiles are absent and complete through the overlapped",
           "[sdk][local-profile][gamercard]") {
   GamercardStore store;
-  rex::Runtime rt(store.path, store.path);
-  SetupGamercard(rt);
-  auto* memory = rt.memory();
-  auto* base = memory->virtual_membase();
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
+  auto& rt = fixture.GetRuntime();
+  auto* memory = &rt.GetGuestHeap();
+  auto* base = rt.GetMembase().GetBase();
   const auto block = memory->SystemHeapAlloc(4096);
   REQUIRE(block);
   const uint32_t stack = block + 1024, overlapped = block + 64, size = block + 16;
-  PPCContext ctx{};
   auto read_tile = [&](uint32_t overlapped_ptr) {
     // Overlapped completion records the calling guest thread.
     uint32_t result = ~0u;
-    auto thread = rex::system::object_ref<rex::system::XHostThread>(
-        new rex::system::XHostThread(rt.kernel_state(), 128 * 1024, 0, [&]() {
-      PPCContext call{};
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      auto& call=caller.GetContext();
       call.r1.u64 = stack;
       call.r3.u64 = 2; call.r4.u64 = 0xFFFE07D1; call.r5.u64 = 0; call.r6.u64 = 0;
       call.r7.u64 = 0; call.r8.u64 = 0; call.r9.u64 = block + 256; call.r10.u64 = size;
@@ -199,17 +197,15 @@ TEST_CASE("Local account tiles are absent and complete through the overlapped",
       rex::memory::store_and_swap<uint32_t>(base + stack + 0x54, overlapped_ptr);
       __imp__XamReadTileEx(call, base);
       result = call.r3.u32;
-      return 0;
-    }));
-    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
-    uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+    });
     return result;
   };
   CHECK(read_tile(0) == X_ERROR_NOT_FOUND);
   std::memset(base + overlapped, 0, 28);
   CHECK(read_tile(overlapped) == X_ERROR_IO_PENDING);
   CHECK(rex::memory::load_and_swap<uint32_t>(base + overlapped) == X_ERROR_NOT_FOUND);
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto& ctx=caller.GetContext();
   for (uint32_t user = 0; user < 4; ++user) {
     ctx.r3.u64 = user;
     __imp__XamUserIsGuest(ctx, base);
@@ -218,25 +214,26 @@ TEST_CASE("Local account tiles are absent and complete through the overlapped",
     __imp__XamUserGetCachedUserFlags(ctx, base);
     CHECK(ctx.r3.u32 == 0);
   }
+  });
   memory->SystemHeapFree(block);
 }
 
 namespace {
 struct ProfilePictureGuest {
-  rex::Runtime& runtime;
+  rex::test::KernelFixture& fixture;
+  rex::kernel::TitleRuntime& runtime;
   uint32_t block;
   uint8_t* base;
-  explicit ProfilePictureGuest(rex::Runtime& rt) : runtime(rt),
-      block(rt.memory()->SystemHeapAlloc(8192)), base(rt.memory()->virtual_membase()) {
+  explicit ProfilePictureGuest(rex::test::KernelFixture& f) : fixture(f),runtime(f.GetRuntime()),
+      block(runtime.GetGuestHeap().SystemHeapAlloc(8192)), base(runtime.GetMembase().GetBase()) {
     REQUIRE(block);
     std::memset(base + block, 0, 8192);
   }
-  ~ProfilePictureGuest() { runtime.memory()->SystemHeapFree(block); }
-  uint32_t call(PPCFunc* function, std::initializer_list<uint64_t> args) {
+  ~ProfilePictureGuest() { runtime.GetGuestHeap().SystemHeapFree(block); }
+  uint32_t call(void (*function)(PPCContext&, uint8_t*), std::initializer_list<uint64_t> args) {
     uint32_t result = ~0u;
-    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        runtime.kernel_state(), 128 * 1024, 0, [&] {
-      auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+      auto& ctx = caller.GetContext();
       ctx.r1.u64 = block + 512;
       PPCRegister* registers[] = {&ctx.r3,&ctx.r4,&ctx.r5,&ctx.r6,&ctx.r7,&ctx.r8,&ctx.r9,&ctx.r10};
       size_t i = 0;
@@ -245,11 +242,8 @@ struct ProfilePictureGuest {
         else rex::memory::store_and_swap<uint32_t>(base + block + 512 + 0x54 + (i - 8) * 8, uint32_t(value));
         ++i;
       }
-      function(ctx, base); result = ctx.r3.u32; return 0;
-    }));
-    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
-    uint64_t timeout = uint64_t(-50'000'000ll);
-    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+      function(ctx, base); result = ctx.r3.u32;
+    });
     return result;
   }
   uint32_t word(uint32_t offset) const { return rex::memory::load_and_swap<uint32_t>(base + block + offset); }
@@ -268,9 +262,8 @@ TEST_CASE("Profile pictures use distinct persisted public and personal files for
   uint64_t alpha = 0, bravo = 0;
   for (unsigned restart = 0; restart != 2; ++restart) {
     INFO("profile image restart " << restart);
-    rex::Runtime rt(store.path, store.path);
-    SetupGamercard(rt);
-    auto* profile = rt.kernel_state()->user_profile();
+    rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
+    auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
     if (!restart) {
       REQUIRE(profile->CreateLocal("Alpha", &alpha) == 0);
       REQUIRE(profile->CreateLocal("Bravo", &bravo) == 0);
@@ -285,7 +278,7 @@ TEST_CASE("Profile pictures use distinct persisted public and personal files for
         WriteProfilePicture(package, "pp_32.png", std::string(prefix) + " personal32");
       }
     }
-    ProfilePictureGuest guest(rt);
+    ProfilePictureGuest guest(fixture);
     auto read = [&](uint32_t type, uint64_t xuid, uint32_t user, std::string_view expected) {
       guest.put(16, 0);
       CHECK(guest.call(__imp__XamReadTileEx, {type,0,xuid,user,0,0,0,guest.block+16,0}) == X_ERROR_INSUFFICIENT_BUFFER);
@@ -323,10 +316,9 @@ TEST_CASE("Profile pictures use distinct persisted public and personal files for
 TEST_CASE("Persisted profile PNGs reach the texture decoder with exact pixels and bounds",
           "[sdk][local-profile][gamercard][profile-image]") {
   GamercardStore store;
-  rex::Runtime rt(store.path, store.path);
-  SetupGamercard(rt);
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
   uint64_t xuid = 0;
-  auto* profile = rt.kernel_state()->user_profile();
+  auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
   REQUIRE(profile->CreateLocal("Picture", &xuid) == 0);
   REQUIRE(profile->SetLocalSession(xuid) == 0);
   const std::vector<uint8_t> png{
@@ -336,7 +328,7 @@ TEST_CASE("Persisted profile PNGs reach the texture decoder with exact pixels an
       0,0,0,0,0x49,0x45,0x4e,0x44,0xae,0x42,0x60,0x82};
   WriteProfilePicture(profile->PackagePath(xuid), "tile_64.png",
       {reinterpret_cast<const char*>(png.data()), png.size()});
-  ProfilePictureGuest guest(rt);
+  ProfilePictureGuest guest(fixture);
   std::memset(guest.base + guest.block + 1024, 0xA5, 33);
   CHECK(guest.call(__imp__XamReadTileToTexture, {2,0,0,0,guest.block+1024,16,2,0}) == 0);
   CHECK(guest.word(1024) == 0xFF112233);
@@ -352,13 +344,12 @@ TEST_CASE("Persisted profile PNGs reach the texture decoder with exact pixels an
 TEST_CASE("Profile picture failures preserve output and report actual malformed or blocked files",
           "[sdk][local-profile][gamercard][profile-image]") {
   GamercardStore store;
-  rex::Runtime rt(store.path, store.path);
-  SetupGamercard(rt);
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, store.path);
   uint64_t xuid = 0;
-  auto* profile = rt.kernel_state()->user_profile();
+  auto* profile = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
   REQUIRE(profile->CreateLocal("Failures", &xuid) == 0);
   REQUIRE(profile->SetLocalSession(xuid) == 0);
-  ProfilePictureGuest guest(rt);
+  ProfilePictureGuest guest(fixture);
   const auto package = profile->PackagePath(xuid), path = package / "pp_64.png";
   auto read_error = [&](uint32_t expected) {
     guest.put(16, 128);

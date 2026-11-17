@@ -1,76 +1,36 @@
-diff --git a/include/rex/graphics/pipeline/texture/util.h b/include/rex/graphics/pipeline/texture/util.h
---- a/include/rex/graphics/pipeline/texture/util.h
-+++ b/include/rex/graphics/pipeline/texture/util.h
-@@ -280,7 +280,7 @@
- // but k_32_32_32 textures are never tiled anyway likely.
- 
- int32_t GetTiledOffset2D(int32_t x, int32_t y, uint32_t pitch, uint32_t bytes_per_block_log2);
--int32_t GetTiledOffset3D(int32_t x, int32_t y, int32_t z, uint32_t pitch, uint32_t height,
-+int64_t GetTiledOffset3D(int32_t x, int32_t y, int32_t z, uint32_t pitch, uint32_t height,
-                          uint32_t bytes_per_block_log2);
- // The tiled address grows monotonically between tiles with Z/4, then Y/32,
- // then X/32 blocks. Within 3D tiles, the bank swap in odd Z/4 groups makes
-@@ -291,7 +291,7 @@
-                                    int32_t(top & ~(xenos::kTextureTileWidthHeight - 1)), pitch,
-                                    bytes_per_block_log2));
- }
--inline uint32_t GetTiledAddressLowerBound3D(uint32_t left, uint32_t top, uint32_t front,
-+inline uint64_t GetTiledAddressLowerBound3D(uint32_t left, uint32_t top, uint32_t front,
-                                             uint32_t pitch, uint32_t height,
-                                             uint32_t bytes_per_block_log2) {
-   uint32_t front_aligned = front & ~(xenos::kTextureTileDepth - 1);
-@@ -299,7 +299,7 @@
-   if (front_aligned & xenos::kTextureTileDepth) {
-     top_aligned += 8;
-   }
--  return uint32_t(GetTiledOffset3D(int32_t(left & ~(xenos::kTextureTileWidthHeight - 1)),
-+  return uint64_t(GetTiledOffset3D(int32_t(left & ~(xenos::kTextureTileWidthHeight - 1)),
-                                    int32_t(top_aligned), int32_t(front_aligned), pitch, height,
-                                    bytes_per_block_log2));
- }
-@@ -308,7 +308,7 @@
- // subresource stride.
- uint32_t GetTiledAddressUpperBound2D(uint32_t right, uint32_t bottom, uint32_t pitch,
-                                      uint32_t bytes_per_block_log2);
--uint32_t GetTiledAddressUpperBound3D(uint32_t right, uint32_t bottom, uint32_t back, uint32_t pitch,
-+uint64_t GetTiledAddressUpperBound3D(uint32_t right, uint32_t bottom, uint32_t back, uint32_t pitch,
-                                      uint32_t height, uint32_t bytes_per_block_log2);
- 
- // Returns four packed TextureSign values swizzled according to the swizzle in
-diff --git a/src/graphics/pipeline/texture/util.cpp b/src/graphics/pipeline/texture/util.cpp
---- a/src/graphics/pipeline/texture/util.cpp
-+++ b/src/graphics/pipeline/texture/util.cpp
-@@ -488,10 +488,10 @@
+diff --git a/src/xenos/texture_layout.cpp b/src/xenos/texture_layout.cpp
+--- a/src/xenos/texture_layout.cpp
++++ b/src/xenos/texture_layout.cpp
+@@ -317,9 +317,9 @@
      if (is_tiled) {
-       uint32_t bytes_per_block_log2 = rex::log2_floor(bytes_per_block);
+       u32 bytes_per_block_log2 = rex::log2_floor(bytes_per_block);
        if (dimension == xenos::DataDimension::k3D) {
--        level_layout.array_slice_data_extent_bytes = GetTiledAddressUpperBound3D(
-+        level_layout.array_slice_data_extent_bytes = uint32_t(GetTiledAddressUpperBound3D(
+-        level_layout.array_layer_data_extent_bytes = GetTiledAddressUpperBound3D(
++        level_layout.array_layer_data_extent_bytes = static_cast<u32>(GetTiledAddressUpperBound3D(
              level_layout.x_extent_blocks, level_layout.y_extent_blocks, level_layout.z_extent,
-             row_pitch_blocks_tile_aligned, level_layout.z_slice_stride_block_rows,
--            bytes_per_block_log2);
-+            bytes_per_block_log2));
+-            row_pitch_blocks_tile_aligned, level_layout.y_extent_blocks, bytes_per_block_log2);
++            row_pitch_blocks_tile_aligned, level_layout.y_extent_blocks, bytes_per_block_log2));
        } else {
-         level_layout.array_slice_data_extent_bytes =
+         level_layout.array_layer_data_extent_bytes =
              GetTiledAddressUpperBound2D(level_layout.x_extent_blocks, level_layout.y_extent_blocks,
-@@ -532,27 +532,27 @@
+@@ -355,26 +355,27 @@
           (((((y & 8) >> 2) + (x >> 3)) & 3) << 6) + (offset & 0x3F);
  }
  
--int32_t GetTiledOffset3D(int32_t x, int32_t y, int32_t z, uint32_t pitch, uint32_t height,
-+int64_t GetTiledOffset3D(int32_t x, int32_t y, int32_t z, uint32_t pitch, uint32_t height,
-                          uint32_t bytes_per_block_log2) {
--  // Reconstructed from disassembly of XGRAPHICS::TileVolume.
-   pitch = rex::align(pitch, xenos::kTextureTileWidthHeight);
-   height = rex::align(height, xenos::kTextureTileWidthHeight);
--  int32_t macro_outer = ((y >> 4) + (z >> 2) * int32_t(height >> 4)) * int32_t(pitch >> 5);
--  int32_t macro = ((((x >> 5) + macro_outer) << (bytes_per_block_log2 + 6)) & 0xFFFFFFF) << 1;
--  int32_t micro = (((x & 7) + ((y & 6) << 2)) << (bytes_per_block_log2 + 6)) >> 6;
--  int32_t offset_outer = ((y >> 3) + (z >> 2)) & 1;
--  int32_t offset1 = offset_outer + ((((x >> 3) + (offset_outer << 1)) & 3) << 1);
--  int32_t offset2 = ((macro + (micro & ~15)) << 1) + (micro & 15) +
--                    ((z & 3) << (bytes_per_block_log2 + 6)) + ((y & 1) << 4);
--  int32_t address = (offset1 & 1) << 3;
+-i32 GetTiledOffset3D(i32 x, i32 y, i32 z, u32 pitch, u32 height, u32 bytes_per_block_log2) {
++i64 GetTiledOffset3D(i32 x, i32 y, i32 z, u32 pitch, u32 height,
++                         u32 bytes_per_block_log2) {
+   pitch = rex::RoundUpPow2(pitch, xenos::kTextureTileWidthHeight);
+   height = rex::RoundUpPow2(height, xenos::kTextureTileWidthHeight);
+-  i32 macro_outer =
+-      ((y >> 4) + (z >> 2) * static_cast<i32>(height >> 4)) * static_cast<i32>(pitch >> 5);
+-  i32 macro = ((((x >> 5) + macro_outer) << (bytes_per_block_log2 + 6)) & 0xFFFFFFF) << 1;
+-  i32 micro = (((x & 7) + ((y & 6) << 2)) << (bytes_per_block_log2 + 6)) >> 6;
+-  i32 offset_outer = ((y >> 3) + (z >> 2)) & 1;
+-  i32 offset1 = offset_outer + ((((x >> 3) + (offset_outer << 1)) & 3) << 1);
+-  i32 offset2 = ((macro + (micro & ~15)) << 1) + (micro & 15) +
+-                ((z & 3) << (bytes_per_block_log2 + 6)) + ((y & 1) << 4);
+-  i32 address = (offset1 & 1) << 3;
 -  address += (offset2 >> 6) & 7;
 -  address <<= 3;
 -  address += offset1 & ~1;
@@ -83,75 +43,156 @@ diff --git a/src/graphics/pipeline/texture/util.cpp b/src/graphics/pipeline/text
 +  // Expecting that all the needed rounding (not only to 32x32x4, but also to a
 +  // power of two for mips) is done before the call so this function works with
 +  // the actual storage dimensions.
-+  assert_zero(pitch & (xenos::kTextureTileWidthHeight - 1));
-+  assert_zero(height & (xenos::kTextureTileWidthHeight - 1));
++  REX_ASSERT((pitch & (xenos::kTextureTileWidthHeight - 1)) == 0);
++  REX_ASSERT((height & (xenos::kTextureTileWidthHeight - 1)) == 0);
 +  // The absolute of `outer_blocks` is below (1024 / 4) * (2048 / 16) *
 +  // (16384 / 32) * 128 = 2^31.
-+  const int32_t outer_blocks =
-+      ((((z >> 2) * (height >> 4) + (y >> 4)) * int32_t(pitch >> 5)) + (x >> 5)) << 7;
-+  const int32_t inner_blocks = ((z & 0b11) << 5) | (((y >> 1) & 0b11) << 3) | (x & 0b111);
-+  const int64_t outer_inner_bytes = int64_t(outer_blocks | inner_blocks) << bytes_per_block_log2;
-+  const uint32_t bank = ((y >> 3) ^ (z >> 2)) & 0b1;
-+  const uint32_t pipe = ((x >> 3) & 0b11) ^ (bank << 1);
-+  return int32_t(((y & 1) << 4) | (pipe << 6) | (bank << 11)) | (outer_inner_bytes & 0b1111) |
++  const i32 outer_blocks =
++      ((((z >> 2) * (height >> 4) + (y >> 4)) * i32(pitch >> 5)) + (x >> 5)) << 7;
++  const i32 inner_blocks = ((z & 0b11) << 5) | (((y >> 1) & 0b11) << 3) | (x & 0b111);
++  const i64 outer_inner_bytes = i64(outer_blocks | inner_blocks) << bytes_per_block_log2;
++  const u32 bank = ((y >> 3) ^ (z >> 2)) & 0b1;
++  const u32 pipe = ((x >> 3) & 0b11) ^ (bank << 1);
++  return i32(((y & 1) << 4) | (pipe << 6) | (bank << 11)) | (outer_inner_bytes & 0b1111) |
 +         (((outer_inner_bytes >> 4) & 0b1) << 5) | (((outer_inner_bytes >> 5) & 0b111) << 8) |
 +         (outer_inner_bytes >> 8 << 12);
  }
  
- uint32_t GetTiledAddressUpperBound2D(uint32_t right, uint32_t bottom, uint32_t pitch,
-@@ -582,7 +582,7 @@
+ u32 GetTiledAddressUpperBound2D(u32 right, u32 bottom, u32 pitch, u32 bytes_per_block_log2) {
+@@ -401,29 +402,42 @@
    return upper_bound;
  }
  
--uint32_t GetTiledAddressUpperBound3D(uint32_t right, uint32_t bottom, uint32_t back, uint32_t pitch,
-+uint64_t GetTiledAddressUpperBound3D(uint32_t right, uint32_t bottom, uint32_t back, uint32_t pitch,
-                                      uint32_t height, uint32_t bytes_per_block_log2) {
+-u32 GetTiledAddressUpperBound3D(u32 right, u32 bottom, u32 back, u32 pitch, u32 height,
+-                                u32 bytes_per_block_log2) {
++u64 GetTiledAddressUpperBound3D(u32 right, u32 bottom, u32 back, u32 pitch,
++                                     u32 height, u32 bytes_per_block_log2) {
    if (!right || !bottom || !back) {
      return 0;
-@@ -603,7 +603,7 @@
-   uint32_t y_first =
-       right > pitch_aligned ? 0 : (bottom - 1) & ~(xenos::kTextureTileWidthHeight - 1);
-   uint32_t z_first = (back - 1) & ~(xenos::kTextureTileDepth - 1);
--  int32_t upper_bound = 0;
-+  int64_t upper_bound = 0;
-   for (uint32_t z = z_first; z < back; ++z) {
-     for (uint32_t y = y_first; y < bottom; ++y) {
-       for (uint32_t x = 7;; x += 8) {
-@@ -617,7 +617,7 @@
-       }
-     }
    }
--  return uint32_t(upper_bound) + (uint32_t(1) << bytes_per_block_log2);
-+  return uint64_t(upper_bound) + (uint64_t(1) << bytes_per_block_log2);
+-  u32 upper_bound = static_cast<u32>(
+-      GetTiledOffset3D(static_cast<i32>((right - 1) & ~(xenos::kTextureTileWidthHeight - 1)),
+-                       static_cast<i32>((bottom - 1) & ~(xenos::kTextureTileWidthHeight - 1)),
+-                       static_cast<i32>((back - 1) & ~(xenos::kTextureTileDepth - 1)), pitch,
+-                       height, bytes_per_block_log2));
++  // Xenia Canary c332733af: find the highest block address within the last
++  // 32 row x 4 slice portion. Addresses increase within aligned runs of 8
++  // blocks walking x, where only x[2:0] changes. Bank/pipe selection can place
++  // earlier runs at a higher address, so check every run's last block.
++  //
++  // For 1 byte per block, two 32x16x4 macro tiles share a page. The bank bit
++  // can place blocks from the earlier macro tile after later ones, so include
++  // both 32 row portion halves in the search.
++  //
++  // When width exceeds the pitch, a block's (x, y) becomes
++  // (x % pitch, y + 16 * (x / pitch)) so blocks from earlier rows can land in
++  // the last portion. Check all rows in this case.
+   u32 pitch_aligned = rex::RoundUpPow2(pitch, xenos::kTextureTileWidthHeight);
+-  switch (bytes_per_block_log2) {
+-    case 0:
+-      // 64x32x8 portions address independently.
+-      upper_bound +=
+-          ((pitch_aligned >> 6) << 12) + 0xC00 + ((pitch_aligned & (1 << 5)) << (10 - 5));
+-      break;
+-    default:
+-      // 32x32x8 portions address independently.
+-      upper_bound += ((pitch_aligned << (12 - 5 - 1)) + (0x1000 >> 1)) << bytes_per_block_log2;
+-      break;
+-  }
+-  return upper_bound;
++  u32 y_first =
++      right > pitch_aligned ? 0 : (bottom - 1) & ~(xenos::kTextureTileWidthHeight - 1);
++  u32 z_first = (back - 1) & ~(xenos::kTextureTileDepth - 1);
++  i64 upper_bound = 0;
++  for (u32 z = z_first; z < back; ++z) {
++    for (u32 y = y_first; y < bottom; ++y) {
++      for (u32 x = 7;; x += 8) {
++        u32 x_last = std::min(x, right - 1);
++        upper_bound = std::max(upper_bound, GetTiledOffset3D(i32(x_last), i32(y),
++                                                             i32(z), pitch, height,
++                                                             bytes_per_block_log2));
++        if (x_last == right - 1) {
++          break;
++        }
++      }
++    }
++  }
++  return u64(upper_bound) + (u64(1) << bytes_per_block_log2);
  }
  
- uint8_t SwizzleSigns(const xenos::xe_gpu_texture_fetch_t& fetch) {
-diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
---- a/src/graphics/util/draw.cpp
-+++ b/src/graphics/util/draw.cpp
-@@ -1214,19 +1214,17 @@
+ u8 SwizzleSigns(const xenos::TextureFetch& fetch) {
+diff --git a/include/rex/xenos/texture.h b/include/rex/xenos/texture.h
+--- a/include/rex/xenos/texture.h
++++ b/include/rex/xenos/texture.h
+@@ -123,7 +123,7 @@
+  * @param height Height in blocks, aligned to 32 internally.
+  * @param bytes_per_block_log2 log2_floor of the bytes per block.
+  */
+-i32 GetTiledOffset3D(i32 x, i32 y, i32 z, u32 pitch, u32 height, u32 bytes_per_block_log2);
++i64 GetTiledOffset3D(i32 x, i32 y, i32 z, u32 pitch, u32 height, u32 bytes_per_block_log2);
+ 
+ /**
+  * Returns the lowest address a 2D region can touch, the origin of its first 32x32 tile. The offset
+@@ -150,13 +150,17 @@
+  * @param height Height in blocks.
+  * @param bytes_per_block_log2 log2_floor of the bytes per block.
+  */
+-inline u32 GetTiledAddressLowerBound3D(u32 left, u32 top, u32 front, u32 pitch, u32 height,
+-                                       u32 bytes_per_block_log2) {
+-  return static_cast<u32>(
+-      GetTiledOffset3D(static_cast<i32>(left & ~(xenos::kTextureTileWidthHeight - 1)),
+-                       static_cast<i32>(top & ~(xenos::kTextureTileWidthHeight - 1)),
+-                       static_cast<i32>(front & ~(xenos::kTextureTileDepth - 1)), pitch, height,
+-                       bytes_per_block_log2));
++inline u64 GetTiledAddressLowerBound3D(u32 left, u32 top, u32 front,
++                                            u32 pitch, u32 height,
++                                            u32 bytes_per_block_log2) {
++  u32 front_aligned = front & ~(xenos::kTextureTileDepth - 1);
++  u32 top_aligned = top & ~(xenos::kTextureTileWidthHeight - 1);
++  if (front_aligned & xenos::kTextureTileDepth) {
++    top_aligned += 8;
++  }
++  return u64(GetTiledOffset3D(i32(left & ~(xenos::kTextureTileWidthHeight - 1)),
++                                   i32(top_aligned), i32(front_aligned), pitch, height,
++                                   bytes_per_block_log2));
+ }
+ 
+ /**
+@@ -181,7 +185,7 @@
+  * @param height Height in blocks.
+  * @param bytes_per_block_log2 log2_floor of the bytes per block.
+  */
+-u32 GetTiledAddressUpperBound3D(u32 right, u32 bottom, u32 back, u32 pitch, u32 height,
++u64 GetTiledAddressUpperBound3D(u32 right, u32 bottom, u32 back, u32 pitch, u32 height,
+                                 u32 bytes_per_block_log2);
+ 
+ /**
+diff --git a/src/gpu/xenos/draw_state.cpp b/src/gpu/xenos/draw_state.cpp
+--- a/src/gpu/xenos/draw_state.cpp
++++ b/src/gpu/xenos/draw_state.cpp
+@@ -653,19 +653,19 @@
+     u32 dest_base_x = static_cast<u32>(x0) & ~dest_base_relative_x_mask;
+     u32 dest_base_y = static_cast<u32>(y0) & ~dest_base_relative_y_mask;
      if (rb_copy_dest_info.copy_dest_array) {
-       // The base pointer is already adjusted to the Z / 8 (copy_dest_slice is
-       // 3-bit).
--      copy_dest_base_adjusted += texture_util::GetTiledOffset3D(
-+      copy_dest_base_adjusted += uint32_t(texture_util::GetTiledOffset3D(
-           int32_t(dest_base_x), int32_t(dest_base_y), 0, rb_copy_dest_pitch.copy_dest_pitch,
--          copy_dest_height, bpp_log2);
-+          copy_dest_height, bpp_log2));
+-      copy_dest_base_adjusted += xenos::GetTiledOffset3D(
++      copy_dest_base_adjusted += static_cast<u32>(xenos::GetTiledOffset3D(
+           static_cast<i32>(dest_base_x), static_cast<i32>(dest_base_y), 0,
+-          rb_copy_dest_pitch.copy_dest_pitch, rb_copy_dest_pitch.copy_dest_height, bpp_log2);
++          rb_copy_dest_pitch.copy_dest_pitch, rb_copy_dest_pitch.copy_dest_height, bpp_log2));
        copy_dest_extent_start =
--          dest_addr_base + texture_util::GetTiledAddressLowerBound3D(
-+          dest_addr_base + uint32_t(texture_util::GetTiledAddressLowerBound3D(
-                                dest_addr_x0, dest_addr_y0, rb_copy_dest_info.copy_dest_slice,
--                                  rb_copy_dest_pitch.copy_dest_pitch, copy_dest_height,
--                                  bpp_log2);
-+                               rb_copy_dest_pitch.copy_dest_pitch, copy_dest_height, bpp_log2));
-       copy_dest_extent_end =
--          dest_addr_base + texture_util::GetTiledAddressUpperBound3D(
-+          dest_addr_base + uint32_t(texture_util::GetTiledAddressUpperBound3D(
-                                dest_addr_x1, dest_addr_y1, rb_copy_dest_info.copy_dest_slice + 1,
--                                  rb_copy_dest_pitch.copy_dest_pitch, copy_dest_height,
--                                  bpp_log2);
-+                               rb_copy_dest_pitch.copy_dest_pitch, copy_dest_height, bpp_log2));
+           rb_copy_dest_base +
+-          xenos::GetTiledAddressLowerBound3D(
++          static_cast<u32>(xenos::GetTiledAddressLowerBound3D(
+               static_cast<u32>(x0), static_cast<u32>(y0), rb_copy_dest_info.copy_dest_layer,
+-              rb_copy_dest_pitch.copy_dest_pitch, rb_copy_dest_pitch.copy_dest_height, bpp_log2);
+-      copy_dest_extent_end = rb_copy_dest_base + xenos::GetTiledAddressUpperBound3D(
++              rb_copy_dest_pitch.copy_dest_pitch, rb_copy_dest_pitch.copy_dest_height, bpp_log2));
++      copy_dest_extent_end = rb_copy_dest_base + static_cast<u32>(xenos::GetTiledAddressUpperBound3D(
+                                                      static_cast<u32>(x1), static_cast<u32>(y1),
+                                                      rb_copy_dest_info.copy_dest_layer + 1,
+                                                      rb_copy_dest_pitch.copy_dest_pitch,
+-                                                     rb_copy_dest_pitch.copy_dest_height, bpp_log2);
++                                                     rb_copy_dest_pitch.copy_dest_height, bpp_log2));
      } else {
-       copy_dest_base_adjusted += texture_util::GetTiledOffset2D(
-           int32_t(dest_base_x), int32_t(dest_base_y), rb_copy_dest_pitch.copy_dest_pitch, bpp_log2);
+       copy_dest_base_adjusted +=
+           xenos::GetTiledOffset2D(static_cast<i32>(dest_base_x), static_cast<i32>(dest_base_y),

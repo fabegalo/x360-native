@@ -1,28 +1,29 @@
-diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
---- a/src/graphics/d3d12/texture_cache.cpp
-+++ b/src/graphics/d3d12/texture_cache.cpp
-@@ -2008,6 +2008,10 @@
+diff --git a/src/gpu/xenos/d3d12/texture_cache.cpp b/src/gpu/xenos/d3d12/texture_cache.cpp
+--- a/src/gpu/xenos/d3d12/texture_cache.cpp
++++ b/src/gpu/xenos/d3d12/texture_cache.cpp
+@@ -1863,6 +1863,10 @@
    desc.Alignment = 0;
-   desc.Width = key().GetWidth();
-   desc.Height = key().GetHeight();
-+  if (key().scaled_resolve) {
-+    desc.Width *= d3d12_cache.draw_resolution_scale_x();
-+    desc.Height *= d3d12_cache.draw_resolution_scale_y();
+   desc.Width = GetKey().GetWidth();
+   desc.Height = GetKey().GetHeight();
++  if (GetKey().scaled_resolve) {
++    desc.Width *= d3d12_cache.GetDrawResolutionScaleX();
++    desc.Height *= d3d12_cache.GetDrawResolutionScaleY();
 +  }
    desc.DepthOrArraySize = 1;
    desc.MipLevels = 1;
-   desc.Format = d3d12_cache.GetDXGIResourceFormat(key());
-diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
---- a/src/graphics/vulkan/texture_cache.cpp
-+++ b/src/graphics/vulkan/texture_cache.cpp
-@@ -2010,6 +2010,10 @@
-     image_create_info.format = wrapper_format;
-     image_create_info.extent.width = key().GetWidth();
-     image_create_info.extent.height = key().GetHeight();
-+    if (key().scaled_resolve) {
-+      image_create_info.extent.width *= vulkan_texture_cache.draw_resolution_scale_x();
-+      image_create_info.extent.height *= vulkan_texture_cache.draw_resolution_scale_y();
-+    }
-     image_create_info.extent.depth = 1;
-     image_create_info.mipLevels = 1;
-     image_create_info.arrayLayers = 1;
+   desc.Format = d3d12_cache.GetDXGIResourceFormat(GetKey());
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -1870,7 +1870,10 @@
+         .flags = 0,
+         .imageType = VK_IMAGE_TYPE_2D,
+         .format = texture_3d_as_2d_format,
+-        .extent = {.width = GetKey().GetWidth(), .height = GetKey().GetHeight(), .depth = 1},
++        .extent = {
++            .width = GetKey().GetWidth() * (GetKey().scaled_resolve ? vulkan_texture_cache.GetDrawResolutionScaleX() : 1),
++            .height = GetKey().GetHeight() * (GetKey().scaled_resolve ? vulkan_texture_cache.GetDrawResolutionScaleY() : 1),
++            .depth = 1},
+         .mipLevels = 1,
+         .arrayLayers = 1,
+         .samples = VK_SAMPLE_COUNT_1_BIT,

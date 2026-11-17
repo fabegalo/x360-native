@@ -52,7 +52,11 @@ foreach ($file in Get-ChildItem "$root/titles" -Recurse -Filter CMakePresets.jso
 }
 foreach ($file in Get-ChildItem "$root/titles" -Recurse -Filter preparation.toml) {
     $runtime = @(Get-Content -LiteralPath $file.FullName | Where-Object {$_ -match '^runtime_files\s*='}) -join ' '
-    Assert ($runtime -notmatch '(?:rexruntime(?:d|rd)|rexgpu-xenos(?:d|rd)|TracyClient(?:d|rd))\.dll') "Non-Release runtime metadata: $file"
-    if($runtime) { Assert ($runtime.Contains('"rexruntime.dll"') -and $runtime.Contains('"rexgpu-xenos.dll"')) "Missing Release runtime metadata: $file" }
+    $modules=@('rexbase','rexppc','rexapp','rexkernel','rexfilesystem','rexgpu','rexxam','rexapu','rexhid','rexui','rexxbdm','SDL3')
+    foreach($module in $modules) {
+        Assert ($runtime -notmatch ('"'+[regex]::Escape($module)+'(?:d|rd)\.dll"')) "Non-Release runtime metadata: $file"
+        if($runtime) { Assert ($runtime.Contains('"'+$module+'.dll"')) "Missing Release runtime module $module in $file" }
+    }
+
 }
 "PASS: cache modes, compiler evidence, $($negative.Count) adverse flag cases, empty evidence, six standard presets, explicit diagnostic presets and Release runtime metadata"

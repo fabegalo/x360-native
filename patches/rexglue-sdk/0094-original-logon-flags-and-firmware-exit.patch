@@ -1,0 +1,119 @@
+diff --git a/include/rex/xam/loader_state.h b/include/rex/xam/loader_state.h
+--- a/include/rex/xam/loader_state.h
++++ b/include/rex/xam/loader_state.h
+@@ -13,8 +13,9 @@
+ 
+ /** One title's launch handoff, owned by XAM until DetachTitle. */
+ struct XAMLoaderState {
+-  enum class ExitRequest { None, Dashboard, Terminate };
++  enum class ExitRequest { None, Dashboard, Terminate, Firmware };
+   ExitRequest exit_request = ExitRequest::None;
++  u32 firmware_routine = 0;
+   bool launch_data_present = false;
+   std::vector<u8> launch_data;
+   u32 launch_flags = 0;
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+@@ -18,17 +18,28 @@
+ #include <rex/kernel/types/status.h>
+ #include "kernel/title_state.h"
+ #include "kernel/kernel.h"
++#include "kernel/rexkernel_module.h"
++#include <rex/xam/title_lifecycle.h>
++#include <rex/xam/loader_state.h>
+ 
+ namespace rex::kernel::xboxkrnl {
+ 
+ /**
+  * Exits the title on a return to firmware.
+  *
+- * @param routine The reentry routine, which must be 1 (HalRebootRoutine).
++ * @param routine The original firmware reentry routine, retained for the session supervisor.
+  */
+ void HalReturnToFirmware_entry(u32 routine) {
+-  REX_ASSERT(routine == 1);
+-  REXKRNL_INFO("Title requested a return to firmware");
++  auto& loader = GetKernelServices()->managers->GetLoaderState();
++  loader.exit_request = rex::xam::XAMLoaderState::ExitRequest::Firmware;
++  loader.firmware_routine = routine;
++  loader.launch_path.clear();
++  loader.launch_flags = 0;
++  loader.launch_data_present = false;
++  loader.launch_data.clear();
++  if (routine != 1 && routine != 5)
++    REXKRNL_WARN("Firmware routine {} is not modeled separately; closing platform", routine);
++  REXKRNL_INFO("Title requested a return to firmware, routine={}", routine);
+   kernel::GetCurrentState().ExitTitle(rex::kernel::TitleExitReason::kHardExit);
+ }
+ 
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -70,8 +70,10 @@
+   if (!users) return static_cast<u32>(kernel::X_E_INVALIDARG);
+   const bool remove = stride == 8 && flags == 0x28;
+   const bool append = stride == 392 && flags == 0x120424;
++  // The original Retail 1888 UI uses this older local XUID-array ABI.
++  const bool local_array = stride == 8 && (flags == 0x23 || flags == 0x420 || flags == 0x424);
+   if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
+-      !(stride == 8 && (flags == 0x63 || flags == 0x24 || remove))) return 0x80004001u;
++      !local_array && !(stride == 8 && (flags == 0x63 || flags == 0x24 || remove))) return 0x80004001u;
+   auto* bytes = users.As<u8*>();
+   for (unsigned i = 1; i < 4; ++i)
+     if (memory::load_and_swap<u64>(bytes + i * stride)) return 0x80004001u;
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1279,3 +1279,51 @@
+     CHECK_FALSE(ui.GetSystemUiSession().visible);
+   });
+ }
++
++
++REX_TEST_CASE("legacy local logon arrays preserve original flags and reject online peers", "[kernel][xam][legacy-logon]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    const auto xuid = profile.GetXUID();
++    const auto users = c.Alloc(32), overlap = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    c.Store64(users, xuid);
++    for (const u32 flags : {0x23u, 0x420u, 0x424u}) {
++      REQUIRE(profile.SetLocalSession(0) == 0);
++      CHECK(c.XAM("XamUserLogon", {users, flags, overlap}) == 0);
++      CHECK(profile.GetXUID() == xuid);
++      CHECK(profile.GetSigninState() == 1);
++      CHECK(c.Load32(overlap) == 0);
++      CHECK(c.Load32(overlap + 24) == 0);
++    }
++    c.Store64(users + 8, xuid ^ 1);
++    CHECK(c.XAM("XamUserLogon", {users, 0x424, overlap}) == 0x80004001u);
++    CHECK(profile.GetSigninState() == 1);
++    c.Store64(users + 8, 0);
++    CHECK(c.XAM("XamUserLogon", {users, 0x1424, overlap}) == 0x80004001u);
++    CHECK(profile.GetSigninState() == 1);
++  });
++}
++
++REX_TEST_CASE("firmware exits preserve the requested routine and clear stale image handoffs", "[kernel][xam][firmware-exit]") {
++  for (const u32 routine : {1u, 5u, 2u}) {
++    KernelFixture fixture;
++    auto& loader = rex::xam::CurrentXAM().GetLoaderState();
++    loader.launch_path = "stale.xex"; loader.launch_flags = 42;
++    loader.launch_data_present = true; loader.launch_data = {1, 2};
++    bool reported = false, returned = false;
++    auto guard = fixture.GetRuntime().OnTitleExit([&](rex::kernel::TitleExitReason reason) {
++      reported = true;
++      CHECK(reason == rex::kernel::TitleExitReason::kHardExit);
++    });
++    fixture.RunUntilGuestThreadEnds([&](Caller& c) {
++      c.Kernel("HalReturnToFirmware", {routine});
++      returned = true;
++    });
++    CHECK_FALSE(returned); CHECK(reported);
++    CHECK(loader.exit_request == rex::xam::XAMLoaderState::ExitRequest::Firmware);
++    CHECK(loader.firmware_routine == routine);
++    CHECK(loader.launch_path.empty()); CHECK(loader.launch_flags == 0);
++    CHECK_FALSE(loader.launch_data_present); CHECK(loader.launch_data.empty());
++  }
++}

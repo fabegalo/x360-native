@@ -1,0 +1,147 @@
+diff --git a/include/rex/ui/image_decode.h b/include/rex/ui/image_decode.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/image_decode.h
+@@ -0,0 +1,28 @@
++/**
++ * @file        ui/image_decode.h
++ *
++ * @copyright   Copyright (c) 2026 Rien Gupta <rgupta9@scu.edu>
++ *              All rights reserved.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++#pragma once
++#include <cstdint>
++#include <vector>
++
++#include <rex/platform.h>
++#include <rex/types.h>
++
++namespace rex::ui {
++
++/**
++ * Decodes a PNG to tightly packed R8G8B8A8 pixels.
++ *
++ * @param out_width Receives the width in pixels on success.
++ * @param out_height Receives the height in pixels on success.
++ * @return width * height * 4 bytes on success, an empty vector on failure.
++ */
++REX_API std::vector<u8> DecodeImageRGBA(const u8* data, size_t size, int& out_width, int& out_height);
++
++}  // namespace rex::ui
+diff --git a/src/ui/overlay/image_decode.h b/src/ui/overlay/image_decode.h
+--- a/src/ui/overlay/image_decode.h
++++ b/src/ui/overlay/image_decode.h
+@@ -1,28 +1,2 @@
+-/**
+- * @file        ui/overlay/image_decode.h
+- *
+- * @copyright   Copyright (c) 2026 Rien Gupta <rgupta9@scu.edu>
+- *              All rights reserved.
+- *
+- * @license     BSD 3-Clause License
+- *              See LICENSE file in the project root for full license text.
+- */
+ #pragma once
+-#include <cstdint>
+-#include <vector>
+-
+-#include <rex/platform.h>
+-#include <rex/types.h>
+-
+-namespace rex::ui {
+-
+-/**
+- * Decodes a PNG to tightly packed R8G8B8A8 pixels.
+- *
+- * @param out_width Receives the width in pixels on success.
+- * @param out_height Receives the height in pixels on success.
+- * @return width * height * 4 bytes on success, an empty vector on failure.
+- */
+-std::vector<u8> DecodeImageRGBA(const u8* data, size_t size, int& out_width, int& out_height);
+-
+-}  // namespace rex::ui
++#include <rex/ui/image_decode.h>
+diff --git a/src/ui/overlay/image_decode.cpp b/src/ui/overlay/image_decode.cpp
+--- a/src/ui/overlay/image_decode.cpp
++++ b/src/ui/overlay/image_decode.cpp
+@@ -1,4 +1,5 @@
+-#include "ui/overlay/image_decode.h"
++#include <rex/ui/image_decode.h>
++#include <limits>
+ 
+ #define STB_IMAGE_IMPLEMENTATION
+ #define STBI_NO_STDIO
+@@ -11,7 +12,7 @@
+ std::vector<u8> DecodeImageRGBA(const u8* data, size_t size, int& out_width, int& out_height) {
+   out_width = 0;
+   out_height = 0;
+-  if (!data || size == 0) {
++  if (!data || size == 0 || size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+     return {};
+   }
+   int channels = 0;
+diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
+--- a/src/ui/CMakeLists.txt
++++ b/src/ui/CMakeLists.txt
+@@ -11,7 +11,6 @@
+   overlay/console_host.cpp
+   overlay/console_overlay.cpp
+   overlay/debug_overlay.cpp
+-  overlay/image_decode.cpp
+   overlay/overlay_registry.cpp
+   overlay/settings_overlay.cpp
+   prompt.cpp
+diff --git a/src/base/CMakeLists.txt b/src/base/CMakeLists.txt
+--- a/src/base/CMakeLists.txt
++++ b/src/base/CMakeLists.txt
+@@ -14,6 +14,7 @@
+           crash.cpp
+           exception_handler.cpp
+           hash.cpp
++          ${REXGLUE_ROOT}/src/ui/overlay/image_decode.cpp
+           init.cpp
+           input_source.cpp
+           host_alloc.cpp
+diff --git a/tests/unit/gpu/imgui_overlay_test.cpp b/tests/unit/gpu/imgui_overlay_test.cpp
+--- a/tests/unit/gpu/imgui_overlay_test.cpp
++++ b/tests/unit/gpu/imgui_overlay_test.cpp
+@@ -15,6 +15,8 @@
+ #include <vector>
+ 
+ #include <imgui.h>
++#include <limits>
++#include <rex/ui/image_decode.h>
+ 
+ #include "gpu/xenos/host/imgui_overlay.h"
+ 
+@@ -180,3 +182,27 @@
+ 
+   CHECK(drawer.begins == 0);
+ }
++
++
++REX_TEST_CASE("shared PNG decoder preserves RGBA pixels for headless XAM and overlays", "[xam][shared-image-decoder]") {
++  const std::vector<rex::u8> png{
++      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
++      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
++      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
++      0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
++      0x00, 0x00, 0x00, 0x10, 0x49, 0x44, 0x41, 0x54,
++      0x78, 0x01, 0x01, 0x05, 0x00, 0xfa, 0xff,
++      0x00, 0x11, 0x22, 0x33, 0xff, 0x02, 0x14, 0x01, 0x66,
++      0xb9, 0xe1, 0xfa, 0xc1, 0x00, 0x00, 0x00, 0x00,
++      0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
++  int width = 7, height = 9;
++  const auto pixels = rex::ui::DecodeImageRGBA(png.data(), png.size(), width, height);
++  CHECK(width == 1); CHECK(height == 1);
++  CHECK(pixels == std::vector<rex::u8>{0x11, 0x22, 0x33, 0xFF});
++  CHECK(rex::ui::DecodeImageRGBA(nullptr, 1, width, height).empty());
++  CHECK(width == 0); CHECK(height == 0);
++  CHECK(rex::ui::DecodeImageRGBA(png.data(), static_cast<size_t>(std::numeric_limits<int>::max()) + 1, width, height).empty());
++  CHECK(width == 0); CHECK(height == 0);
++  CHECK(rex::ui::DecodeImageRGBA(png.data(), 4, width, height).empty());
++  CHECK(width == 0); CHECK(height == 0);
++}

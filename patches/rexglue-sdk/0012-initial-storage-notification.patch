@@ -1,16 +1,39 @@
-diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
---- a/src/system/kernel_state.cpp
-+++ b/src/system/kernel_state.cpp
-@@ -1100,6 +1100,12 @@ void KernelState::RegisterNotifyListener(XNotifyListener* listener) {
-     // XN_SYS_SIGNINCHANGED x2
-     listener->EnqueueNotification(0x0000000A, 1);
-     listener->EnqueueNotification(0x0000000A, 1);
-+    // The content devices exposed by XamContentCreateDeviceEnumerator are
-+    // already available. Notify the initial system consumer so it can perform
-+    // its own enumeration. This is not content-enumeration completion: the
-+    // caller must still enumerate devices/packages and handle their results.
-+    // XN_SYS_STORAGEDEVICESCHANGED
-+    listener->EnqueueNotification(0x0000000B, 0);
-     // XN_SYS_INPUTDEVICESCHANGED x2
-     listener->EnqueueNotification(0x00000012, 0);
-     listener->EnqueueNotification(0x00000012, 0);
+diff --git a/src/kernel/notification_broadcaster.cpp b/src/kernel/notification_broadcaster.cpp
+--- a/src/kernel/notification_broadcaster.cpp
++++ b/src/kernel/notification_broadcaster.cpp
+@@ -34,6 +34,8 @@
+     has_notified_startup_ = true;
+     listener.Enqueue(0x00000009, 1);
+     listener.Enqueue(0x00000009, 0);
++    // Available content devices trigger initial enumeration; this does not complete it.
++    listener.Enqueue(0x0000000B, 0);
+     // Sign-in changes follow successful durable profile transactions.
+     listener.Enqueue(0x00000012, 0);
+     listener.Enqueue(0x00000012, 0);
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -754,3 +754,23 @@
+     CHECK(std::string(std::istreambuf_iterator<char>(preserved), {}) == "corrupt");
+   });
+ }
++
++
++REX_TEST_CASE("the first system notification listener receives initial storage availability once", "[kernel][xam][storage-notification]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto id = caller.Alloc(4), data = caller.Alloc(4);
++    const auto first = caller.XAM("XamNotifyCreateListener", {1, 0});
++    REQUIRE(first != 0);
++    CHECK(caller.XAM("XNotifyGetNext", {first, 0xB, id, data}) == 1);
++    CHECK(caller.Load32(id) == 0xB);
++    CHECK(caller.Load32(data) == 0);
++    CHECK(caller.XAM("XNotifyGetNext", {first, 0xB, id, data}) == 0);
++    const auto second = caller.XAM("XamNotifyCreateListener", {1, 0});
++    REQUIRE(second != 0);
++    CHECK(caller.XAM("XNotifyGetNext", {second, 0xB, id, data}) == 0);
++    CHECK(caller.XAM("XNotifyGetNext", {first, 0xA, id, data}) == 0);
++    CHECK(caller.Kernel("NtClose", {first}) == 0);
++    CHECK(caller.Kernel("NtClose", {second}) == 0);
++  });
++}

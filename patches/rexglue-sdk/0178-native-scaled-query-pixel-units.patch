@@ -1,29 +1,44 @@
-diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
-index 8e89a32..2585383 100644
---- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
-+++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
-@@ -743,6 +743,7 @@ class DxbcShaderTranslator : public ShaderTranslator {
-   // unchanged or known that it's safe not to await kills/alphatest/AtoC),
-   // returns from the shader.
-   void ROV_DepthStencilTest();
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.h b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.h
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+@@ -737,17 +737,12 @@
+    * when the coverage is empty for all pixels of the 2x2 quad and no kill, alpha test or alpha to
+    * coverage is pending.
+    */
++  // unchanged or known that it's safe not to await kills/alphatest/AtoC),
++  // returns from the shader.
+   void ROVDepthStencilTest();
+-  /**
+-   * Unpacks a 32bpp or 64bpp color from packed_temp.packed_temp_components to color_temp using two
+-   * temporary VGPRs.
+-   *
+-   * @param packed_temp Temporary register holding the packed color.
+-   * @param packed_temp_components Component of packed_temp where the packed color starts.
+-   * @param color_temp Temporary register receiving the unpacked color.
+-   * @param temp1 First scratch VGPR.
+-   * @param temp2 Second scratch VGPR.
+-   */
 +  bool ROV_BeginSampleCountScaleGuard();
-   // Unpacks a 32bpp or a 64bpp color in packed_temp.packed_temp_components to
-   // color_temp, using 2 temporary VGPRs.
-   void ROV_UnpackColor(uint32_t rt_index, uint32_t packed_temp, uint32_t packed_temp_components,
-diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
-index edf2d83..9f673a0 100644
---- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
-+++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
-@@ -361,6 +361,22 @@ void DxbcShaderTranslator::StartPixelShader_LoadROVParameters() {
++  // Unpacks a 32bpp or a 64bpp color in packed_temp.packed_temp_components to
++  // color_temp, using 2 temporary VGPRs.
+   void ROVUnpackColor(u32 rt_index, u32 packed_temp, u32 packed_temp_components, u32 color_temp,
+                       u32 temp1, u32 temp1_component, u32 temp2, u32 temp2_component);
+   /**
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator_om.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator_om.cpp
+@@ -195,6 +195,22 @@
+   // Close the 4x MSAA conditional.
    a_.OpEndIf();
- }
- 
-+bool DxbcShaderTranslator::ROV_BeginSampleCountScaleGuard() {
+   PopSystemTemp();
++}
++
++bool DXBCShaderTranslator::ROV_BeginSampleCountScaleGuard() {
 +  if ((draw_resolution_scale_x_ == 1 && draw_resolution_scale_y_ == 1) ||
-+      (GetDxbcShaderModification().value & Modification::kNativeVisibilityQuery)) return false;
++      (GetDXBCShaderModification().value & Modification::kNativeVisibilityQuery)) return false;
 +  // Match the top-left subpixel published in canonical guest-memory resolves.
 +  // Reports retain guest-pixel units; visibility still considers all subpixels.
-+  const uint32_t temp = PushSystemTemp();
++  const u32 temp = PushSystemTemp();
 +  a_.OpFToU(dxbc::Dest::R(temp, 0b0011), dxbc::Src::V1D(in_reg_ps_position_));
 +  a_.OpUDiv(dxbc::Dest::Null(), dxbc::Dest::R(temp, 0b0011), dxbc::Src::R(temp),
 +             dxbc::Src::LU(draw_resolution_scale_x_, draw_resolution_scale_y_, 1, 1));
@@ -32,36 +47,34 @@ index edf2d83..9f673a0 100644
 +  a_.OpIf(false, dxbc::Src::R(temp, dxbc::Src::kXXXX));
 +  PopSystemTemp();
 +  return true;
-+}
-+
- void DxbcShaderTranslator::ROV_DepthStencilTest() {
-   uint32_t temp = PushSystemTemp();
-   dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
-@@ -1013,6 +1029,7 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+ }
+ 
+ void DXBCShaderTranslator::ROVDepthStencilTest() {
+@@ -589,6 +605,7 @@
      // Count failures where the existing early/late test ran, before an early
      // return can discard the quad. No depth/stencil or coverage order changes.
      if (count_samples) {
 +      const bool scale_guard = ROV_BeginSampleCountScaleGuard();
-       const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
+       const auto counter = dxbc::Dest::U(uav_index_edram_, static_cast<u32>(UAVRegister::kEDRAM));
        a_.OpIf(true, dxbc::Src::R(count_temp, dxbc::Src::kXXXX));
        a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001),
-@@ -1023,6 +1040,7 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
-           (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_),
+@@ -599,6 +616,7 @@
+           (xenos::kEDRAMSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_),
            1, dxbc::Src::LU(1));
        a_.OpEndIf();
 +      if (scale_guard) a_.OpEndIf();
      }
      // Release sample_temp and the optional failure category.
      PopSystemTemp();
-@@ -1891,6 +1909,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+@@ -1223,6 +1241,7 @@
    }
  
-   if (GetDxbcShaderModification().pixel.rov_sample_counts) {
+   if (GetDXBCShaderModification().pixel.rov_sample_counts) {
 +    const bool scale_guard = ROV_BeginSampleCountScaleGuard();
      // Passing samples are counted only after guest kill, alpha test, alpha to
      // coverage and depth/stencil. Host occlusion queries cannot see ROV depth.
      if (uav_index_edram_ == kBindingIndexUnallocated) uav_index_edram_ = uav_count_++;
-@@ -1908,6 +1927,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+@@ -1240,6 +1259,7 @@
        }
        a_.OpEndIf();
      }
@@ -69,45 +82,44 @@ index edf2d83..9f673a0 100644
    }
  
    // system_temp_rov_params_.y (the depth / stencil sample address) is not
-diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
-index 7eb32ea..5012691 100644
---- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
-+++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
-@@ -1446,6 +1446,29 @@ spv::Id SpirvShaderTranslator::LoadMsaaSamplesFromFlags() {
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator_rb.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator_rb.cpp
+@@ -1301,6 +1301,29 @@
  }
  
- void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id count) {
-+  std::unique_ptr<SpirvBuilder::IfBuilder> scale_guard;
+ void SPIRVShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id count) {
++  std::unique_ptr<SPIRVBuilder::IfBuilder> scale_guard;
 +  if ((draw_resolution_scale_x_ != 1 || draw_resolution_scale_y_ != 1) &&
-+      !(GetSpirvShaderModification().value & Modification::kNativeVisibilityQuery)) {
++      !(GetSPIRVShaderModification().value & Modification::kNativeVisibilityQuery)) {
 +    // Canonical readback retains subpixel (0,0), rather than multiplying guest
 +    // query results by the Enhanced resolution scale. Visibility is boolean
 +    // and intentionally remains sensitive to every covered host subpixel.
 +    spv::Id selected = builder_->makeBoolConstant(true);
-+    const uint32_t scales[] = {draw_resolution_scale_x_, draw_resolution_scale_y_};
-+    for (uint32_t i = 0; i < 2; ++i) {
++    const u32 scales[] = {draw_resolution_scale_x_, draw_resolution_scale_y_};
++    for (u32 i = 0; i < 2; ++i) {
 +      if (scales[i] == 1) continue;
 +      id_vector_temp_.clear();
 +      id_vector_temp_.push_back(builder_->makeIntConstant(i));
-+      const spv::Id coordinate = builder_->createUnaryOp(spv::OpConvertFToU, type_uint_,
++      const spv::Id coordinate = builder_->createUnaryOp(spv::OpConvertFToU, type_uint,
 +          builder_->createLoad(builder_->createAccessChain(spv::StorageClassInput,
 +              input_fragment_coordinates_, id_vector_temp_), spv::NoPrecision));
-+      selected = builder_->createBinOp(spv::OpLogicalAnd, type_bool_, selected,
-+          builder_->createBinOp(spv::OpIEqual, type_bool_, const_uint_0_,
-+              builder_->createBinOp(spv::OpUMod, type_uint_, coordinate,
++      selected = builder_->createBinOp(spv::OpLogicalAnd, type_bool, selected,
++          builder_->createBinOp(spv::OpIEqual, type_bool, const_uint_0_,
++              builder_->createBinOp(spv::OpUMod, type_uint, coordinate,
 +                                     builder_->makeUintConstant(scales[i]))));
 +    }
-+    scale_guard = std::make_unique<SpirvBuilder::IfBuilder>(selected,
++    scale_guard = std::make_unique<SPIRVBuilder::IfBuilder>(selected,
 +        spv::SelectionControlDontFlattenMask, *builder_);
 +  }
    // Reports are four pairs of uint32 pipe counters (not uint64 values).
    // This executor aggregates in pipe A, leaving pipe B at zero; uint32 wrap
    // is retained so subtraction of cumulative BEGIN/END reports still works.
-@@ -1468,6 +1491,7 @@ void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id
-       builder_->createQuadOp(spv::OpAtomicIAdd, type_uint_, counter, scope, const_uint_0_, count);
+@@ -1323,6 +1346,7 @@
+       builder_->CreateQuadOp(spv::OpAtomicIAdd, type_uint, counter, scope, const_uint_0_, count);
      }
    }
-+  if (scale_guard) scale_guard->makeEndIf();
++  if (scale_guard) scale_guard->MakeEndIf();
  }
  
- void SpirvShaderTranslator::FSI_LoadSampleMask(spv::Id msaa_samples) {
+ void SPIRVShaderTranslator::FSILoadSampleMask(spv::Id msaa_samples) {

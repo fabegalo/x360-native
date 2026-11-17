@@ -1,23 +1,26 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
+#include <rex/ppc/recompiled_code.h>
+#include "kernel/kernel_fixture.h"
 
-extern "C" REX_FUNC(__imp__XamLookupCommonStringByIndex);
 extern "C" REX_FUNC(__imp__XamLaunchURI);
 
 TEST_CASE("Missing XAM common strings return null instead of an ID as a pointer", "[sdk][common-string]") {
-  auto ctx = std::make_unique<PPCContext>();
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([](rex::test::Caller& caller) {
+  auto* ctx = &caller.GetContext();
   // Actual IDs used by the dashboard's confirmation dialog; null takes its
   // existing failure path (-1), not the success/confirmation path (0).
   for (uint32_t id : {8u, 11u, 272u, 275u, 0xFFFFFFFFu}) {
     CAPTURE(id);
     ctx->r3.u64 = id;
     ctx->r4.u64 = 0xBADC0FFEE;
-    __imp__XamLookupCommonStringByIndex(*ctx, nullptr);
+    caller.XAM("XamLookupCommonStringByIndex", {id});
     CHECK(ctx->r3.u64 == 0);
     CHECK(ctx->r4.u64 == 0xBADC0FFEE);
   }
+  });
 }
 
 TEST_CASE("Dashboard unsupported URI launch never reports success or completion", "[sdk][uri]") {

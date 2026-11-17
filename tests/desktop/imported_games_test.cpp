@@ -57,9 +57,7 @@ struct Fixture {
          "titles/common/generic/modules.cmake"}) {
       auto dest=root/file; fs::create_directories(dest.parent_path()); fs::copy_file(fs::path(X360N_SOURCE_ROOT)/file,dest);
     }
-    const auto dest = root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja";
-    fs::create_directories(dest.parent_path());
-    fs::copy_file(fs::path(X360N_TEST_SDK_ROOT) / "resources/templates/init/rexglue_cmake.inja", dest);
+
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root, ec); }
 };
@@ -493,11 +491,13 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   CHECK_FALSE(profile.library_relative_xex.empty());
   CHECK(profile.library_relative_xex.filename()=="default.xex");
   CHECK(Inspect(f.paths,t).interrupted); CHECK_FALSE(Inspect(f.paths,t).prepared);
-  const auto integration=t.manifest.parent_path()/"generated/x360n_rexglue.cmake";
+  const auto integration=t.manifest.parent_path()/"CMakeLists.txt";
   std::ifstream in(integration); const std::string text{std::istreambuf_iterator<char>(in),{}};
   CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}")!=std::string::npos);
   CHECK(text.find("{{")==std::string::npos);
-  CHECK(text.find("include(\"${X360N_GENERATED_ROOT}/sources.cmake\")")!=std::string::npos);
+  CHECK(text.find("x360n_setup_rexglue(" + t.id + " OUTPUT_DIR \"${X360N_GENERATED_ROOT}\"")!=std::string::npos);
+  CHECK(text.find("MODULE_TARGETS generated/x360n_modules.cmake")!=std::string::npos);
+  CHECK(text.find("GPU_PLUGINS")==std::string::npos);
   CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}/generated/default")==std::string::npos);
   std::ifstream host_input(t.manifest.parent_path()/"main.cpp");
   const std::string host{std::istreambuf_iterator<char>(host_input),{}};

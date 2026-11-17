@@ -3,7 +3,7 @@
 #include "../../src/content/catalog.h"
 #include "sha256.h"
 #include "../supervisor/scratch.h"
-#include <rex/filesystem/devices/stfs_xbox.h>
+#include <rex/filesystem/stfs.h>
 #include <cstring>
 #include <fstream>
 #include <cstdlib>
@@ -25,11 +25,11 @@ std::string Iso() {
 }
 std::string Stfs(rex::filesystem::XContentPackageType magic) {
   using namespace rex::filesystem;
-  StfsHeader header{}; header.header.magic = magic; header.header.header_size = 0xA000;
+  XContentPackageHeader header{}; header.header.magic = magic; header.header.header_size = 0xA000;
   auto& desc=header.metadata.volume_descriptor.stfs; desc.flags.bits.read_only_format=1;
-  desc.file_table_block_count=1; desc.set_file_table_block_number(0); desc.total_block_count=2;
-  StfsDirectoryEntry entry{}; std::memcpy(entry.name,"default.xex",11); entry.flags.name_length=11;
-  entry.directory_index=0xFFFF; entry.length=4; entry.set_start_block_number(1); entry.set_allocated_data_blocks(1);
+  desc.file_table_block_count=1; desc.SetFileTableBlockNumber(0); desc.total_block_count=2;
+  STFSDirectoryEntry entry{}; std::memcpy(entry.name,"default.xex",11); entry.flags.name_length=11;
+  entry.directory_index=0xFFFF; entry.length=4; entry.SetStartBlockNumber(1); entry.SetAllocatedDataBlocks(1);
   std::string b(0xD000,'\0'); std::memcpy(b.data(),&header,sizeof(header));
   // Header, one hash block, directory block 0, data block 1.
   b[0xA000+21]=b[0xA000+22]=b[0xA000+23]=char(0xFF);

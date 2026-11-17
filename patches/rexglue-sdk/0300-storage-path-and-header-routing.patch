@@ -1,0 +1,378 @@
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -148,6 +148,8 @@
+     bool enabled = true;
+   };
+ 
++  void CheckStoragePath(const std::filesystem::path& path) const;
++
+   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, u64 xuid,
+                                                  const kernel::XCONTENT_AGGREGATE_DATA& data);
+   std::unique_ptr<rex::filesystem::IXDBFTitleData> GetModuleXDBF(
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -123,6 +123,19 @@
+   });
+ }
+ 
++void ContentManager::CheckStoragePath(const std::filesystem::path& path) const {
++  for (auto current = path; current != root_path_ && !current.empty(); current = current.parent_path()) {
++    std::error_code error;
++    const auto status = std::filesystem::symlink_status(current, error);
++    if (error && error != std::errc::no_such_file_or_directory)
++      throw std::filesystem::filesystem_error("content storage is inaccessible", current, error);
++    if (std::filesystem::is_symlink(status))
++      throw std::filesystem::filesystem_error("linked content storage", current,
++          std::make_error_code(std::errc::permission_denied));
++    if (current == current.parent_path()) break;
++  }
++}
++
+ u32 ContentManager::FlushContent(std::string_view root_name) {
+   auto session_lock = user_profile_.LockSettings();
+   std::lock_guard lock(mutex_);
+@@ -174,8 +187,12 @@
+     used_xuid = 0;
+   }
+ 
++  if (!ValidName(data.GetFileName())) throw std::filesystem::filesystem_error(
++      "invalid content name", std::make_error_code(std::errc::invalid_argument));
+   auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id);
+-  return rex::platform::ResolveEntryCase(package_root, data.GetFileName());
++  auto path = rex::platform::ResolveEntryCase(package_root, data.GetFileName());
++  CheckStoragePath(path);
++  return path;
+ }
+ 
+ std::filesystem::path ContentManager::ResolvePackageHeaderPath(
+@@ -194,9 +211,12 @@
+   auto content_type_str = std::format("{:08X}", static_cast<u32>(content_type));
+   std::string final_name = std::string(file_name) + ".header";
+ 
+-  // Layout is content_root/xuid/title_id/Headers/content_type/filename.header
+-  return detail::ResolveChain(root_path_, xuid_str, title_id_str, detail::kGameContentHeaderDirName,
+-                              content_type_str, final_name);
++  if (!ValidName(file_name)) throw std::filesystem::filesystem_error(
++      "invalid content name", std::make_error_code(std::errc::invalid_argument));
++  auto path = detail::ResolveChain(root_path_, xuid_str, title_id_str, detail::kGameContentHeaderDirName,
++                                   content_type_str, final_name);
++  CheckStoragePath(path);
++  return path;
+ }
+ 
+ std::filesystem::path ContentManager::ResolveHeaderPathFor(
+@@ -215,9 +235,10 @@
+   }
+ 
+   auto package_root = ResolvePackageRoot(xuid, content_type, title_id);
+-  std::error_code ec;
+-  for (const auto& child : std::filesystem::directory_iterator(package_root, ec)) {
+-    if (!child.is_directory(ec)) {
++  if (!std::filesystem::exists(package_root)) return result;
++  CheckStoragePath(package_root);
++  for (const auto& child : std::filesystem::directory_iterator(package_root)) {
++    if (child.is_symlink() || !child.is_directory() || !ValidName(rex::string::PathToUTF8(child.path().filename()))) {
+       continue;
+     }
+     const std::filesystem::path name = child.path().filename();
+@@ -228,7 +249,7 @@
+     kernel::XCONTENT_AGGREGATE_DATA content_data{};
+     if (auto header =
+             ReadContentHeaderFile(rex::string::PathToUTF8(name), xuid, title_id, content_type)) {
+-      result.emplace_back(*header);
++      content_data = *header;
+     } else {
+       content_data.device_id = device_id;
+       content_data.content_type = content_type;
+@@ -236,8 +257,11 @@
+       content_data.SetFileName(rex::string::PathToUTF8(name));
+       content_data.title_id = title_id;
+       content_data.xuid = xuid;
+-      result.emplace_back(content_data);
+-    }
++    }
++    // Routing belongs to the directory that was enumerated, never stale header fields.
++    content_data.device_id = device_id; content_data.xuid = xuid; content_data.title_id = title_id;
++    content_data.content_type = content_type; content_data.SetFileName(rex::string::PathToUTF8(name));
++    result.emplace_back(content_data);
+   }
+ 
+   return result;
+@@ -301,7 +325,7 @@
+   return package;
+ }
+ 
+-u32 ContentManager::GetContentAttributes(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output) {
++u32 ContentManager::GetContentAttributes(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output) try {
+   if (!output) return kernel::X_ERROR_INVALID_PARAMETER;
+   const std::string name(data.file_name_raw, std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
+   if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos)
+@@ -336,6 +360,8 @@
+   memory::store_and_swap<u64>(output + 20, info->write_time);
+   memory::store_and_swap<u64>(output + 28, size);
+   return kernel::X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) {
++  return kernel::X_ERROR_ACCESS_DENIED;
+ }
+ 
+ bool ContentManager::HasContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
+@@ -349,11 +375,11 @@
+ }
+ 
+ Result<void> ContentManager::WriteContentHeaderFile(u64 xuid, kernel::XCONTENT_AGGREGATE_DATA data,
+-                                                    u32 license_mask) {
++                                                    u32 license_mask) try {
+   if (data.title_id == static_cast<u32>(-1)) {
+     data.title_id = this->GetTitleID();
+   }
+-  if (data.xuid == static_cast<u64>(-1)) {
++  if (data.xuid == static_cast<u64>(-1) || data.xuid == 0) {
+     data.xuid = xuid;
+   }
+   auto header_path = ResolveHeaderPathFor(xuid, data);
+@@ -373,14 +399,16 @@
+                 sizeof(license_mask));
+   }
+   if (!platform::WriteHostFile(header_path, header, true)) {
+-    return Err(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
++    return Err(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+   }
+   return Ok();
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<kernel::XCONTENT_AGGREGATE_DATA> ContentManager::ReadContentHeaderFile(
+     const std::string_view file_name, u64 xuid, u32 title_id,
+-    rex::kernel::XContentType content_type) const {
++    rex::kernel::XContentType content_type) const try {
+   auto header_file_path = ResolvePackageHeaderPath(file_name, xuid, title_id, content_type);
+   constexpr u32 kHeaderSize = sizeof(kernel::XCONTENT_AGGREGATE_DATA);
+ 
+@@ -404,10 +432,12 @@
+   kernel::XCONTENT_AGGREGATE_DATA data;
+   std::memcpy(&data, buffer.data(), buffer.size());
+   return data;
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<kernel::XCONTENT_AGGREGATE_DATA>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<void> ContentManager::CreateContent(const std::string_view root_name, u64 xuid,
+-                                           const kernel::XCONTENT_AGGREGATE_DATA& data) {
++                                           const kernel::XCONTENT_AGGREGATE_DATA& data) try {
+   auto session_lock = user_profile_.LockSettings();
+   {
+     std::lock_guard lock(mutex_);
+@@ -434,10 +464,12 @@
+     open_packages_.emplace(string::StringKeyIgnoreCase::Create(root_name), std::move(package));
+   }
+   return Ok();
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<u32> ContentManager::OpenContent(const std::string_view root_name, u64 xuid,
+-                                        const kernel::XCONTENT_AGGREGATE_DATA& data) {
++                                        const kernel::XCONTENT_AGGREGATE_DATA& data) try {
+   auto session_lock = user_profile_.LockSettings();
+   {
+     std::lock_guard lock(mutex_);
+@@ -468,6 +500,8 @@
+     open_packages_.emplace(string::StringKeyIgnoreCase::Create(root_name), std::move(package));
+   }
+   return license;
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<u32>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<void> ContentManager::CloseContent(const std::string_view root_name) {
+@@ -490,7 +524,7 @@
+ }
+ 
+ Result<std::vector<u8>> ContentManager::GetContentThumbnail(
+-    u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
++    u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) try {
+   auto package_path = ResolvePackagePath(xuid, data);
+   auto thumb_path = package_path / detail::kThumbnailFileName;
+   std::lock_guard lock(mutex_);
+@@ -499,11 +533,13 @@
+   } else {
+     return Err<std::vector<u8>>(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
+   }
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<std::vector<u8>>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<void> ContentManager::SetContentThumbnail(u64 xuid,
+                                                  const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                                                 std::vector<u8> buffer) {
++                                                 std::vector<u8> buffer) try {
+   auto package_path = ResolvePackagePath(xuid, data);
+   std::lock_guard lock(mutex_);
+   std::filesystem::create_directories(package_path);
+@@ -516,9 +552,11 @@
+   } else {
+     return Err(kernel::XResultError(kernel::X_ERROR_FILE_NOT_FOUND));
+   }
+-}
+-
+-Result<void> ContentManager::DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
++}
++
++Result<void> ContentManager::DeleteContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) try {
+   auto package_path = ResolvePackagePath(xuid, data);
+   u64 used_xuid =
+       (data.xuid != static_cast<u64>(-1) && data.xuid != 0) ? static_cast<u64>(data.xuid) : xuid;
+@@ -561,6 +599,8 @@
+   }
+   NotifyContentChanged();
+   return Ok();
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ std::filesystem::path ContentManager::ResolveGameUserContentPath() {
+diff --git a/src/xam/content_package.cpp b/src/xam/content_package.cpp
+--- a/src/xam/content_package.cpp
++++ b/src/xam/content_package.cpp
+@@ -164,7 +164,7 @@
+ }
+ 
+ Result<kernel::XCONTENT_AGGREGATE_DATA> ContentManager::InstallContent(
+-    const std::filesystem::path& package_path, const InstallOptions& options) {
++    const std::filesystem::path& package_path, const InstallOptions& options) try {
+   REX_TRY(filesystem::XContentPackageHeader header,
+           title_.file_system_factory.ReadPackageHeader(package_path));
+   const PackageInfo info = BuildPackageInfo(header);
+@@ -264,10 +264,12 @@
+   }
+   NotifyContentChanged();
+   return content_data;
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<kernel::XCONTENT_AGGREGATE_DATA>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ Result<void> ContentManager::SetContentEnabled(const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                                               bool enabled, std::optional<u64> xuid) {
++                                               bool enabled, std::optional<u64> xuid) try {
+   kernel::XCONTENT_AGGREGATE_DATA resolved = data;
+   if (resolved.title_id == kernel::kRunningTitleID) {
+     const std::optional<u32> running = FindRunningTitleID();
+@@ -300,6 +302,8 @@
+   }
+   NotifyContentChanged();
+   return Ok();
++} catch (const std::filesystem::filesystem_error&) {
++  return Err<void>(kernel::XResultError(kernel::X_ERROR_ACCESS_DENIED));
+ }
+ 
+ std::vector<InstalledPackage> ContentManager::ListInstalledPackages(u32 title_id) const {
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -79,7 +79,7 @@
+ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id,
+                                      u32 content_type, [[maybe_unused]] u32 content_flags,
+                                      u32 items_per_enumerate, MappedU32 buffer_size_ptr,
+-                                     MappedU32 handle_out) {
++                                     MappedU32 handle_out) try {
+   auto& profile = CurrentXAM().GetUserProfile();
+   auto session_lock = profile.LockSettings();
+   if (!handle_out || !items_per_enumerate || items_per_enumerate > UINT32_MAX / sizeof(kernel::XCONTENT_DATA))
+@@ -155,6 +155,8 @@
+ 
+   *handle_out = handle;
+   return kernel::X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) {
++  return kernel::X_ERROR_ACCESS_DENIED;
+ }
+ 
+ enum class DispositionState : u8 { kUnknown = 0, kCreate = 1, kOpen = 2 };
+@@ -194,6 +196,7 @@
+   auto run = [content_manager, xuid, root_name = root_name.GetValue(), flags, content_data,
+               disposition_ptr, user_index, epoch,
+               license_mask_ptr](u32& extended_error, u32& length) mutable -> kernel::X_RESULT {
++    try {
+     auto& profile = CurrentXAM().GetUserProfile();
+     auto session_lock = profile.LockSettings();
+     const auto fail = [&](u32 error) {
+@@ -306,6 +309,11 @@
+     extended_error = kernel::XHRESULTFromWin32(result);
+     length = static_cast<u32>(disposition);
+     return result;
++    } catch (const std::filesystem::filesystem_error&) {
++      if (disposition_ptr) *disposition_ptr = 0;
++      extended_error = kernel::XHRESULTFromWin32(kernel::X_ERROR_ACCESS_DENIED); length = 0;
++      return kernel::X_ERROR_ACCESS_DENIED;
++    }
+   };
+ 
+   if (!overlapped_ptr) {
+@@ -383,7 +391,7 @@
+ 
+ u32 XamContentGetCreator_entry([[maybe_unused]] u32 user_index, MappedVoid content_data_ptr,
+                                MappedU32 is_creator_ptr, MappedU64 creator_xuid_ptr,
+-                               MappedVoid overlapped_ptr) {
++                               MappedVoid overlapped_ptr) try {
+   auto result = kernel::X_ERROR_SUCCESS;
+ 
+   u64 xuid = CurrentXAM().GetUserProfile().GetXUID();
+@@ -414,6 +422,12 @@
+   } else {
+     return result;
+   }
++} catch (const std::filesystem::filesystem_error&) {
++  if (overlapped_ptr) {
++    CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr.GetGuestAddress(), {.result = kernel::X_ERROR_ACCESS_DENIED});
++    return kernel::X_ERROR_IO_PENDING;
++  }
++  return kernel::X_ERROR_ACCESS_DENIED;
+ }
+ 
+ u32 XamContentGetThumbnail_entry([[maybe_unused]] u32 user_index, MappedVoid content_data_ptr,
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1547,3 +1547,38 @@
+     CHECK(std::filesystem::is_directory(fixture.GetRoot() / "0000000000000000" / "00000000" / "00000001" / "legacy"));
+   });
+ }
++
++
++REX_TEST_CASE("blocked save storage is an error and committed routing overrides stale headers", "[kernel][xam][save-storage]") {
++  SignedInProfileFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++    const auto title = fixture.GetRoot() / std::format("{:016X}", profile.GetXUID()) / "00000000";
++    std::filesystem::create_directories(title);
++    std::ofstream(title / "00000001", std::ios::binary).write("preserve", 8);
++    const auto root = c.AllocString("SAVE"), data = c.Alloc(sizeof(rex::kernel::XCONTENT_DATA));
++    auto* content = reinterpret_cast<rex::kernel::XCONTENT_DATA*>(c.GetBase() + data);
++    content->device_id = 1; content->content_type = rex::kernel::XContentType::kSavedGame;
++    content->SetFileName("progress");
++    CHECK(c.XAM("XamContentCreate", {0, root, data, 4, 0, 0, 0}) == rex::kernel::X_ERROR_ACCESS_DENIED);
++    const auto size = c.Alloc(4), handle = c.Alloc(4);
++    CHECK(c.XAM("XamContentCreateEnumerator", {0, 1, 1, 0, 4, size, handle}) == rex::kernel::X_ERROR_ACCESS_DENIED);
++    CHECK(std::filesystem::file_size(title / "00000001") == 8);
++    REQUIRE(std::filesystem::remove(title / "00000001"));
++    REQUIRE(c.XAM("XamContentCreate", {0, root, data, 4, 0, 0, 0}) == 0);
++    REQUIRE(c.XAM("XamContentClose", {root, 0}) == 0);
++    const auto header = title / "Headers" / "00000001" / "progress.header";
++    auto bytes = rex::platform::ReadHostFile(header); REQUIRE(bytes);
++    auto* record = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(bytes->data());
++    record->xuid = 1; record->title_id = 0xDEADBEEF; record->device_id = 99;
++    record->content_type = rex::kernel::XContentType::kMarketplaceContent; record->SetFileName("foreign");
++    REQUIRE(rex::platform::WriteHostFile(header, *bytes));
++    auto& manager = rex::xam::CurrentXAM().GetContentManager();
++    const auto items = manager.ListContent(1, profile.GetXUID(), rex::kernel::XContentType::kSavedGame, 0);
++    REQUIRE(items.size() == 1);
++    CHECK(static_cast<u64>(items[0].xuid) == profile.GetXUID());
++    CHECK(static_cast<u32>(items[0].title_id) == 0); CHECK(static_cast<u32>(items[0].device_id) == 1);
++    CHECK(items[0].content_type == rex::kernel::XContentType::kSavedGame);
++    CHECK(items[0].GetFileName() == "progress");
++  });
++}

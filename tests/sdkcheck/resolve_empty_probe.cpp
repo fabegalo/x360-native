@@ -1,33 +1,37 @@
 #include <cstring>
 #include <iostream>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/util/draw.h>
-#include <rex/system/xmemory.h>
+#include <catch2/catch_test_macros.hpp>
+#include <rex/xenos/register.h>
+#include "gpu/xenos/draw_state.h"
+#include "gpu/xenos/xenos_settings.h"
+#include <rex/kernel/heap.h>
+#include "kernel/title_context.h"
+#include "kernel/title_state.h"
+#include "kernel/kernel_fixture.h"
 
-using namespace rex::graphics;
+using namespace rex::xenos;
+namespace xenos = rex::xenos;
+namespace reg = rex::xenos::reg;
+namespace draw_util = rex::gpu::draw_state;
 template <typename T> void Set(RegisterFile &regs, T value) {
-  regs[T::register_index] = value.value;
+  regs[T::kRegisterIndex] = value.value;
 }
 
-int main() {
-  rex::memory::Memory memory;
-  if (!memory.Initialize())
-    return 2;
+TEST_CASE("Empty resolves preserve zero copy and clear extents before alignment", "[sdk][gpu][resolve-dest]") {
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto& memory = *rex::kernel::StateOf(caller.GetRuntime()).GetAddressSpace();
+  rex::kernel::TitleContext physical(caller.GetRuntime());
+  struct TestSettings : rex::gpu::XenosSettings {} settings;
   constexpr uint32_t address = 0x01000000;
-  if (!memory.LookupHeap(0xA1000000)
-           ->AllocFixed(0xA1000000, 4096, 4096,
-                        rex::memory::kMemoryAllocationReserve |
-                            rex::memory::kMemoryAllocationCommit,
-                        rex::memory::kMemoryProtectRead |
-                            rex::memory::kMemoryProtectWrite))
-    return 3;
+  REQUIRE(memory.LookupHeap(0xA1000000)->AllocFixed(0xA1000000,4096,4096,
+      rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+      rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite));
   int failures = 0, checks = 0;
   auto check = [&](bool ok, const char *name) {
     ++checks;
-    if (!ok) {
-      ++failures;
-      std::cerr << "FAIL " << name << '\n';
-    }
+    INFO(name);
+    CHECK(ok);
   };
   for (auto pixel_center :
        {xenos::PixelCenter::kD3DZero, xenos::PixelCenter::kOGLHalf}) {
@@ -36,11 +40,11 @@ int main() {
         for (int mode = 0; mode < 8; ++mode) {
           RegisterFile regs;
           std::memset(regs.values, 0, sizeof(regs.values));
-          xenos::xe_gpu_vertex_fetch_t fetch{};
+          xenos::VertexFetch fetch{};
           fetch.type = xenos::FetchConstantType::kVertex;
           fetch.address = address / 4;
           fetch.size = 6;
-          std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch,
+          std::memcpy(&regs[std::to_underlying(xenos::Register::SHADER_CONSTANT_FETCH_00_0)], &fetch,
                       sizeof(fetch));
           float vertices[] = {0, 0, 16, 0, 0, 16};
           // Degenerate aligned / unaligned axes, subpixel coverage, scissor
@@ -62,7 +66,7 @@ int main() {
                       sizeof(vertices));
           reg::RB_SURFACE_INFO surface{};
           surface.surface_pitch = mode == 6 ? 0 : 128;
-          surface.msaa_samples = xenos::MsaaSamples(sample);
+          surface.msaa_samples = xenos::MSAASamples(sample);
           Set(regs, surface);
           reg::PA_SC_WINDOW_SCISSOR_TL tl{};
           tl.window_offset_disable = 1;
@@ -88,9 +92,9 @@ int main() {
           control.copy_command = xenos::CopyCommand::kRaw;
           control.color_clear_enable = control.depth_clear_enable = 1;
           Set(regs, control);
-          draw_util::ResolveInfo info;
+          draw_util::ResolveRequest info;
           std::memset(&info, 0xCD, sizeof(info));
-          const bool ok = draw_util::GetResolveInfo(regs, memory, scale, scale,
+          const bool ok = draw_util::GetResolveInfo(settings, regs, physical, scale, scale,
                                                     false, false, info);
           check(ok, "valid resolve succeeds");
           if (mode == 7) {
@@ -109,5 +113,6 @@ int main() {
     }
   }
   std::cout << checks << " checks, " << failures << " failures\n";
-  return failures ? 1 : 0;
+  REQUIRE(failures == 0);
+  });
 }

@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <fstream>
 #include <iterator>
@@ -39,11 +39,11 @@ TEST_CASE("Referenced shared tails retain independent callable entries",
     config << "project_name='shared_tail'\nfile_path='test.xex'\nout_directory_path='out'\n";
     if (variant == 5) config << "[functions]\n0x82010008={size=336}\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
     const bool callable = variant < 2 || variant >= 8;
-    CHECK(pipeline->context().graph.isEntryPoint(kXexText + 16) == callable);
+    CHECK(pipeline->GetContext().graph.IsEntryPoint(kXexText + 16) == callable);
     REQUIRE(pipeline->RunWrite().has_value());
     std::ifstream init(work.dir / "out" / "shared_tail_init.cpp");
     REQUIRE(init.good());

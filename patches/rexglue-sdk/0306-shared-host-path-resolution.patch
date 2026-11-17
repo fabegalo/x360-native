@@ -1,0 +1,73 @@
+diff --git a/include/rex/filesystem/file_system.h b/include/rex/filesystem/file_system.h
+--- a/include/rex/filesystem/file_system.h
++++ b/include/rex/filesystem/file_system.h
+@@ -116,6 +116,11 @@
+   /** Returns the information of a path without opening it, kNoMount, kPathNotFound or kNotFound. */
+   [[nodiscard]] virtual Result<FileStat> Stat(std::string_view path) = 0;
+ 
++  /** Resolves an existing host-backed guest path through this mount table, preserving links,
++   * case and provider access checks. Container and null nodes return kUnsupported.
++   */
++  [[nodiscard]] virtual Result<std::filesystem::path> ResolveHostPath(std::string_view path) = 0;
++
+   /**
+    * Starts a walk of the children of a directory.
+    *
+diff --git a/src/filesystem/file_system.h b/src/filesystem/file_system.h
+--- a/src/filesystem/file_system.h
++++ b/src/filesystem/file_system.h
+@@ -45,6 +45,7 @@
+   [[nodiscard]] Result<Opened> OpenRelative(IFile& root, std::string_view path,
+                                             const OpenOptions& options) override;
+   [[nodiscard]] Result<FileStat> Stat(std::string_view path) override;
++  [[nodiscard]] Result<std::filesystem::path> ResolveHostPath(std::string_view path) override;
+   [[nodiscard]] Result<std::unique_ptr<IDirectory>> List(std::string_view path,
+                                                          std::string_view pattern) override;
+   [[nodiscard]] Result<void> CreateDirectories(std::string_view path) override;
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -18,6 +18,7 @@
+ #include <rex/string/path.h>
+ 
+ #include "filesystem/node_file.h"
++#include "filesystem/host_provider.h"
+ 
+ namespace rex::filesystem {
+ 
+@@ -404,6 +405,23 @@
+   const auto mount_lock = LockMount(path);
+   REX_TRY(Node * node, ResolveNode(path));
+   return node->GetInfo();
++}
++
++Result<std::filesystem::path> FileSystem::ResolveHostPath(std::string_view path) {
++  std::lock_guard lock(mutex_);
++  const auto mount_lock = LockMount(path);
++  REX_TRY(Resolved resolved, ResolveMount(path));
++  if (!resolved.provider->IsAccessible()) {
++    return Err<std::filesystem::path>(BuildError(FileSystemError::kAccessDenied,
++                                               "the volume is disconnected"));
++  }
++  REX_TRY(Node * node, ResolveNode(path));
++  auto* host = dynamic_cast<HostNode*>(node);
++  if (!host) {
++    return Err<std::filesystem::path>(BuildError(FileSystemError::kUnsupported,
++                                               "the guest path has no host file"));
++  }
++  return host->GetHostPath();
+ }
+ 
+ Result<std::unique_ptr<IDirectory>> FileSystem::List(std::string_view path,
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 8)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 9)
+ /**
+  * Creates an empty mount table.
+  *

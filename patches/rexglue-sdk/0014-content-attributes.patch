@@ -1,106 +1,275 @@
-diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
-index ee4d0f8..1448a47 100644
---- a/include/rex/system/xam/content_manager.h
-+++ b/include/rex/system/xam/content_manager.h
-@@ -155,6 +155,9 @@ class ContentManager {
-   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, uint64_t xuid,
-                                                  const XCONTENT_AGGREGATE_DATA& data);
+diff --git a/src/filesystem/host_file.h b/src/filesystem/host_file.h
+--- a/src/filesystem/host_file.h
++++ b/src/filesystem/host_file.h
+@@ -21,6 +21,7 @@
+ #include <vector>
  
-+  // Packed 36-byte content attributes: flags, three FILETIMEs, size (all BE).
-+  X_RESULT GetContentAttributes(const XCONTENT_AGGREGATE_DATA& data, uint8_t* output);
+ #include <rex/filesystem/file_open.h>
++#include <rex/filesystem/file_stat.h>
+ #include <rex/platform.h>
+ #include <rex/result.h>
+ #include <rex/types.h>
+@@ -35,18 +36,6 @@
+ /** Host file handle, a file descriptor. */
+ using NativeHandle = int;
+ #endif
+-
+-/** Host view of a file or folder. */
+-struct HostFileStat {
+-  std::filesystem::path name; /**< Last path component. */
+-  bool directory = false;
+-  u64 size = 0;        /**< Size in bytes, 0 for a folder. */
+-  u64 create_time = 0; /**< Creation time in FILETIME ticks. */
+-  u64 access_time = 0; /**< Last access time in FILETIME ticks. */
+-  u64 write_time = 0;  /**< Last write time in FILETIME ticks. */
+-  u64 device = 0;      /**< Host device ID, 0 where the host reports none. */
+-  u64 inode = 0;       /**< Host file ID on the device, 0 where the host reports none. */
+-};
+ 
+ /** An open host file read and written at offsets. */
+ class HostFile : public NonCopyable {
+diff --git a/include/rex/filesystem/file_stat.h b/include/rex/filesystem/file_stat.h
+--- a/include/rex/filesystem/file_stat.h
++++ b/include/rex/filesystem/file_stat.h
+@@ -11,6 +11,7 @@
+ #pragma once
+ 
+ #include <optional>
++#include <filesystem>
+ #include <string>
+ 
+ #include <rex/bit.h>
+@@ -40,6 +41,19 @@
+   kTemporary = 0x0100,
+   kCompressed = 0x0800,
+   kEncrypted = 0x4000,
++};
 +
-   bool ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
-   X_RESULT CreateContent(const std::string_view root_name, uint64_t xuid,
-                          const XCONTENT_AGGREGATE_DATA& data);
-diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
-index ea5ab75..af2ee6b 100644
---- a/src/system/xam/content_manager.cpp
-+++ b/src/system/xam/content_manager.cpp
-@@ -217,6 +217,49 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
++// Native metadata queries derive from Xenia (Ben Vanik, 2020).
++/** Host view of a file or folder. */
++struct HostFileStat {
++  std::filesystem::path name; /**< Last path component. */
++  bool directory = false;
++  u64 size = 0;        /**< Size in bytes, 0 for a folder. */
++  u64 create_time = 0; /**< Creation time in FILETIME ticks. */
++  u64 access_time = 0; /**< Last access time in FILETIME ticks. */
++  u64 write_time = 0;  /**< Last write time in FILETIME ticks. */
++  u64 device = 0;      /**< Host device ID, 0 where the host reports none. */
++  u64 inode = 0;       /**< Host file ID on the device, 0 where the host reports none. */
+ };
+ 
+ struct FileStat {
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,13 +28,16 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 3)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 4)
+ /**
+  * Creates an empty mount table.
+  *
+  * @return The file system, which must be destroyed before the module unloads.
+  */
+   [[nodiscard]] virtual std::unique_ptr<IFileSystem> Create() = 0;
++
++  /** Native metadata, empty when unreadable. Does not mount, copy or mutate the path. */
++  [[nodiscard]] virtual std::optional<HostFileStat> StatHostPath(const std::filesystem::path& path) = 0;
+ 
+   /**
+    * Parses the header of an XEX1 or XEX2 file.
+diff --git a/src/filesystem/filesystem_module.h b/src/filesystem/filesystem_module.h
+--- a/src/filesystem/filesystem_module.h
++++ b/src/filesystem/filesystem_module.h
+@@ -15,6 +15,7 @@
+ 
+ #include "filesystem/container.h"
+ #include "filesystem/file_system.h"
++#include "filesystem/host_file.h"
+ #include "filesystem/xdbf_title_data.h"
+ #include "filesystem/xex_image.h"
+ #include <rex/kernel/types/xex.h>
+@@ -62,6 +63,7 @@
+   }
+ 
+   std::unique_ptr<IFileSystem> Create() override { return std::make_unique<FileSystem>(); }
++  std::optional<HostFileStat> StatHostPath(const std::filesystem::path& path) override { return HostStat(path); }
+ 
+   Result<std::unique_ptr<IXEXImage>> ParseXEX(std::span<const u8> file) override {
+     auto image = XEXImage::Parse(file);
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -92,6 +92,7 @@
+                                                            u32 title_id = 0xFFFFFFFF) override;
+   std::vector<kernel::XCONTENT_AGGREGATE_DATA> ListContentAllTypes(
+       u32 device_id, u64 xuid, u32 title_filter = 0);
++  u32 GetContentAttributes(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output);
+   bool HasContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) override;
+   [[nodiscard]] Result<void> CreateContent(std::string_view root_name, u64 xuid,
+                                            const kernel::XCONTENT_AGGREGATE_DATA& data) override;
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -264,6 +264,43 @@
    return package;
  }
  
-+// xam 17559 0x277 -> message 0x2001A -> 0x81684688. The exported
-+// layout has unaligned 64-bit values, so use byte stores rather than a C++ struct.
-+// This backend exposes extracted packages: timestamps and byte size describe
-+// the local installed tree, not the original STFS container or a license.
-+X_RESULT ContentManager::GetContentAttributes(const XCONTENT_AGGREGATE_DATA& data,
-+                                             uint8_t* output) {
-+  const std::string name(data.file_name_raw,
-+      std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
-+  if (name.empty() || name == "." || name == ".." ||
-+      name.find_first_of("/\\:") != std::string::npos) return X_ERROR_INVALID_PARAMETER;
++u32 ContentManager::GetContentAttributes(const kernel::XCONTENT_AGGREGATE_DATA& data, u8* output) {
++  if (!output) return kernel::X_ERROR_INVALID_PARAMETER;
++  const std::string name(data.file_name_raw, std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
++  if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos)
++    return kernel::X_ERROR_INVALID_PARAMETER;
 +  const auto path = ResolvePackagePath(data.xuid, data);
-+  filesystem::FileInfo info{};
-+  if (!filesystem::GetInfo(path, &info)) {
-+    std::error_code ec;
-+    const bool exists = std::filesystem::exists(path, ec);
-+    return !ec && !exists ? X_ERROR_FILE_NOT_FOUND : X_ERROR_ACCESS_DENIED;
++  const auto info = title_.file_system_factory.StatHostPath(path);
++  if (!info) {
++    std::error_code error;
++    const bool exists = std::filesystem::exists(path, error);
++    return !error && !exists ? kernel::X_ERROR_FILE_NOT_FOUND : kernel::X_ERROR_ACCESS_DENIED;
 +  }
-+  uint64_t size = info.total_size;
-+  const bool directory = info.type == filesystem::FileInfo::Type::kDirectory;
-+  if (directory) {
-+    std::error_code ec;
-+    std::filesystem::recursive_directory_iterator it(path, ec), end;
-+    if (ec) return X_ERROR_ACCESS_DENIED;
-+    while (it != end) {
-+      const bool regular = it->is_regular_file(ec);
-+      if (ec) return X_ERROR_ACCESS_DENIED;
++  u64 size = info->size;
++  if (info->directory) {
++    std::error_code error;
++    std::filesystem::recursive_directory_iterator item(path, error), end;
++    if (error) return kernel::X_ERROR_ACCESS_DENIED;
++    while (item != end) {
++      const bool regular = item->is_regular_file(error);
++      if (error) return kernel::X_ERROR_ACCESS_DENIED;
 +      if (regular) {
-+        const auto bytes = it->file_size(ec);
-+        if (ec || bytes > UINT64_MAX - size) return X_ERROR_ACCESS_DENIED;
++        const auto bytes = item->file_size(error);
++        if (error || bytes > UINT64_MAX - size) return kernel::X_ERROR_ACCESS_DENIED;
 +        size += bytes;
 +      }
-+      it.increment(ec);
-+      if (ec) return X_ERROR_ACCESS_DENIED;
++      item.increment(error);
++      if (error) return kernel::X_ERROR_ACCESS_DENIED;
 +    }
 +  }
-+  memory::store_and_swap<uint32_t>(output, directory ? 0x10u : 0x80u);
-+  memory::store_and_swap<uint64_t>(output + 4, info.create_timestamp);
-+  memory::store_and_swap<uint64_t>(output + 12, info.access_timestamp);
-+  memory::store_and_swap<uint64_t>(output + 20, info.write_timestamp);
-+  memory::store_and_swap<uint64_t>(output + 28, size);
-+  return X_ERROR_SUCCESS;
++  memory::store_and_swap<u32>(output, info->directory ? 0x10u : 0x80u);
++  memory::store_and_swap<u64>(output + 4, info->create_time);
++  memory::store_and_swap<u64>(output + 12, info->access_time);
++  memory::store_and_swap<u64>(output + 20, info->write_time);
++  memory::store_and_swap<u64>(output + 28, size);
++  return kernel::X_ERROR_SUCCESS;
 +}
 +
- bool ContentManager::ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
-   auto path = ResolvePackagePath(xuid, data);
-   return std::filesystem::exists(path);
-diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
-index 1fb1e16..be4b662 100644
---- a/src/kernel/xam/xam_content.cpp
-+++ b/src/kernel/xam/xam_content.cpp
-@@ -29,6 +29,24 @@ namespace xam {
- using namespace rex::system;
- using namespace rex::system::xam;
+ bool ContentManager::HasContent(u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) {
+   const u32 title_id =
+       data.title_id == kernel::kRunningTitleID ? GetTitleID() : static_cast<u32>(data.title_id);
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -37,6 +37,22 @@
  
-+u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attributes,
-+                                        mapped_void overlapped) {
-+  X_RESULT result = X_ERROR_INVALID_PARAMETER;
+ using namespace rex::kernel;
+ 
++u32 XamContentGetAttributesInternal_entry(MappedVoid content, MappedVoid attributes, MappedVoid overlapped) {
++  u32 result = kernel::X_ERROR_INVALID_PARAMETER;
 +  if (content && attributes) {
-+    const auto* data = content.as<XCONTENT_AGGREGATE_DATA*>();
-+    const auto* device = GetDummyDeviceInfo(data->device_id);
-+    if (!device) result = X_ERROR_DEVICE_NOT_CONNECTED;
-+    else if (device->device_type != DeviceType::HDD) result = X_RESULT_FROM_WIN32(50) /* ERROR_NOT_SUPPORTED */;
-+    else result = REX_KERNEL_STATE()->content_manager()->GetContentAttributes(
-+        *data, attributes.as<uint8_t*>());
++    const auto& data = *content.As<const kernel::XCONTENT_AGGREGATE_DATA*>();
++    const auto* device = rex::xam::GetPlaceholderDevice(data.device_id);
++    if (!device) result = kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++    else if (device->device_type != rex::xam::DeviceType::kHDD) result = kernel::XResultFromWin32(50);
++    else result = CurrentXAM().GetContentManager().GetContentAttributes(data, attributes.As<u8*>());
 +  }
 +  if (overlapped) {
-+    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), result);
-+    return X_ERROR_IO_PENDING;
++    CurrentTitle().overlapped_dispatcher.Complete(overlapped.GetGuestAddress(), {.result = result});
++    return kernel::X_ERROR_IO_PENDING;
 +  }
 +  return result;
 +}
 +
- u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_ptr) {
-   // Each bit in the mask represents a granted license. Available licenses
-   // seems to vary from game to game, but most appear to use bit 0 to indicate
-@@ -440,7 +458,7 @@ REX_EXPORT_STUB(__imp__XamContentDuplicateFileHandle);
+ u32 XamContentGetLicenseMask_entry(MappedU32 mask_ptr, MappedVoid overlapped_ptr) {
+   // Bits of the licenses applicable to the title, combined with OR.
+   *mask_ptr = GetXAMSettings().license_mask->Get();
+@@ -469,3 +485,5 @@
+ REX_XAM_BODY(__imp__XamContentSetThumbnail, rex::xam::XamContentSetThumbnail_entry)
+ REX_XAM_BODY(__imp__XamContentDelete, rex::xam::XamContentDelete_entry)
+ REX_XAM_BODY(__imp__XamContentDeleteInternal, rex::xam::XamContentDeleteInternal_entry)
++
++REX_XAM_BODY(__imp__XamContentGetAttributesInternal, rex::xam::XamContentGetAttributesInternal_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1058,7 +1058,7 @@
  REX_EXPORT_STUB(__imp__XamContentExistsOnDeviceInternal);
  REX_EXPORT_STUB(__imp__XamContentFlushPackage);
  REX_EXPORT_STUB(__imp__XamContentGetAttributes);
 -REX_EXPORT_STUB(__imp__XamContentGetAttributesInternal);
-+REX_EXPORT(__imp__XamContentGetAttributesInternal, rex::kernel::xam::XamContentGetAttributesInternal_entry)
++
  REX_EXPORT_STUB(__imp__XamContentGetHeaderInternal);
  REX_EXPORT_STUB(__imp__XamContentGetLocalizedString);
  REX_EXPORT_STUB(__imp__XamContentGetMetaDataInternal);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -358,3 +358,5 @@
+ REX_XAM_FORWARD(__imp__XamProfileCreate)
+ 
+ REX_XAM_FORWARD(__imp__XamProfileGetCreationStatus)
++
++REX_XAM_FORWARD(__imp__XamContentGetAttributesInternal)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -28,6 +28,7 @@
+ #include "kernel/title_state.h"
+ #include "xam/xam_state.h"
+ #include "xam/enumerator_object.h"
++#include <rex/filesystem/file_system_factory.h>
+ #include <set>
+ #include <atomic>
+ #include <rex/kernel/title_exit.h>
+@@ -1015,3 +1016,51 @@
+     CHECK(query(0, 0, 2).empty());
+   });
+ }
++
++
++REX_TEST_CASE("content attributes retain packed BE timestamps, recursive byte size and failure completions", "[kernel][xam][content-attributes]") {
++  KernelFixture fixture([](const std::filesystem::path& root) {
++    REQUIRE(std::filesystem::equivalent(root.parent_path(), std::filesystem::temp_directory_path()));
++    REQUIRE(root.filename().string().starts_with("rexglue_kernel_fixture_"));
++    const auto package = root / "0000000000000000" / "584108B7" / "000D0000" / "package";
++    std::filesystem::create_directories(package / "sub");
++    std::ofstream(package / "payload", std::ios::binary).write("actual bytes", 12);
++    std::ofstream(package / "sub" / "more", std::ios::binary).write("abc", 3);
++  });
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto input = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
++    auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + input);
++    *data = {};
++    data->device_id = 1;
++    data->title_id = 0x584108B7;
++    data->content_type = static_cast<rex::kernel::XContentType>(0xD0000);
++    data->SetFileName("package");
++    const auto output = caller.Alloc(44), overlap = caller.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    std::memset(caller.GetBase() + output, 0xA5, 44);
++    // Snapshot before traversal: enumerating a directory may update its native access time.
++    const auto path = fixture.GetRoot() / "0000000000000000" / "584108B7" / "000D0000" / "package";
++    const auto info = rex::xam::CurrentTitle().file_system_factory.StatHostPath(path);
++    REQUIRE(info.has_value());
++    REQUIRE(caller.XAM("XamContentGetAttributesInternal", {input, output, 0}) == 0);
++    CHECK(caller.Load32(output) == 0x10);
++    CHECK(caller.Load32(output + 28) == 0);
++    CHECK(caller.Load32(output + 32) == 15);
++    CHECK(caller.Load32(output + 36) == 0xA5A5A5A5);
++    for (const auto& [offset, expected] : {std::pair<u32, u64>{4, info->create_time}, {12, info->access_time}, {20, info->write_time}})
++      CHECK(((u64(caller.Load32(output + offset)) << 32) | caller.Load32(output + offset + 4)) == expected);
++    REQUIRE(caller.XAM("XamContentGetAttributesInternal", {input, output, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(caller.Load32(overlap) == 0);
++    data->SetFileName("missing");
++    std::memset(caller.GetBase() + output, 0xA5, 44);
++    CHECK(caller.XAM("XamContentGetAttributesInternal", {input, output, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(caller.Load32(overlap) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    for (u32 offset = 0; offset < 44; offset += 4) CHECK(caller.Load32(output + offset) == 0xA5A5A5A5);
++    data->SetFileName("../package");
++    CHECK(caller.XAM("XamContentGetAttributesInternal", {input, output, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    data->device_id = 2;
++    CHECK(caller.XAM("XamContentGetAttributesInternal", {input, output, 0}) == 50);
++    data->device_id = 99;
++    CHECK(caller.XAM("XamContentGetAttributesInternal", {input, output, 0}) == rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED);
++    CHECK(caller.XAM("XamContentGetAttributesInternal", {0, output, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++  });
++}

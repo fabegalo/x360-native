@@ -1,0 +1,222 @@
+diff --git a/include/rex/xam/user_profile.h b/include/rex/xam/user_profile.h
+--- a/include/rex/xam/user_profile.h
++++ b/include/rex/xam/user_profile.h
+@@ -284,6 +284,8 @@
+   REX_XAM_API std::vector<Identity> local_profiles() const;
+   REX_XAM_API Identity FindLocal(u64 xuid) const;
+   REX_XAM_API u32 SetLocalSession(u64 xuid);
++  // Archive the committed identity snapshot; retain saves, settings and achievements.
++  REX_XAM_API u32 RemoveLocal(u64 xuid);
+   u64 GetStorageEpoch() const { return storage_epoch_.load(std::memory_order_acquire); }
+ 
+ 
+diff --git a/src/xam/user_profile.cpp b/src/xam/user_profile.cpp
+--- a/src/xam/user_profile.cpp
++++ b/src/xam/user_profile.cpp
+@@ -16,6 +16,7 @@
+ #include <cstring>
+ #include <cctype>
+ #include <random>
++#include <chrono>
+ #include <rex/platform.h>
+ #if REX_PLATFORM_WIN32
+ #include <windows.h>
+@@ -261,9 +262,14 @@
+     if (size < 20 || std::memcmp(record.data(), "X360LP02", 8)) return false;
+     count = (static_cast<u32>(record[8]) << 24) | (static_cast<u32>(record[9]) << 16) |
+             (static_cast<u32>(record[10]) << 8) | record[11];
+-    if (!count || count > 64 || size != 20 + count * 25) return false;
++    if (count > 64 || size != 20 + count * 25) return false;
+     selected = read64(12);
+     offset = 20;
++    if (!count) {
++      if (selected) return false;
++      storage_ready_ = true;
++      return true; // A committed tombstone takes precedence over the v1 migration source.
++    }
+   } else if (size != 33 || std::memcmp(record.data(), "X360LP01", 8)) return false;
+   std::vector<Identity> loaded;
+   unsigned signed_in = 0;
+@@ -295,7 +301,7 @@
+   std::error_code error;
+   std::filesystem::create_directories(profile_path_.parent_path(), error);
+   if (error) { REXSYS_ERROR("Local profile directory: {}", error.message()); return false; }
+-  const bool version2 = next.size() > 1 || profile_path_.filename() == "local-v2.dat";
++  const bool version2 = next.size() != 1 || profile_path_.filename() == "local-v2.dat";
+   const auto destination = profile_path_.parent_path() / (version2 ? "local-v2.dat" : "local-v1.dat");
+   std::vector<u8> record(version2 ? 20 + next.size() * 25 : 33, 0);
+   std::memcpy(record.data(), version2 ? "X360LP02" : "X360LP01", 8);
+@@ -370,6 +376,59 @@
+   profiles_ = std::move(next);
+   identity_ = std::move(selected);
+   if (created_xuid) *created_xuid = xuid;
++  return X_ERROR_SUCCESS;
++}
++
++u32 UserProfile::RemoveLocal(u64 xuid) {
++  auto settings_lock = LockSettings();
++  std::unique_lock lock(identity_mutex_);
++  auto next = profiles_;
++  const auto target = std::find_if(next.begin(), next.end(),
++      [xuid](const auto& profile) { return profile.xuid == xuid; });
++  if (target == next.end()) return X_ERROR_NO_SUCH_USER;
++  std::error_code error;
++  const auto recovery_dir = profile_path_.parent_path() / "deleted";
++  std::filesystem::create_directories(recovery_dir, error);
++  if (error) return X_ERROR_FUNCTION_FAILED;
++  const auto recovery = recovery_dir / std::format("{:016X}-{}-{}", xuid,
++      std::chrono::steady_clock::now().time_since_epoch().count(), profile_path_.filename().string());
++  if (!std::filesystem::copy_file(profile_path_, recovery, std::filesystem::copy_options::none, error) || error)
++    return X_ERROR_FUNCTION_FAILED;
++  auto* archive = platform::OpenFile(recovery, "ab");
++  if (!archive) return X_ERROR_FUNCTION_FAILED;
++  bool durable = fflush(archive) == 0;
++#if REX_PLATFORM_WIN32
++  if (durable) durable = _commit(_fileno(archive)) == 0;
++#else
++  if (durable) durable = fsync(fileno(archive)) == 0;
++#endif
++  if (fclose(archive)) durable = false;
++  if (!durable) return X_ERROR_FUNCTION_FAILED;
++  next.erase(target);
++  auto selected = identity_;
++  const bool removed_selection = selected.xuid == xuid;
++  const bool signed_out = removed_selection && selected.signin_state != 0;
++  if (removed_selection) {
++    selected = next.empty() ? Identity{} : next.front();
++    selected.signin_state = 0;
++    for (auto& profile : next) profile.signin_state = 0;
++  }
++  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  profiles_ = std::move(next);
++  identity_ = std::move(selected);
++  if (removed_selection) {
++    storage_epoch_.fetch_add(1, std::memory_order_acq_rel);
++    for (auto& setting : setting_list_) if (setting->IsTitleSpecific()) {
++      setting->loaded_title_id = 0;
++      if (setting->type == Setting::Type::kBinary) {
++        static_cast<BinarySetting*>(setting.get())->value.clear();
++        setting->is_set = false;
++      }
++    }
++  }
++  const auto changed = session_changed_;
++  lock.unlock();
++  if (signed_out && changed) changed();
+   return X_ERROR_SUCCESS;
+ }
+ 
+diff --git a/src/xam/xam_enum.cpp b/src/xam/xam_enum.cpp
+--- a/src/xam/xam_enum.cpp
++++ b/src/xam/xam_enum.cpp
+@@ -154,6 +154,12 @@
+   *handle = *added;
+   REXXAM_INFO("Local profile created name={} xuid={:016X} result={}", name, operation->xuid, operation->result);
+   return 0;
++}
++
++u32 XamProfileDelete_entry(u32 device, u64 xuid) {
++  const auto result = device > 1 ? kernel::X_ERROR_DEVICE_NOT_CONNECTED
++      : CurrentXAM().GetUserProfile().RemoveLocal(xuid);
++  return static_cast<u32>(kernel::XHRESULTFromWin32(result));
+ }
+ 
+ u32 XamProfileGetCreationStatus_entry(u32 handle, MappedU64 xuid) {
+@@ -286,3 +292,5 @@
+ REX_XAM_BODY(__imp__XamProfileCreate, rex::xam::XamProfileCreate_entry)
+ 
+ REX_XAM_BODY(__imp__XamProfileGetCreationStatus, rex::xam::XamProfileGetCreationStatus_entry)
++
++REX_XAM_BODY(__imp__XamProfileDelete, rex::xam::XamProfileDelete_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -646,7 +646,7 @@
+ REX_EXPORT_STUB(__imp__XamProfileControlPec);
+ 
+ 
+-REX_EXPORT_STUB(__imp__XamProfileDelete);
++
+ 
+ 
+ REX_EXPORT_STUB(__imp__XamProfileGetCachedWindowsLiveEmail);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -388,3 +388,5 @@
+ REX_XAM_FORWARD(__imp__XamInputSetKeyboardTranslationHud)
+ 
+ REX_XAM_FORWARD(__imp__XamLoaderRebootToDash)
++
++REX_XAM_FORWARD(__imp__XamProfileDelete)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1858,3 +1858,67 @@
+     CHECK(loader.launch_data == expected);
+   }
+ }
++
++
++REX_TEST_CASE("profile removal archives committed identities and keeps original user data recoverable", "[kernel][xam][local-profile-session][profile-removal]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  const auto root = rex::xam::CurrentTitle().user_data_root;
++  u64 first = 0, second = 0;
++  REQUIRE(profile.CreateLocal("First", &first) == 0);
++  REQUIRE(profile.SetLocalSession(first) == 0);
++  REQUIRE(profile.CreateLocal("Second", &second) == 0);
++  const auto v1 = root / "profiles" / "local-v1.dat", v2 = root / "profiles" / "local-v2.dat";
++  REQUIRE(std::filesystem::exists(v1)); REQUIRE(std::filesystem::exists(v2));
++  const auto data = root / "preserved-user-data.bin";
++  { std::ofstream out(data, std::ios::binary); out << "save and profile data"; }
++  const auto epoch = profile.GetStorageEpoch();
++  fixture.RunOnGuestThread([&](Caller& c) {
++    CHECK(c.XAM("XamProfileDelete", {2, second}) == static_cast<u32>(rex::kernel::XHRESULTFromWin32(rex::kernel::X_ERROR_DEVICE_NOT_CONNECTED)));
++    REQUIRE(c.XAM("XamProfileDelete", {0, second}) == 0);
++    CHECK(c.XAM("XamProfileDelete", {0, second}) == static_cast<u32>(rex::kernel::XHRESULTFromWin32(rex::kernel::X_ERROR_NO_SUCH_USER)));
++  });
++  CHECK(profile.identity().xuid == first); CHECK(profile.GetSigninState() == 1);
++  CHECK(profile.GetStorageEpoch() == epoch);
++  std::vector<std::filesystem::path> archives;
++  for (const auto& entry : std::filesystem::directory_iterator(root / "profiles" / "deleted")) archives.push_back(entry.path());
++  REQUIRE(archives.size() == 1);
++  CHECK(std::filesystem::file_size(archives.front()) == 20 + 2 * 25);
++  REQUIRE(profile.RemoveLocal(first) == 0);
++  CHECK(profile.identity().xuid == 0); CHECK(profile.GetSigninState() == 0);
++  CHECK(profile.GetStorageEpoch() > epoch);
++  CHECK(profile.local_profiles().empty());
++  CHECK(std::filesystem::file_size(v2) == 20);
++  CHECK(std::filesystem::file_size(v1) == 33);
++  CHECK(std::filesystem::file_size(data) == 21);
++  rex::xam::UserProfile reopened;
++  REQUIRE(reopened.InitializeLocal(root));
++  CHECK(reopened.local_profiles().empty()); CHECK(reopened.identity().xuid == 0);
++  REQUIRE(reopened.CreateLocal("New") == 0);
++  CHECK(reopened.local_profiles().size() == 1);
++  CHECK(reopened.GetName() == "New");
++}
++
++REX_TEST_CASE("failed profile removal preserves the committed identity and sign-in epoch", "[kernel][xam][local-profile-session][profile-removal]") {
++  KernelFixture fixture;
++  auto& profile = rex::xam::CurrentXAM().GetUserProfile();
++  const auto root = rex::xam::CurrentTitle().user_data_root;
++  REQUIRE(profile.CreateLocal("Keep") == 0);
++  const auto xuid = profile.identity().xuid;
++  REQUIRE(profile.SetLocalSession(xuid) == 0);
++  const auto epoch = profile.GetStorageEpoch();
++  const auto recovery = root / "profiles" / "deleted";
++  { std::ofstream out(recovery); out << "blocked"; }
++  CHECK(profile.RemoveLocal(xuid) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++  CHECK(std::filesystem::file_size(recovery) == 7);
++  CHECK(profile.identity().xuid == xuid); CHECK(profile.GetSigninState() == 1);
++  CHECK(profile.GetStorageEpoch() == epoch);
++  std::filesystem::remove(recovery);
++  std::filesystem::create_directory(root / "profiles" / "local-v2.dat.tmp");
++  CHECK(profile.RemoveLocal(xuid) == rex::kernel::X_ERROR_FUNCTION_FAILED);
++  CHECK(profile.identity().xuid == xuid); CHECK(profile.GetSigninState() == 1);
++  CHECK(profile.GetStorageEpoch() == epoch);
++  rex::xam::UserProfile reopened;
++  REQUIRE(reopened.InitializeLocal(root));
++  CHECK(reopened.identity().xuid == xuid); CHECK(reopened.GetSigninState() == 1);
++}

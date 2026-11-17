@@ -1,71 +1,105 @@
-diff --git a/include/rex/runtime.h b/include/rex/runtime.h
-index 34f226c..b3b4a6f 100644
---- a/include/rex/runtime.h
-+++ b/include/rex/runtime.h
-@@ -156,6 +156,9 @@ class Runtime {
+diff --git a/include/rex/kernel/title_runtime.h b/include/rex/kernel/title_runtime.h
+--- a/include/rex/kernel/title_runtime.h
++++ b/include/rex/kernel/title_runtime.h
+@@ -90,6 +90,8 @@
+    * @param image The recompiled image the codegen header declares.
+    */
+   explicit TitleRuntime(const ppc::PPCImage& image);
++  // Must match the entrypoint's REX_HOST_FUNCTION_TABLE codegen setting.
++  TitleRuntime(const ppc::PPCImage& image, bool host_function_table);
  
-   // rexglue - initializes per-module function dispatch table
-   X_STATUS Setup(const PPCImageInfo& image_info, RuntimeConfig config = {});
-+  // Opt-in entrypoint dispatch without a guest-resident auxiliary table.
-+  // Keep the original overload and the PPCImageInfo/RuntimeConfig layouts.
-+  X_STATUS Setup(const PPCImageInfo& image_info, RuntimeConfig config, bool host_function_table);
- 
-   const PPCCodegenFlags& codegen_flags() const { return codegen_flags_; }
- 
-diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
-index 3f6b6f4..f9aebb7 100644
---- a/src/system/runtime.cpp
-+++ b/src/system/runtime.cpp
-@@ -204,6 +204,11 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
+   /** Unloads the title when it is loaded. */
+   ~TitleRuntime();
+diff --git a/src/kernel/title_runtime.cpp b/src/kernel/title_runtime.cpp
+--- a/src/kernel/title_runtime.cpp
++++ b/src/kernel/title_runtime.cpp
+@@ -49,8 +49,10 @@
+   return settings;
  }
  
- X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig config) {
-+  return Setup(image_info, std::move(config), false);
-+}
+-TitleRuntime::TitleRuntime(const ppc::PPCImage& image)
+-    : state_(std::make_unique<kernel::TitleState>(*this, image)) {}
++TitleRuntime::TitleRuntime(const ppc::PPCImage& image) : TitleRuntime(image, false) {}
 +
-+X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig config,
-+                        bool host_function_table) {
-   X_STATUS status = Setup(std::move(config));
-   if (status != X_STATUS_SUCCESS) {
-     return status;
-@@ -213,7 +218,7 @@ X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig confi
++TitleRuntime::TitleRuntime(const ppc::PPCImage& image, bool host_function_table)
++    : state_(std::make_unique<kernel::TitleState>(*this, image, host_function_table)) {}
+ 
+ TitleRuntime::~TitleRuntime() {
+   state_->Unload();
+diff --git a/src/kernel/title_state.h b/src/kernel/title_state.h
+--- a/src/kernel/title_state.h
++++ b/src/kernel/title_state.h
+@@ -115,7 +115,7 @@
+    * @param owner The public object that owns this state.
+    * @param image The recompiled image the codegen header declares.
+    */
+-  TitleState(TitleRuntime& owner, const ppc::PPCImage& image);
++  TitleState(TitleRuntime& owner, const ppc::PPCImage& image, bool host_function_table = false);
+ 
+   /** Unloads the title when it is loaded. */
+   ~TitleState();
+@@ -374,6 +374,7 @@
+ 
+  private:
+   TitleRuntime& owner_;
++  const bool host_function_table_;
+ 
+   [[nodiscard]] Result<void> LoadKernel();
+   [[nodiscard]] Result<void> InstallImage();
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -89,7 +89,8 @@
+ 
+ }  // namespace
+ 
+-TitleState::TitleState(TitleRuntime& owner, const ppc::PPCImage& image) : owner_(owner) {
++TitleState::TitleState(TitleRuntime& owner, const ppc::PPCImage& image, bool host_function_table)
++    : owner_(owner), host_function_table_(host_function_table) {
+   image_ = image;
+   has_image_ = true;
+ }
+@@ -331,7 +332,7 @@
  
    if (!function_dispatcher_->InitializeFunctionTable(image_info.code_base, image_info.code_size,
                                                       image_info.image_base, image_info.image_size,
 -                                                     /*is_entrypoint=*/true)) {
-+                                                     /*is_entrypoint=*/true, host_function_table)) {
-     REXSYS_ERROR("Failed to initialize function table");
-     return X_STATUS_UNSUCCESSFUL;  // patch 0002: teardown is left to ~Runtime()
++                                                     /*is_entrypoint=*/true, host_function_table_)) {
+     Shutdown();
+     return Err(SetupError(X_STATUS_UNSUCCESSFUL, "the function table cannot be initialized"));
    }
-diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
-index 1f52480..e4e5d34 100644
---- a/include/rex/rex_app.h
-+++ b/include/rex/rex_app.h
-@@ -286,6 +286,12 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
-   // WindowInputListener overrides
-   void OnKeyDown(ui::KeyEvent& e) override;
+diff --git a/include/rex/app/title_app.h b/include/rex/app/title_app.h
+--- a/include/rex/app/title_app.h
++++ b/include/rex/app/title_app.h
+@@ -40,6 +40,7 @@
+    * @param image The recompiled image the codegen header declares.
+    */
+   TitleApp(std::string_view app_name, const ppc::PPCImage& image);
++  TitleApp(std::string_view app_name, const ppc::PPCImage& image, bool host_function_table);
+   ~TitleApp() override;
  
-+ protected:
-+  // Appended opt-in hook: compiled indirect dispatch must use the same mode.
-+  // Existing apps retain the guest table and their original Setup overload.
-+  virtual bool UseHostFunctionTable() const { return false; }
+   /**
+diff --git a/src/app/title_app.cpp b/src/app/title_app.cpp
+--- a/src/app/title_app.cpp
++++ b/src/app/title_app.cpp
+@@ -67,7 +67,7 @@
+ }  // namespace
+ 
+ struct TitleApp::State {
+-  explicit State(const ppc::PPCImage& image) : runtime(image) {}
++  State(const ppc::PPCImage& image, bool host_function_table) : runtime(image, host_function_table) {}
+ 
+   rex::kernel::TitleRuntime runtime;
+   ScopeGuard exit_guard;
+@@ -77,7 +77,10 @@
+ };
+ 
+ TitleApp::TitleApp(std::string_view app_name, const ppc::PPCImage& image)
+-    : App(app_name), state_(std::make_unique<State>(image)) {
++    : TitleApp(app_name, image, false) {}
 +
-+ private:
-   PPCImageInfo ppc_info_;
-   PathConfig resolved_defaults_;
-   RuntimeConfig config_;
-diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
-index ae55246..dcd5123 100644
---- a/src/ui/rex_app.cpp
-+++ b/src/ui/rex_app.cpp
-@@ -234,7 +234,9 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
-     runtime_->set_imgui_drawer(imgui_drawer_.get());
-   }
++TitleApp::TitleApp(std::string_view app_name, const ppc::PPCImage& image, bool host_function_table)
++    : App(app_name), state_(std::make_unique<State>(image, host_function_table)) {
+   state_->com_initialized = ::rex::app::detail::InitializeCOM();
+ }
  
--  auto status = runtime_->Setup(ppc_info_, std::move(config_));
-+  auto status = UseHostFunctionTable()
-+      ? runtime_->Setup(ppc_info_, std::move(config_), true)
-+      : runtime_->Setup(ppc_info_, std::move(config_));
-   if (XFAILED(status)) {
-     REXLOG_ERROR("Runtime setup failed: {:08X}", status);
-     return false;

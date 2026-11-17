@@ -1,109 +1,155 @@
-diff --git a/include/rex/graphics/flags.h b/include/rex/graphics/flags.h
---- a/include/rex/graphics/flags.h
-+++ b/include/rex/graphics/flags.h
-@@ -122,3 +122,5 @@
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.h b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.h
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.h
+@@ -70,7 +70,7 @@
+      * Layout version in 0xYYYYMMDD form, increased on incompatible changes to invalidate pipeline
+      * storage.
+      */
+-    static constexpr u32 kVersion = 0x20261124;
++    static constexpr u32 kVersion = 0x20261125;
  
- REXCVAR_DECLARE(std::string, edram_tile_count);
- namespace rex::graphics { uint32_t GetConfiguredEdramTileCount(); }
-+
-+REXCVAR_DECLARE(bool, mulsc_round_toward_zero);
-diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
---- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
-+++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
-@@ -108,7 +108,7 @@
-     // If anything in this is structure is changed in a way not compatible with
-     // the previous layout, invalidate the pipeline storages by increasing this
-     // version number (0xYYYYMMDD)!
--    static constexpr uint32_t kVersion = 0x20261117;
-+    static constexpr uint32_t kVersion = 0x20261118;
- 
- 
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
      // Opt-in for backends that make every possible destination resident and
-@@ -924,6 +924,9 @@
-   void ProcessVectorAluOperation(const ParsedAluInstruction& instr,
-                                  uint8_t memexport_eM_potentially_written_before,
-                                  uint32_t& result_swizzle, bool& predicate_written);
-+  void ReduceFloatPrecision(const dxbc::Dest& dest, const dxbc::Src& value,
-+                            uint32_t mantissa_bits);
+@@ -96,6 +96,7 @@
+     static constexpr ShaderModificationKey kInterpolatorNoPerspective{0, static_cast<u64>(1) << 1};
+ 
+     static constexpr ShaderModificationKey kScaledTextureOffsetsDisabled{0, u64{1} << 17};
++    static constexpr ShaderModificationKey kMulscRTZ{0, u64{1} << 18};
+ 
+     enum class DepthStencilMode : u32 {
+       kNoModifiers,
+@@ -1007,8 +1008,11 @@
+                  u8 memexport_em_potentially_written_before);
+ 
+   void ProcessVectorAluOperation(const ParsedALUInstruction& instr,
+-                                 u8 memexport_em_potentially_written_before, u32& result_swizzle,
+-                                 bool& predicate_written);
++                                 u8 memexport_em_potentially_written_before,
++                                 u32& result_swizzle, bool& predicate_written);
++  void ReduceFloatPrecision(const dxbc::Dest& Dest, const dxbc::Src& value,
++                            u32 mantissa_bits);
 +
-   void ProcessScalarAluOperation(const ParsedAluInstruction& instr,
-                                  uint8_t memexport_eM_potentially_written_before,
+   void ProcessScalarAluOperation(const ParsedALUInstruction& instr,
+                                  u8 memexport_em_potentially_written_before,
                                   bool& predicate_written);
-diff --git a/include/rex/graphics/pipeline/shader/interpreter.h b/include/rex/graphics/pipeline/shader/interpreter.h
---- a/include/rex/graphics/pipeline/shader/interpreter.h
-+++ b/include/rex/graphics/pipeline/shader/interpreter.h
-@@ -114,6 +114,8 @@
-   const std::array<float, 4> GetFloatConstant(uint32_t address, bool is_relative,
-                                               bool relative_address_is_a0) const;
+diff --git a/src/gpu/xenos/pipeline/shader/interpreter.h b/src/gpu/xenos/pipeline/shader/interpreter.h
+--- a/src/gpu/xenos/pipeline/shader/interpreter.h
++++ b/src/gpu/xenos/pipeline/shader/interpreter.h
+@@ -29,8 +29,9 @@
  
-+  static float ReduceFloatPrecision(float value, uint32_t mantissa_bits);
+ class ShaderInterpreter {
+  public:
+-  ShaderInterpreter(const xenos::RegisterFile& register_file, IPhysicalMemory& memory)
+-      : register_file_(register_file), physical_memory_(memory) {}
++  ShaderInterpreter(const xenos::RegisterFile& register_file, IPhysicalMemory& memory,
++                    bool mulsc_round_toward_zero = false)
++      : register_file_(register_file), physical_memory_(memory), mulsc_round_toward_zero_(mulsc_round_toward_zero) {}
+ 
+   class ExportSink {
+    public:
+@@ -118,7 +119,9 @@
+     return temp_registers_[GetTempRegisterIndex(address, is_relative)];
+   }
+   const std::array<f32, 4> GetFloatConstant(u32 address, bool is_relative,
+-                                            bool relative_address_is_a0) const;
++                                              bool relative_address_is_a0) const;
 +
-   void ExecuteAluInstruction(ucode::AluInstruction instr);
-   void StoreFetchResult(uint32_t dest, bool is_dest_relative, uint32_t swizzle, const float* value);
-   void ExecuteVertexFetchInstruction(ucode::VertexFetchInstruction instr);
-diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
---- a/include/rex/graphics/pipeline/shader/spirv_translator.h
-+++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
-@@ -34,7 +34,7 @@
-     // prototyping stage (easier to do small granular updates with an
-     // incremental counter).
-     // Also invalidate stored translations when emitted control-flow changes.
--    static constexpr uint32_t kVersion = 0x20261117;
-+    static constexpr uint32_t kVersion = 0x20261118;
++  static f32 ReduceFloatPrecision(f32 value, u32 mantissa_bits);
  
+   void ExecuteALUInstruction(xenos::ucode::AluInstruction instr);
+   void StoreFetchResult(u32 dest, bool is_dest_relative, u32 swizzle, const f32* value);
+@@ -126,6 +129,7 @@
  
+   const xenos::RegisterFile& register_file_;
+   IPhysicalMemory& physical_memory_;
++  const bool mulsc_round_toward_zero_;
+ 
+   ExportSink* export_sink_ = nullptr;
+ 
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -32,7 +32,7 @@
+  public:
+   union Modification {
+     /** Pipeline storage version, incremented when the layout changes incompatibly. */
+-    static constexpr u32 kVersion = 0x20261125;
++    static constexpr u32 kVersion = 0x20261126;
+ 
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
      // Opt-in for backends that make every possible destination resident and
-@@ -681,6 +681,8 @@
-   // destination. If the return value is ps itself (in the retain_prev case),
-   // returns spv::NoResult (handled as a special case, so if it's retain_prev,
-   // but don't need to write to anywhere, no OpLoad(ps) will be done).
-+  spv::Id ReduceFloatPrecision(spv::Id value, uint32_t mantissa_bits);
+@@ -52,6 +52,7 @@
+     static constexpr ShaderModificationKey kXenosVIZSurvey{0, static_cast<u64>(1) << 9};
+ 
+     static constexpr ShaderModificationKey kScaledTextureOffsetsDisabled{0, u64{1} << 17};
++    static constexpr ShaderModificationKey kMulscRTZ{0, u64{1} << 18};
+ 
+     enum class DepthStencilMode : u32 {
+       kNoModifiers,
+@@ -416,14 +417,15 @@
+   SPIRVShaderTranslator(const Features& features, bool native_2x_msaa_with_attachments,
+                         bool native_2x_msaa_no_attachments, bool edram_fragment_shader_interlock,
+                         u32 draw_resolution_scale_x = 1, u32 draw_resolution_scale_y = 1,
+-                        bool scaled_texture_offsets = true)
++                        bool scaled_texture_offsets = true, bool mulsc_round_toward_zero = false)
+       : features_(features),
+         native_2x_msaa_with_attachments_(native_2x_msaa_with_attachments),
+         native_2x_msaa_no_attachments_(native_2x_msaa_no_attachments),
+         edram_fragment_shader_interlock_(edram_fragment_shader_interlock),
+         draw_resolution_scale_x_(draw_resolution_scale_x ? draw_resolution_scale_x : 1),
+         draw_resolution_scale_y_(draw_resolution_scale_y ? draw_resolution_scale_y : 1),
+-        scaled_texture_offsets_(scaled_texture_offsets) {}
++        scaled_texture_offsets_(scaled_texture_offsets),
++        mulsc_round_toward_zero_(mulsc_round_toward_zero) {}
+ 
+   ShaderModificationKey GetDefaultVertexShaderModification(
+       u32 dynamic_addressable_register_count,
+@@ -816,6 +818,11 @@
+    * @param memexport_em_potentially_written_before Bit mask of eM# elements possibly written.
+    * @param predicate_written Set when the operation writes the predicate.
+    */
++  // destination. If the return value is ps itself (in the retain_prev case),
++  // returns spv::NoResult (handled as a special case, so if it's retain_prev,
++  // but don't need to write to anywhere, no OpLoad(ps) will be done).
++  spv::Id ReduceFloatPrecision(spv::Id value, u32 mantissa_bits);
 +
-   spv::Id ProcessScalarAluOperation(const ParsedAluInstruction& instr,
-                                     uint8_t memexport_eM_potentially_written_before,
+   spv::Id ProcessScalarALUOperation(const ParsedALUInstruction& instr,
+                                     u8 memexport_em_potentially_written_before,
                                      bool& predicate_written);
-diff --git a/src/graphics/flags.cpp b/src/graphics/flags.cpp
---- a/src/graphics/flags.cpp
-+++ b/src/graphics/flags.cpp
-@@ -78,3 +78,7 @@
-   return REXCVAR_GET(edram_tile_count) == "extended" ? xenos::kEdramTileCountMax : xenos::kEdramTileCount;
- }
- }
-+
-+REXCVAR_DEFINE_BOOL(mulsc_round_toward_zero, false, "GPU",
-+    "Opt-in mulsc rounding toward zero for Volition Engine geometry; real hardware rounding remains unconfirmed")
-+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics/pipeline/shader/dxbc_translator_alu.cpp
---- a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp
-+++ b/src/graphics/pipeline/shader/dxbc_translator_alu.cpp
-@@ -13,6 +13,7 @@
- #include <cmath>
+@@ -1041,6 +1048,7 @@
+   u32 draw_resolution_scale_x_;
+   u32 draw_resolution_scale_y_;
+   bool scaled_texture_offsets_;
++  const bool mulsc_round_toward_zero_;
  
- #include <rex/assert.h>
-+#include <rex/graphics/flags.h>
- #include <rex/graphics/pipeline/shader/dxbc_translator.h>
- #include <rex/math.h>
+   bool is_depth_only_fragment_shader_ = false;
  
-@@ -586,9 +587,57 @@
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator_alu.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator_alu.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator_alu.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator_alu.cpp
+@@ -530,9 +530,57 @@
    PopSystemTemp(operand_temps);
  }
  
-+void DxbcShaderTranslator::ReduceFloatPrecision(const dxbc::Dest& dest,
+-void DXBCShaderTranslator::ProcessScalarAluOperation(const ParsedALUInstruction& instr,
+-                                                     u8 memexport_em_potentially_written_before,
+-                                                     bool& predicate_written) {
++void DXBCShaderTranslator::ReduceFloatPrecision(const dxbc::Dest& Dest,
 +                                                const dxbc::Src& value,
-+                                                uint32_t mantissa_bits) {
++                                                u32 mantissa_bits) {
 +  // Round to nearest, with halfway values away from zero. We don't know the
 +  // actual midpoint behavior, this is the one 4E4D07D1 needs. Signed zero stays
 +  // signed. Denormals still follow the host float controls.
-+  assert_true(mantissa_bits > 0 && mantissa_bits < 23);
++  REX_ASSERT(mantissa_bits > 0 && mantissa_bits < 23);
 +
-+  uint32_t truncate_bits = 23 - mantissa_bits;
-+  uint32_t discarded_mask = (uint32_t(1) << truncate_bits) - 1;
-+  uint32_t truncate_mask = ~discarded_mask;
-+  uint32_t round_bit = uint32_t(1) << (truncate_bits - 1);
-+  uint32_t reduced_ulp = uint32_t(1) << truncate_bits;
++  u32 truncate_bits = 23 - mantissa_bits;
++  u32 discarded_mask = (static_cast<u32>(1) << truncate_bits) - 1;
++  u32 truncate_mask = ~discarded_mask;
++  u32 round_bit = static_cast<u32>(1) << (truncate_bits - 1);
++  u32 reduced_ulp = static_cast<u32>(1) << truncate_bits;
 +
 +  // x keeps the original, y is truncated, z is rounded, and w is scratch.
-+  uint32_t temp = PushSystemTemp();
++  u32 temp = PushSystemTemp();
 +  dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
 +  dxbc::Dest temp_y_dest(dxbc::Dest::R(temp, 0b0010));
 +  dxbc::Dest temp_z_dest(dxbc::Dest::R(temp, 0b0100));
@@ -131,82 +177,79 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +  // reduces finite results and shouldn't make a nonfinite value look finite.
 +  a_.OpAnd(temp_w_dest, temp_x_src, dxbc::Src::LU(0x7F800000u));
 +  a_.OpIEq(temp_w_dest, temp_w_src, dxbc::Src::LU(0x7F800000u));
-+  a_.OpMovC(dest, temp_w_src, temp_x_src, temp_y_src);
++  a_.OpMovC(Dest, temp_w_src, temp_x_src, temp_y_src);
 +
 +  PopSystemTemp();
 +}
 +
- void DxbcShaderTranslator::ProcessScalarAluOperation(
--    const ParsedAluInstruction& instr, uint8_t memexport_eM_potentially_written_before,
--    bool& predicate_written) {
-+    const ParsedAluInstruction& instr,
-+    uint8_t memexport_eM_potentially_written_before, bool& predicate_written) {
++void DXBCShaderTranslator::ProcessScalarAluOperation(
++    const ParsedALUInstruction& instr,
++    u8 memexport_em_potentially_written_before, bool& predicate_written) {
    predicate_written = false;
  
-   if (instr.scalar_opcode == ucode::AluScalarOpcode::kRetainPrev) {
-@@ -601,7 +650,8 @@
-   for (uint32_t i = 0; i < instr.scalar_operand_count; ++i) {
+   if (instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kRetainPrev) {
+@@ -544,7 +592,8 @@
+   for (u32 i = 0; i < instr.scalar_operand_count; ++i) {
      bool operand_temp_pushed = false;
      operands_loaded[i] =
 -        LoadOperand(instr.scalar_operands[i], (1 << instr.scalar_operands[i].component_count) - 1,
 +        LoadOperand(instr.scalar_operands[i],
 +                    (1 << instr.scalar_operands[i].component_count) - 1,
                      operand_temp_pushed);
-     operand_temps += uint32_t(operand_temp_pushed);
+     operand_temps += static_cast<u32>(operand_temp_pushed);
    }
-@@ -621,15 +671,18 @@
+@@ -564,10 +613,14 @@
        break;
      case AluScalarOpcode::kMuls:
        a_.OpMul(ps_dest, operand_0_a, operand_0_b);
 -      if (instr.scalar_operands[0].components[0] != instr.scalar_operands[0].components[1]) {
+-        // Shader Model 3 gives +-0 or denormal * anything = +0.
 +      if (instr.scalar_operands[0].components[0] !=
 +          instr.scalar_operands[0].components[1]) {
-         // Shader Model 3: +-0 or denormal * anything = +0.
-         uint32_t is_zero_temp = PushSystemTemp();
++        // Shader Model 3: +-0 or denormal * anything = +0.
++        // Shader Model 3: +-0 or denormal * anything = +0.
+         u32 is_zero_temp = PushSystemTemp();
 -        a_.OpMin(dxbc::Dest::R(is_zero_temp, 0b0001), operand_0_a.Abs(), operand_0_b.Abs());
 +        a_.OpMin(dxbc::Dest::R(is_zero_temp, 0b0001), operand_0_a.Abs(),
 +                 operand_0_b.Abs());
-         // min isn't required to flush denormals, eq is.
--        a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001), dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
-+        a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001),
-+                dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
++        // min isn't required to flush denormals, eq is.
+         // min need not flush denormals, but eq does.
+         a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001), dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
                  dxbc::Src::LF(0.0f));
--        a_.OpMovC(ps_dest, dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX), dxbc::Src::LF(0.0f),
--                  ps_src);
-+        a_.OpMovC(ps_dest, dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
-+                  dxbc::Src::LF(0.0f), ps_src);
-         // Release is_zero_temp.
-         PopSystemTemp();
-       }
-@@ -640,31 +693,40 @@
+@@ -580,25 +633,47 @@
+     case AluScalarOpcode::kMulsPrev2: {
+       u32 test_temp = PushSystemTemp();
        if (instr.scalar_opcode == AluScalarOpcode::kMulsPrev2) {
-         // Check if need to select the src0.a * ps case.
-         // ps != -FLT_MAX.
 -        a_.OpNE(dxbc::Dest::R(test_temp, 0b0001), ps_src, dxbc::Src::LF(-FLT_MAX));
-+        a_.OpNE(dxbc::Dest::R(test_temp, 0b0001), ps_src,
-+                dxbc::Src::LF(-FLT_MAX));
-         // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since
-         // -FLT_MAX is already loaded to an SGPR, this is also false if it's
-         // NaN.
 -        a_.OpGE(dxbc::Dest::R(test_temp, 0b0010), -ps_src.Abs(), dxbc::Src::LF(-FLT_MAX));
 -        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001), dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
++        // Check if need to select the src0.a * ps case.
++        // ps != -FLT_MAX.
++        a_.OpNE(dxbc::Dest::R(test_temp, 0b0001), ps_src,
++                dxbc::Src::LF(-FLT_MAX));
++        // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since
++        // -FLT_MAX is already loaded to an SGPR, this is also false if it's
++        // NaN.
++        // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since
++        // -FLT_MAX is already loaded to an SGPR, this is also false if it's
++        // NaN.
 +        a_.OpGE(dxbc::Dest::R(test_temp, 0b0010), -ps_src.Abs(),
 +                dxbc::Src::LF(-FLT_MAX));
 +        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001),
 +                 dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
                   dxbc::Src::R(test_temp, dxbc::Src::kYYYY));
-         // isfinite(src0.b).
 -        a_.OpGE(dxbc::Dest::R(test_temp, 0b0010), -operand_0_b.Abs(), dxbc::Src::LF(-FLT_MAX));
 -        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001), dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
++        // isfinite(src0.b).
 +        a_.OpGE(dxbc::Dest::R(test_temp, 0b0010), -operand_0_b.Abs(),
 +                dxbc::Src::LF(-FLT_MAX));
 +        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001),
 +                 dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
                   dxbc::Src::R(test_temp, dxbc::Src::kYYYY));
-         // src0.b > 0 (need !(src0.b <= 0), but src0.b has already been checked
-         // for NaN).
 -        a_.OpLT(dxbc::Dest::R(test_temp, 0b0010), dxbc::Src::LF(0.0f), operand_0_b);
 -        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001), dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
++        // src0.b > 0 (need !(src0.b <= 0), but src0.b has already been checked
++        // for NaN).
 +        a_.OpLT(dxbc::Dest::R(test_temp, 0b0010), dxbc::Src::LF(0.0f),
 +                operand_0_b);
 +        a_.OpAnd(dxbc::Dest::R(test_temp, 0b0001),
@@ -214,13 +257,16 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
                   dxbc::Src::R(test_temp, dxbc::Src::kYYYY));
          a_.OpIf(true, dxbc::Src::R(test_temp, dxbc::Src::kXXXX));
        }
-       // Shader Model 3: +-0 or denormal * anything = +0.
+-      // Shader Model 3 gives +-0 or denormal * anything = +0.
 -      a_.OpMin(dxbc::Dest::R(test_temp, 0b0001), operand_0_a.Abs(), ps_src.Abs());
++      // Shader Model 3: +-0 or denormal * anything = +0.
 +      a_.OpMin(dxbc::Dest::R(test_temp, 0b0001), operand_0_a.Abs(),
 +               ps_src.Abs());
-       // min isn't required to flush denormals, eq is.
++      // min isn't required to flush denormals, eq is.
+       // min need not flush denormals, but eq does.
 -      a_.OpEq(dxbc::Dest::R(test_temp, 0b0001), dxbc::Src::R(test_temp, dxbc::Src::kXXXX),
 -              dxbc::Src::LF(0.0f));
++      // min isn't required to flush denormals, eq is.
 +      a_.OpEq(dxbc::Dest::R(test_temp, 0b0001),
 +              dxbc::Src::R(test_temp, dxbc::Src::kXXXX), dxbc::Src::LF(0.0f));
        a_.OpMul(ps_dest, operand_0_a, ps_src);
@@ -230,17 +276,21 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
        if (instr.scalar_opcode == AluScalarOpcode::kMulsPrev2) {
          a_.OpElse();
          a_.OpMov(ps_dest, dxbc::Src::LF(-FLT_MAX));
-@@ -677,7 +739,8 @@
+@@ -609,9 +684,12 @@
+ 
      case AluScalarOpcode::kMaxs:
      case AluScalarOpcode::kMins:
-       // max is commonly used as mov.
 -      if (instr.scalar_operands[0].components[0] == instr.scalar_operands[0].components[1]) {
++      // max is commonly used as mov.
 +      if (instr.scalar_operands[0].components[0] ==
 +          instr.scalar_operands[0].components[1]) {
          a_.OpMov(ps_dest, operand_0_a);
        } else {
-         // Shader Model 3 NaN behavior (a op b ? a : b, not fmax/fmin).
-@@ -719,11 +782,14 @@
++        // Shader Model 3 NaN behavior (a op b ? a : b, not fmax/fmin).
+         // Shader Model 3 NaN behavior (`a op b ? a : b`, not fmax/fmin).
+         if (instr.scalar_opcode == AluScalarOpcode::kMins) {
+           a_.OpLT(ps_dest, operand_0_a, operand_0_b);
+@@ -651,71 +729,99 @@
  
      case AluScalarOpcode::kExp:
        a_.OpExp(ps_dest, operand_0_a);
@@ -249,14 +299,14 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
      case AluScalarOpcode::kLogc: {
        a_.OpLog(ps_dest, operand_0_a);
 +      ReduceFloatPrecision(ps_dest, ps_src, 21);
-       uint32_t is_neg_infinity_temp = PushSystemTemp();
+       u32 is_neg_infinity_temp = PushSystemTemp();
 -      a_.OpEq(dxbc::Dest::R(is_neg_infinity_temp, 0b0001), ps_src, dxbc::Src::LF(-INFINITY));
 +      a_.OpEq(dxbc::Dest::R(is_neg_infinity_temp, 0b0001), ps_src,
 +              dxbc::Src::LF(-INFINITY));
        a_.OpMovC(ps_dest, dxbc::Src::R(is_neg_infinity_temp, dxbc::Src::kXXXX),
                  dxbc::Src::LF(-FLT_MAX), ps_src);
-       // Release is_neg_infinity_temp.
-@@ -731,62 +797,79 @@
++      // Release is_neg_infinity_temp.
+       PopSystemTemp();
      } break;
      case AluScalarOpcode::kLog:
        a_.OpLog(ps_dest, operand_0_a);
@@ -274,16 +324,19 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +        a_.OpDiv(ps_dest, dxbc::Src::LF(1.0f), operand_0_a);
 +      }
 +      ReduceFloatPrecision(ps_dest, ps_src, 21);
-       uint32_t is_infinity_temp = PushSystemTemp();
+       u32 is_infinity_temp = PushSystemTemp();
 -      a_.OpEq(dxbc::Dest::R(is_infinity_temp, 0b0001), ps_src.Abs(), dxbc::Src::LF(INFINITY));
 +      a_.OpEq(dxbc::Dest::R(is_infinity_temp, 0b0001), ps_src.Abs(),
 +              dxbc::Src::LF(INFINITY));
-       // If +-Infinity (0x7F800000 or 0xFF800000), add -1 (0xFFFFFFFF) to turn
-       // into +-FLT_MAX (0x7F7FFFFF or 0xFF7FFFFF).
++      // If +-Infinity (0x7F800000 or 0xFF800000), add -1 (0xFFFFFFFF) to turn
++      // into +-FLT_MAX (0x7F7FFFFF or 0xFF7FFFFF).
+       // Adding 0xFFFFFFFF turns +-Infinity (0x7F800000, 0xFF800000) into +-FLT_MAX.
 -      a_.OpIAdd(ps_dest, ps_src, dxbc::Src::R(is_infinity_temp, dxbc::Src::kXXXX));
++      // If +-Infinity (0x7F800000 or 0xFF800000), add -1 (0xFFFFFFFF) to turn
++      // into +-FLT_MAX (0x7F7FFFFF or 0xFF7FFFFF).
 +      a_.OpIAdd(ps_dest, ps_src,
 +                dxbc::Src::R(is_infinity_temp, dxbc::Src::kXXXX));
-       // Release is_infinity_temp.
++      // Release is_infinity_temp.
        PopSystemTemp();
      } break;
      case AluScalarOpcode::kRcpf:
@@ -298,18 +351,18 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +        a_.OpDiv(ps_dest, dxbc::Src::LF(1.0f), operand_0_a);
 +      }
 +      ReduceFloatPrecision(ps_dest, ps_src, 21);
-       uint32_t is_not_infinity_temp = PushSystemTemp();
+       u32 is_not_infinity_temp = PushSystemTemp();
 -      a_.OpNE(dxbc::Dest::R(is_not_infinity_temp, 0b0001), ps_src.Abs(), dxbc::Src::LF(INFINITY));
 +      a_.OpNE(dxbc::Dest::R(is_not_infinity_temp, 0b0001), ps_src.Abs(),
 +              dxbc::Src::LF(INFINITY));
-       // Keep the sign bit if infinity.
++      // Keep the sign bit if infinity.
        a_.OpOr(dxbc::Dest::R(is_not_infinity_temp, 0b0001),
                dxbc::Src::R(is_not_infinity_temp, dxbc::Src::kXXXX),
-               dxbc::Src::LU(uint32_t(1) << 31));
+               dxbc::Src::LU(static_cast<u32>(1) << 31));
 -      a_.OpAnd(ps_dest, ps_src, dxbc::Src::R(is_not_infinity_temp, dxbc::Src::kXXXX));
 +      a_.OpAnd(ps_dest, ps_src,
 +               dxbc::Src::R(is_not_infinity_temp, dxbc::Src::kXXXX));
-       // Release is_not_infinity_temp.
++      // Release is_not_infinity_temp.
        PopSystemTemp();
      } break;
      case AluScalarOpcode::kRcp:
@@ -342,9 +395,7 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +               dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kWWWW),
 +               dxbc::Src::LF(0.0f));
        a_.OpMin(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b1000),
--               dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kWWWW), dxbc::Src::LF(255.0f));
-+               dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kWWWW),
-+               dxbc::Src::LF(255.0f));
+                dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kWWWW), dxbc::Src::LF(255.0f));
        a_.OpFToI(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b1000),
                  dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kWWWW));
 -      if (instr.scalar_operands[0].components[0] == instr.scalar_operands[0].components[1]) {
@@ -352,8 +403,11 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +          instr.scalar_operands[0].components[1]) {
          a_.OpMov(ps_dest, operand_0_a);
        } else {
-         // Shader Model 3 NaN behavior (a >= b ? a : b, not fmax).
-@@ -804,26 +887,34 @@
++        // Shader Model 3 NaN behavior (a >= b ? a : b, not fmax).
+         // Shader Model 3 NaN behavior (`a >= b ? a : b`, not fmax).
+         a_.OpGE(ps_dest, operand_0_a, operand_0_b);
+         a_.OpMovC(ps_dest, ps_src, operand_0_a, operand_0_b);
+@@ -731,52 +837,70 @@
  
      case AluScalarOpcode::kSetpEq:
        predicate_written = true;
@@ -396,12 +450,12 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
                  dxbc::Src::LF(0.0f), dxbc::Src::LF(1.0f));
        break;
      case AluScalarOpcode::kSetpInv:
-@@ -832,28 +923,35 @@
+       predicate_written = true;
        a_.OpEq(ps_dest, operand_0_a, dxbc::Src::LF(0.0f));
        a_.OpMovC(ps_dest, ps_src, dxbc::Src::LF(1.0f), operand_0_a);
-       // Set the predicate to src0.a == 1.0, and, if it's true, zero ps.
 -      a_.OpEq(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b0100), operand_0_a, dxbc::Src::LF(1.0f));
 -      a_.OpMovC(ps_dest, dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kZZZZ),
++      // Set the predicate to src0.a == 1.0, and, if it's true, zero ps.
 +      a_.OpEq(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b0100), operand_0_a,
 +              dxbc::Src::LF(1.0f));
 +      a_.OpMovC(ps_dest,
@@ -429,17 +483,17 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
      case AluScalarOpcode::kSetpRstr:
        predicate_written = true;
 -      a_.OpEq(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b0100), operand_0_a, dxbc::Src::LF(0.0f));
+-      a_.OpMovC(ps_dest, dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kZZZZ),
 +      a_.OpEq(dxbc::Dest::R(system_temp_ps_pc_p0_a0_, 0b0100), operand_0_a,
 +              dxbc::Src::LF(0.0f));
-       // Just copying src0.a to ps (since it's set to 0 if it's 0) could work,
-       // but flush denormals and zero sign just for safety.
--      a_.OpMovC(ps_dest, dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kZZZZ),
++      // Just copying src0.a to ps (since it's set to 0 if it's 0) could work,
++      // but flush denormals and zero sign just for safety.
 +      a_.OpMovC(ps_dest,
 +                dxbc::Src::R(system_temp_ps_pc_p0_a0_, dxbc::Src::kZZZZ),
                  dxbc::Src::LF(0.0f), operand_0_a);
        break;
  
-@@ -885,20 +983,89 @@
+@@ -808,15 +932,85 @@
  
      case AluScalarOpcode::kSqrt:
        a_.OpSqRt(ps_dest, operand_0_a);
@@ -454,11 +508,12 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +      // Real hardware rounding behavior needs to be verified.
        a_.OpMul(ps_dest, operand_0_a, operand_1);
 -      if (!(instr.scalar_operands[0].GetIdenticalComponents(instr.scalar_operands[1]) & 0b0001)) {
-+      if (REXCVAR_GET(mulsc_round_toward_zero)) {
+-        // Shader Model 3 gives +-0 or denormal * anything = +0.
++      if (static_cast<bool>(GetDXBCShaderModification().value & Modification::kMulscRTZ)) {
 +        // DXBC mad isn't guaranteed to stay fused, so recover the product
 +        // error with a Veltkamp split and Dekker error sum instead.
-+        uint32_t split_temp = PushSystemTemp();
-+        uint32_t error_temp = PushSystemTemp();
++        u32 split_temp = PushSystemTemp();
++        u32 error_temp = PushSystemTemp();
 +        // x/y: high/low part of a, z/w: high/low part of b.
 +        a_.OpMul(dxbc::Dest::R(split_temp, 0b0001), operand_0_a,
 +                 dxbc::Src::LF(4097.0f));
@@ -517,116 +572,95 @@ diff --git a/src/graphics/pipeline/shader/dxbc_translator_alu.cpp b/src/graphics
 +      if (!(instr.scalar_operands[0].GetIdenticalComponents(
 +                instr.scalar_operands[1]) &
 +            0b0001)) {
-         // Shader Model 3: +-0 or denormal * anything = +0.
-         uint32_t is_zero_temp = PushSystemTemp();
++        // Shader Model 3: +-0 or denormal * anything = +0.
++        // Shader Model 3: +-0 or denormal * anything = +0.
+         u32 is_zero_temp = PushSystemTemp();
 -        a_.OpMin(dxbc::Dest::R(is_zero_temp, 0b0001), operand_0_a.Abs(), operand_1.Abs());
 +        a_.OpMin(dxbc::Dest::R(is_zero_temp, 0b0001), operand_0_a.Abs(),
 +                 operand_1.Abs());
-         // min isn't required to flush denormals, eq is.
--        a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001), dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
-+        a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001),
-+                dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
++        // min isn't required to flush denormals, eq is.
+         // min need not flush denormals, but eq does.
+         a_.OpEq(dxbc::Dest::R(is_zero_temp, 0b0001), dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
                  dxbc::Src::LF(0.0f));
--        a_.OpMovC(ps_dest, dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX), dxbc::Src::LF(0.0f),
--                  ps_src);
-+        a_.OpMovC(ps_dest, dxbc::Src::R(is_zero_temp, dxbc::Src::kXXXX),
-+                  dxbc::Src::LF(0.0f), ps_src);
-         // Release is_zero_temp.
-         PopSystemTemp();
-       }
-diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipeline/shader/interpreter.cpp
---- a/src/graphics/pipeline/shader/interpreter.cpp
-+++ b/src/graphics/pipeline/shader/interpreter.cpp
-@@ -14,6 +14,7 @@
- #include <cstring>
- 
- #include <rex/assert.h>
-+#include <rex/graphics/flags.h>
- #include <rex/graphics/pipeline/shader/interpreter.h>
- #include <rex/graphics/registers.h>
- #include <rex/graphics/xenos.h>
-@@ -257,6 +258,36 @@
+diff --git a/src/gpu/xenos/pipeline/shader/interpreter.cpp b/src/gpu/xenos/pipeline/shader/interpreter.cpp
+--- a/src/gpu/xenos/pipeline/shader/interpreter.cpp
++++ b/src/gpu/xenos/pipeline/shader/interpreter.cpp
+@@ -262,7 +262,38 @@
    return value;
  }
  
-+float ShaderInterpreter::ReduceFloatPrecision(float value,
-+                                              uint32_t mantissa_bits) {
-+  assert_true(mantissa_bits > 0 && mantissa_bits < 23);
++f32 ShaderInterpreter::ReduceFloatPrecision(f32 value,
++                                              u32 mantissa_bits) {
++  REX_ASSERT(mantissa_bits > 0 && mantissa_bits < 23);
 +
-+  uint32_t value_bits;
++  u32 value_bits;
 +  std::memcpy(&value_bits, &value, sizeof(value_bits));
 +
 +  if ((value_bits & UINT32_C(0x7F800000)) == UINT32_C(0x7F800000)) {
 +    return value;
 +  }
 +
-+  uint32_t truncate_bits = 23 - mantissa_bits;
-+  uint32_t discarded_mask = (uint32_t(1) << truncate_bits) - 1;
-+  uint32_t truncated_bits = value_bits & ~discarded_mask;
-+  uint32_t rounded_bits = truncated_bits + (uint32_t(1) << truncate_bits);
++  u32 truncate_bits = 23 - mantissa_bits;
++  u32 discarded_mask = (static_cast<u32>(1) << truncate_bits) - 1;
++  u32 truncated_bits = value_bits & ~discarded_mask;
++  u32 rounded_bits = truncated_bits + (static_cast<u32>(1) << truncate_bits);
 +
 +  // Don't let this rounding turn a finite host result into infinity.
 +  if ((rounded_bits & UINT32_C(0x7F800000)) == UINT32_C(0x7F800000)) {
 +    rounded_bits = truncated_bits;
 +  }
 +
-+  uint32_t round_bit = uint32_t(1) << (truncate_bits - 1);
-+  uint32_t result_bits = (value_bits & discarded_mask) >= round_bit
++  u32 round_bit = static_cast<u32>(1) << (truncate_bits - 1);
++  u32 result_bits = (value_bits & discarded_mask) >= round_bit
 +                             ? rounded_bits
 +                             : truncated_bits;
-+  float result;
++  f32 result;
 +  std::memcpy(&result, &result_bits, sizeof(result));
 +  return result;
 +}
 +
- void ShaderInterpreter::ExecuteAluInstruction(ucode::AluInstruction instr) {
-   // Vector operation.
-   float vector_result[4] = {};
-@@ -275,26 +306,28 @@
+ void ShaderInterpreter::ExecuteALUInstruction(xenos::ucode::AluInstruction instr) {
++  // Vector operation.
+   f32 vector_result[4] = {};
+   xenos::ucode::AluVectorOpcode vector_opcode = instr.GetVectorOpcode();
+   const xenos::ucode::AluVectorOpcodeTraits& vector_opcode_info =
+@@ -279,23 +310,24 @@
        bool vector_src_absolute = false;
-       std::array<float, 4> vector_src_float_constant;
-       if (instr.src_is_temp(1 + i)) {
+       std::array<f32, 4> vector_src_float_constant;
+       if (instr.IsSrcTemp(1 + i)) {
 -        vector_src_ptr =
--            GetTempRegister(ucode::AluInstruction::src_temp_reg(vector_src_register),
--                            ucode::AluInstruction::is_src_temp_relative(vector_src_register));
+-            GetTempRegister(xenos::ucode::AluInstruction::GetSrcTempReg(vector_src_register),
+-                            xenos::ucode::AluInstruction::IsSrcTempRelative(vector_src_register));
 -        vector_src_absolute =
--            ucode::AluInstruction::is_src_temp_value_absolute(vector_src_register);
+-            xenos::ucode::AluInstruction::IsSrcTempValueAbsolute(vector_src_register);
 +        vector_src_ptr = GetTempRegister(
-+            ucode::AluInstruction::src_temp_reg(vector_src_register),
-+            ucode::AluInstruction::is_src_temp_relative(vector_src_register));
-+        vector_src_absolute = ucode::AluInstruction::is_src_temp_value_absolute(
++            xenos::ucode::AluInstruction::GetSrcTempReg(vector_src_register),
++            xenos::ucode::AluInstruction::IsSrcTempRelative(vector_src_register));
++        vector_src_absolute = xenos::ucode::AluInstruction::IsSrcTempValueAbsolute(
 +            vector_src_register);
        } else {
--        vector_src_float_constant =
--            GetFloatConstant(vector_src_register, instr.src_const_is_addressed(1 + i),
--                             instr.is_const_address_register_relative());
-+        vector_src_float_constant = GetFloatConstant(
-+            vector_src_register, instr.src_const_is_addressed(1 + i),
-+            instr.is_const_address_register_relative());
+         vector_src_float_constant =
+             GetFloatConstant(vector_src_register, instr.IsSrcConstAddressed(1 + i),
+                              instr.IsConstAddressRegisterRelative());
          vector_src_ptr = vector_src_float_constant.data();
        }
--      uint32_t vector_src_absolute_mask = ~(uint32_t(vector_src_absolute) << 31);
-+      uint32_t vector_src_absolute_mask =
-+          ~(uint32_t(vector_src_absolute) << 31);
-       uint32_t vector_src_negate_bit = uint32_t(instr.src_negate(1 + i)) << 31;
-       uint32_t vector_src_swizzle = instr.src_swizzle(1 + i);
-       for (uint32_t j = 0; j < 4; ++j) {
--        float vector_src_component =
--            FlushDenormal(vector_src_ptr[ucode::AluInstruction::GetSwizzledComponentIndex(
-+        float vector_src_component = FlushDenormal(
-+            vector_src_ptr[ucode::AluInstruction::GetSwizzledComponentIndex(
+-      u32 vector_src_absolute_mask = ~(static_cast<u32>(vector_src_absolute) << 31);
++      u32 vector_src_absolute_mask =
++          ~(static_cast<u32>(vector_src_absolute) << 31);
+       u32 vector_src_negate_bit = static_cast<u32>(instr.IsSrcNegated(1 + i)) << 31;
+       u32 vector_src_swizzle = instr.GetSrcSwizzle(1 + i);
+       for (u32 j = 0; j < 4; ++j) {
+-        f32 vector_src_component =
+-            FlushDenormal(vector_src_ptr[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(
++        f32 vector_src_component = FlushDenormal(
++            vector_src_ptr[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(
                  vector_src_swizzle, j)]);
-         *reinterpret_cast<uint32_t*>(&vector_src_component) =
--            (*reinterpret_cast<const uint32_t*>(&vector_src_component) & vector_src_absolute_mask) ^
-+            (*reinterpret_cast<const uint32_t*>(&vector_src_component) &
-+             vector_src_absolute_mask) ^
-             vector_src_negate_bit;
-         vector_operands[i][j] = vector_src_component;
-       }
-@@ -317,42 +350,48 @@
+         vector_src_component = std::bit_cast<f32>(
+             (std::bit_cast<u32>(vector_src_component) & vector_src_absolute_mask) ^
+@@ -321,43 +353,48 @@
        } break;
-       case ucode::AluVectorOpcode::kMax: {
-         for (uint32_t i = 0; i < 4; ++i) {
+       case xenos::ucode::AluVectorOpcode::kMax: {
+         for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] = std::isgreaterequal(vector_operands[0][i], vector_operands[1][i])
 -                                 ? vector_operands[0][i]
 -                                 : vector_operands[1][i];
@@ -636,8 +670,8 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +                  : vector_operands[1][i];
          }
        } break;
-       case ucode::AluVectorOpcode::kMin: {
-         for (uint32_t i = 0; i < 4; ++i) {
+       case xenos::ucode::AluVectorOpcode::kMin: {
+         for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] = std::isless(vector_operands[0][i], vector_operands[1][i])
 -                                 ? vector_operands[0][i]
 -                                 : vector_operands[1][i];
@@ -647,63 +681,57 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +                  : vector_operands[1][i];
          }
        } break;
-       case ucode::AluVectorOpcode::kSeq: {
-         for (uint32_t i = 0; i < 4; ++i) {
--          vector_result[i] = float(vector_operands[0][i] == vector_operands[1][i]);
+       case xenos::ucode::AluVectorOpcode::kSeq: {
+         for (u32 i = 0; i < 4; ++i) {
+-          vector_result[i] = static_cast<f32>(vector_operands[0][i] == vector_operands[1][i]);
 +          vector_result[i] =
-+              float(vector_operands[0][i] == vector_operands[1][i]);
++              static_cast<f32>(vector_operands[0][i] == vector_operands[1][i]);
          }
        } break;
-       case ucode::AluVectorOpcode::kSgt: {
-         for (uint32_t i = 0; i < 4; ++i) {
--          vector_result[i] = float(std::isgreater(vector_operands[0][i], vector_operands[1][i]));
-+          vector_result[i] = float(
+       case xenos::ucode::AluVectorOpcode::kSgt: {
+         for (u32 i = 0; i < 4; ++i) {
++          vector_result[i] = static_cast<f32>(
 +              std::isgreater(vector_operands[0][i], vector_operands[1][i]));
-         }
-       } break;
-       case ucode::AluVectorOpcode::kSge: {
-         for (uint32_t i = 0; i < 4; ++i) {
-+          vector_result[i] = float(std::isgreaterequal(vector_operands[0][i],
++        }
++      } break;
++      case xenos::ucode::AluVectorOpcode::kSge: {
++        for (u32 i = 0; i < 4; ++i) {
++          vector_result[i] = static_cast<f32>(std::isgreaterequal(vector_operands[0][i],
 +                                                       vector_operands[1][i]));
 +        }
 +      } break;
-+      case ucode::AluVectorOpcode::kSne: {
-+        for (uint32_t i = 0; i < 4; ++i) {
++      case xenos::ucode::AluVectorOpcode::kSne: {
++        for (u32 i = 0; i < 4; ++i) {
            vector_result[i] =
--              float(std::isgreaterequal(vector_operands[0][i], vector_operands[1][i]));
+-              static_cast<f32>(std::isgreater(vector_operands[0][i], vector_operands[1][i]));
 -        }
 -      } break;
--      case ucode::AluVectorOpcode::kSne: {
--        for (uint32_t i = 0; i < 4; ++i) {
--          vector_result[i] = float(vector_operands[0][i] != vector_operands[1][i]);
-+              float(vector_operands[0][i] != vector_operands[1][i]);
-         }
-       } break;
-       case ucode::AluVectorOpcode::kFrc: {
-         for (uint32_t i = 0; i < 4; ++i) {
+-      case xenos::ucode::AluVectorOpcode::kSge: {
++              static_cast<f32>(vector_operands[0][i] != vector_operands[1][i]);
++        }
++      } break;
++      case xenos::ucode::AluVectorOpcode::kFrc: {
+         for (u32 i = 0; i < 4; ++i) {
+           vector_result[i] =
+-              static_cast<f32>(std::isgreaterequal(vector_operands[0][i], vector_operands[1][i]));
+-        }
+-      } break;
+-      case xenos::ucode::AluVectorOpcode::kSne: {
+-        for (u32 i = 0; i < 4; ++i) {
+-          vector_result[i] = static_cast<f32>(vector_operands[0][i] != vector_operands[1][i]);
+-        }
+-      } break;
+-      case xenos::ucode::AluVectorOpcode::kFrc: {
+-        for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] = vector_operands[0][i] - std::floor(vector_operands[0][i]);
-+          vector_result[i] =
 +              vector_operands[0][i] - std::floor(vector_operands[0][i]);
          }
        } break;
-       case ucode::AluVectorOpcode::kTrunc: {
-@@ -370,16 +409,18 @@
-           // Direct3D 9 behavior (0 or denormal * anything = +0).
-           // Doing the addition rather than conditional assignment even for zero
-           // operands because +0 + -0 must be +0.
--          vector_result[i] = ((vector_operands[0][i] && vector_operands[1][i])
--                                  ? vector_operands[0][i] * vector_operands[1][i]
--                                  : 0.0f) +
--                             vector_operands[2][i];
-+          vector_result[i] =
-+              ((vector_operands[0][i] && vector_operands[1][i])
-+                   ? vector_operands[0][i] * vector_operands[1][i]
-+                   : 0.0f) +
-+              vector_operands[2][i];
-         }
+       case xenos::ucode::AluVectorOpcode::kTrunc: {
+@@ -381,8 +418,9 @@
        } break;
-       case ucode::AluVectorOpcode::kCndEq: {
-         for (uint32_t i = 0; i < 4; ++i) {
+       case xenos::ucode::AluVectorOpcode::kCndEq: {
+         for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] =
 -              vector_operands[0][i] == 0.0f ? vector_operands[1][i] : vector_operands[2][i];
 +          vector_result[i] = vector_operands[0][i] == 0.0f
@@ -711,11 +739,11 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +                                 : vector_operands[2][i];
          }
        } break;
-       case ucode::AluVectorOpcode::kCndGe: {
-@@ -391,8 +432,9 @@
+       case xenos::ucode::AluVectorOpcode::kCndGe: {
+@@ -394,8 +432,9 @@
        } break;
-       case ucode::AluVectorOpcode::kCndGt: {
-         for (uint32_t i = 0; i < 4; ++i) {
+       case xenos::ucode::AluVectorOpcode::kCndGt: {
+         for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] = std::isgreater(vector_operands[0][i], 0.0f) ? vector_operands[1][i]
 -                                                                         : vector_operands[2][i];
 +          vector_result[i] = std::isgreater(vector_operands[0][i], 0.0f)
@@ -723,50 +751,8 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +                                 : vector_operands[2][i];
          }
        } break;
-       case ucode::AluVectorOpcode::kDp4: {
-@@ -401,9 +443,10 @@
-           // Direct3D 9 behavior (0 or denormal * anything = +0).
-           // Doing the addition even for zero operands because +0 + -0 must be
-           // +0.
--          vector_result[0] += (vector_operands[0][i] && vector_operands[1][i])
--                                  ? vector_operands[0][i] * vector_operands[1][i]
--                                  : 0.0f;
-+          vector_result[0] +=
-+              (vector_operands[0][i] && vector_operands[1][i])
-+                  ? vector_operands[0][i] * vector_operands[1][i]
-+                  : 0.0f;
-         }
-         replicate_vector_result_x = true;
-       } break;
-@@ -413,9 +456,10 @@
-           // Direct3D 9 behavior (0 or denormal * anything = +0).
-           // Doing the addition even for zero operands because +0 + -0 must be
-           // +0.
--          vector_result[0] += (vector_operands[0][i] && vector_operands[1][i])
--                                  ? vector_operands[0][i] * vector_operands[1][i]
--                                  : 0.0f;
-+          vector_result[0] +=
-+              (vector_operands[0][i] && vector_operands[1][i])
-+                  ? vector_operands[0][i] * vector_operands[1][i]
-+                  : 0.0f;
-         }
-         replicate_vector_result_x = true;
-       } break;
-@@ -424,9 +468,10 @@
-         vector_result[0] = 0.0f;
-         for (uint32_t i = 0; i < 2; ++i) {
-           // Direct3D 9 behavior (0 or denormal * anything = +0).
--          vector_result[0] += (vector_operands[0][i] && vector_operands[1][i])
--                                  ? vector_operands[0][i] * vector_operands[1][i]
--                                  : 0.0f;
-+          vector_result[0] +=
-+              (vector_operands[0][i] && vector_operands[1][i])
-+                  ? vector_operands[0][i] * vector_operands[1][i]
-+                  : 0.0f;
-         }
-         vector_result[0] += vector_operands[2][0];
-         replicate_vector_result_x = true;
-@@ -464,10 +509,13 @@
+       case xenos::ucode::AluVectorOpcode::kDp4: {
+@@ -463,10 +502,13 @@
              std::isgreaterequal(vector_operands[0][0], vector_operands[0][2]) &&
              std::isgreaterequal(vector_operands[0][0], vector_operands[0][3])) {
            vector_result[0] = vector_operands[0][0];
@@ -783,135 +769,81 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
            vector_result[0] = vector_operands[0][2];
          } else {
            vector_result[0] = vector_operands[0][3];
-@@ -475,66 +523,73 @@
+@@ -505,34 +547,38 @@
+                 : vector_operands[0][0] + 1.0f;
          replicate_vector_result_x = true;
        } break;
-       case ucode::AluVectorOpcode::kSetpEqPush: {
--        state_.predicate = vector_operands[0][3] == 0.0f && vector_operands[1][3] == 0.0f;
--        vector_result[0] = (vector_operands[0][0] == 0.0f && vector_operands[1][0] == 0.0f)
-+        state_.predicate =
-+            vector_operands[0][3] == 0.0f && vector_operands[1][3] == 0.0f;
++      // Not implementing pixel kill currently, the interpreter is currently
++      // used only for vertex shaders.
+       case xenos::ucode::AluVectorOpcode::kKillEq: {
+-        vector_result[0] = static_cast<f32>(vector_operands[0][0] == vector_operands[1][0] ||
+-                                            vector_operands[0][1] == vector_operands[1][1] ||
+-                                            vector_operands[0][2] == vector_operands[1][2] ||
+-                                            vector_operands[0][3] == vector_operands[1][3]);
 +        vector_result[0] =
-+            (vector_operands[0][0] == 0.0f && vector_operands[1][0] == 0.0f)
-+                ? 0.0f
-+                : vector_operands[0][0] + 1.0f;
-+        replicate_vector_result_x = true;
-+      } break;
-+      case ucode::AluVectorOpcode::kSetpNePush: {
-+        state_.predicate =
-+            vector_operands[0][3] == 0.0f && vector_operands[1][3] != 0.0f;
-+        vector_result[0] =
-+            (vector_operands[0][0] == 0.0f && vector_operands[1][0] != 0.0f)
-+                ? 0.0f
-+                : vector_operands[0][0] + 1.0f;
-+        replicate_vector_result_x = true;
-+      } break;
-+      case ucode::AluVectorOpcode::kSetpGtPush: {
-+        state_.predicate = vector_operands[0][3] == 0.0f &&
-+                           std::isgreater(vector_operands[1][3], 0.0f);
-+        vector_result[0] = (vector_operands[0][0] == 0.0f &&
-+                            std::isgreater(vector_operands[1][0], 0.0f))
-                                ? 0.0f
-                                : vector_operands[0][0] + 1.0f;
-         replicate_vector_result_x = true;
-       } break;
--      case ucode::AluVectorOpcode::kSetpNePush: {
--        state_.predicate = vector_operands[0][3] == 0.0f && vector_operands[1][3] != 0.0f;
--        vector_result[0] = (vector_operands[0][0] == 0.0f && vector_operands[1][0] != 0.0f)
-+      case ucode::AluVectorOpcode::kSetpGePush: {
-+        state_.predicate = vector_operands[0][3] == 0.0f &&
-+                           std::isgreaterequal(vector_operands[1][3], 0.0f);
-+        vector_result[0] = (vector_operands[0][0] == 0.0f &&
-+                            std::isgreaterequal(vector_operands[1][0], 0.0f))
-                                ? 0.0f
-                                : vector_operands[0][0] + 1.0f;
-         replicate_vector_result_x = true;
-       } break;
--      case ucode::AluVectorOpcode::kSetpGtPush: {
--        state_.predicate =
--            vector_operands[0][3] == 0.0f && std::isgreater(vector_operands[1][3], 0.0f);
--        vector_result[0] =
--            (vector_operands[0][0] == 0.0f && std::isgreater(vector_operands[1][0], 0.0f))
--                ? 0.0f
--                : vector_operands[0][0] + 1.0f;
--        replicate_vector_result_x = true;
--      } break;
--      case ucode::AluVectorOpcode::kSetpGePush: {
--        state_.predicate =
--            vector_operands[0][3] == 0.0f && std::isgreaterequal(vector_operands[1][3], 0.0f);
--        vector_result[0] =
--            (vector_operands[0][0] == 0.0f && std::isgreaterequal(vector_operands[1][0], 0.0f))
--                ? 0.0f
--                : vector_operands[0][0] + 1.0f;
--        replicate_vector_result_x = true;
--      } break;
-       // Not implementing pixel kill currently, the interpreter is currently
-       // used only for vertex shaders.
-       case ucode::AluVectorOpcode::kKillEq: {
--        vector_result[0] = float(vector_operands[0][0] == vector_operands[1][0] ||
--                                 vector_operands[0][1] == vector_operands[1][1] ||
--                                 vector_operands[0][2] == vector_operands[1][2] ||
--                                 vector_operands[0][3] == vector_operands[1][3]);
-+        vector_result[0] =
-+            float(vector_operands[0][0] == vector_operands[1][0] ||
++            static_cast<f32>(vector_operands[0][0] == vector_operands[1][0] ||
 +                  vector_operands[0][1] == vector_operands[1][1] ||
 +                  vector_operands[0][2] == vector_operands[1][2] ||
 +                  vector_operands[0][3] == vector_operands[1][3]);
          replicate_vector_result_x = true;
        } break;
-       case ucode::AluVectorOpcode::kKillGt: {
--        vector_result[0] = float(std::isgreater(vector_operands[0][0], vector_operands[1][0]) ||
--                                 std::isgreater(vector_operands[0][1], vector_operands[1][1]) ||
--                                 std::isgreater(vector_operands[0][2], vector_operands[1][2]) ||
--                                 std::isgreater(vector_operands[0][3], vector_operands[1][3]));
-+        vector_result[0] = float(
+       case xenos::ucode::AluVectorOpcode::kKillGt: {
++        vector_result[0] = static_cast<f32>(
 +            std::isgreater(vector_operands[0][0], vector_operands[1][0]) ||
 +            std::isgreater(vector_operands[0][1], vector_operands[1][1]) ||
 +            std::isgreater(vector_operands[0][2], vector_operands[1][2]) ||
 +            std::isgreater(vector_operands[0][3], vector_operands[1][3]));
-         replicate_vector_result_x = true;
-       } break;
-       case ucode::AluVectorOpcode::kKillGe: {
-+        vector_result[0] = float(
++        replicate_vector_result_x = true;
++      } break;
++      case xenos::ucode::AluVectorOpcode::kKillGe: {
++        vector_result[0] = static_cast<f32>(
 +            std::isgreaterequal(vector_operands[0][0], vector_operands[1][0]) ||
 +            std::isgreaterequal(vector_operands[0][1], vector_operands[1][1]) ||
 +            std::isgreaterequal(vector_operands[0][2], vector_operands[1][2]) ||
 +            std::isgreaterequal(vector_operands[0][3], vector_operands[1][3]));
 +        replicate_vector_result_x = true;
 +      } break;
-+      case ucode::AluVectorOpcode::kKillNe: {
++      case xenos::ucode::AluVectorOpcode::kKillNe: {
          vector_result[0] =
--            float(std::isgreaterequal(vector_operands[0][0], vector_operands[1][0]) ||
--                  std::isgreaterequal(vector_operands[0][1], vector_operands[1][1]) ||
--                  std::isgreaterequal(vector_operands[0][2], vector_operands[1][2]) ||
--                  std::isgreaterequal(vector_operands[0][3], vector_operands[1][3]));
+-            static_cast<f32>(std::isgreater(vector_operands[0][0], vector_operands[1][0]) ||
+-                             std::isgreater(vector_operands[0][1], vector_operands[1][1]) ||
+-                             std::isgreater(vector_operands[0][2], vector_operands[1][2]) ||
+-                             std::isgreater(vector_operands[0][3], vector_operands[1][3]));
 -        replicate_vector_result_x = true;
 -      } break;
--      case ucode::AluVectorOpcode::kKillNe: {
--        vector_result[0] = float(vector_operands[0][0] != vector_operands[1][0] ||
--                                 vector_operands[0][1] != vector_operands[1][1] ||
--                                 vector_operands[0][2] != vector_operands[1][2] ||
--                                 vector_operands[0][3] != vector_operands[1][3]);
-+            float(vector_operands[0][0] != vector_operands[1][0] ||
+-      case xenos::ucode::AluVectorOpcode::kKillGe: {
+-        vector_result[0] =
+-            static_cast<f32>(std::isgreaterequal(vector_operands[0][0], vector_operands[1][0]) ||
+-                             std::isgreaterequal(vector_operands[0][1], vector_operands[1][1]) ||
+-                             std::isgreaterequal(vector_operands[0][2], vector_operands[1][2]) ||
+-                             std::isgreaterequal(vector_operands[0][3], vector_operands[1][3]));
+-        replicate_vector_result_x = true;
+-      } break;
+-      case xenos::ucode::AluVectorOpcode::kKillNe: {
+-        vector_result[0] = static_cast<f32>(vector_operands[0][0] != vector_operands[1][0] ||
+-                                            vector_operands[0][1] != vector_operands[1][1] ||
+-                                            vector_operands[0][2] != vector_operands[1][2] ||
+-                                            vector_operands[0][3] != vector_operands[1][3]);
++            static_cast<f32>(vector_operands[0][0] != vector_operands[1][0] ||
 +                  vector_operands[0][1] != vector_operands[1][1] ||
 +                  vector_operands[0][2] != vector_operands[1][2] ||
 +                  vector_operands[0][3] != vector_operands[1][3]);
          replicate_vector_result_x = true;
        } break;
-       case ucode::AluVectorOpcode::kDst: {
-@@ -547,12 +602,13 @@
+       case xenos::ucode::AluVectorOpcode::kDst: {
+@@ -545,12 +591,13 @@
          vector_result[3] = vector_operands[1][3];
        } break;
-       case ucode::AluVectorOpcode::kMaxA: {
--        state_.address_register =
--            int32_t(std::floor(rex::clamp_float(vector_operands[0][3], -256.0f, 255.0f) + 0.5f));
--        for (uint32_t i = 0; i < 4; ++i) {
+       case xenos::ucode::AluVectorOpcode::kMaxA: {
+-        state_.address_register = static_cast<i32>(
+-            std::floor(rex::clamp_float(vector_operands[0][3], -256.0f, 255.0f) + 0.5f));
+-        for (u32 i = 0; i < 4; ++i) {
 -          vector_result[i] = std::isgreaterequal(vector_operands[0][i], vector_operands[1][i])
 -                                 ? vector_operands[0][i]
 -                                 : vector_operands[1][i];
-+        state_.address_register = int32_t(std::floor(
++        state_.address_register = static_cast<i32>(std::floor(
 +            rex::clamp_float(vector_operands[0][3], -256.0f, 255.0f) + 0.5f));
-+        for (uint32_t i = 0; i < 4; ++i) {
++        for (u32 i = 0; i < 4; ++i) {
 +          vector_result[i] =
 +              std::isgreaterequal(vector_operands[0][i], vector_operands[1][i])
 +                  ? vector_operands[0][i]
@@ -919,119 +851,93 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
          }
        } break;
        default: {
-@@ -575,42 +631,49 @@
+@@ -572,16 +619,16 @@
    bool scalar_src_absolute = false;
    switch (scalar_opcode_info.operand_count) {
      case 1: {
 -      // r#/c#.w or r#/c#.wx.
 +      // Match the shared GPU operand parser: r#/c#.w or r#/c#.wx.
-       const float* scalar_src_ptr;
-       uint32_t scalar_src_register = instr.src_reg(3);
-       std::array<float, 4> scalar_src_float_constant;
-       if (instr.src_is_temp(3)) {
+       const f32* scalar_src_ptr;
+       u32 scalar_src_register = instr.GetSrcReg(3);
+       std::array<f32, 4> scalar_src_float_constant;
+       if (instr.IsSrcTemp(3)) {
 -        scalar_src_ptr =
--            GetTempRegister(ucode::AluInstruction::src_temp_reg(scalar_src_register),
--                            ucode::AluInstruction::is_src_temp_relative(scalar_src_register));
+-            GetTempRegister(xenos::ucode::AluInstruction::GetSrcTempReg(scalar_src_register),
+-                            xenos::ucode::AluInstruction::IsSrcTempRelative(scalar_src_register));
 -        scalar_src_absolute =
--            ucode::AluInstruction::is_src_temp_value_absolute(scalar_src_register);
+-            xenos::ucode::AluInstruction::IsSrcTempValueAbsolute(scalar_src_register);
 +        scalar_src_ptr = GetTempRegister(
-+            ucode::AluInstruction::src_temp_reg(scalar_src_register),
-+            ucode::AluInstruction::is_src_temp_relative(scalar_src_register));
-+        scalar_src_absolute = ucode::AluInstruction::is_src_temp_value_absolute(
++            xenos::ucode::AluInstruction::GetSrcTempReg(scalar_src_register),
++            xenos::ucode::AluInstruction::IsSrcTempRelative(scalar_src_register));
++        scalar_src_absolute = xenos::ucode::AluInstruction::IsSrcTempValueAbsolute(
 +            scalar_src_register);
        } else {
--        scalar_src_float_constant =
--            GetFloatConstant(scalar_src_register, instr.src_const_is_addressed(3),
--                             instr.is_const_address_register_relative());
-+        scalar_src_float_constant = GetFloatConstant(
-+            scalar_src_register, instr.src_const_is_addressed(3),
-+            instr.is_const_address_register_relative());
+         scalar_src_float_constant =
+             GetFloatConstant(scalar_src_register, instr.IsSrcConstAddressed(3),
+@@ -589,10 +636,13 @@
          scalar_src_ptr = scalar_src_float_constant.data();
        }
-       uint32_t scalar_src_swizzle = instr.src_swizzle(3);
+       u32 scalar_src_swizzle = instr.GetSrcSwizzle(3);
 -      scalar_operand_component_count = scalar_opcode_info.single_operand_is_two_component ? 2 : 1;
 +      scalar_operand_component_count =
 +          scalar_opcode_info.single_operand_is_two_component ? 2 : 1;
-       for (uint32_t i = 0; i < scalar_operand_component_count; ++i) {
--        scalar_operands[i] = scalar_src_ptr[ucode::AluInstruction::GetSwizzledComponentIndex(
+       for (u32 i = 0; i < scalar_operand_component_count; ++i) {
+-        scalar_operands[i] = scalar_src_ptr[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(
 -            scalar_src_swizzle, (3 + i) & 3)];
-+        uint32_t source_component = i == 0 ? 3 : 0;
++        u32 source_component = i == 0 ? 3 : 0;
 +        scalar_operands[i] =
-+            scalar_src_ptr[ucode::AluInstruction::GetSwizzledComponentIndex(
++            scalar_src_ptr[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(
 +                scalar_src_swizzle, source_component)];
        }
      } break;
      case 2: {
-       scalar_operand_component_count = 2;
--      uint32_t scalar_src_absolute_mask = ~(uint32_t(instr.abs_constants()) << 31);
-+      uint32_t scalar_src_absolute_mask =
-+          ~(uint32_t(instr.abs_constants()) << 31);
-       uint32_t scalar_src_negate_bit = uint32_t(instr.src_negate(3)) << 31;
-       uint32_t scalar_src_swizzle = instr.src_swizzle(3);
-       // c#.w.
--      scalar_operands[0] = GetFloatConstant(instr.src_reg(3), instr.src_const_is_addressed(3),
--                                            instr.is_const_address_register_relative())
--          [ucode::AluInstruction::GetSwizzledComponentIndex(scalar_src_swizzle, 3)];
-+      scalar_operands[0] =
-+          GetFloatConstant(instr.src_reg(3), instr.src_const_is_addressed(3),
-+                           instr.is_const_address_register_relative())
-+              [ucode::AluInstruction::GetSwizzledComponentIndex(
-+                  scalar_src_swizzle, 3)];
+@@ -606,7 +656,8 @@
        // r#.x.
        scalar_operands[1] = GetTempRegister(
-           instr.scalar_const_reg_op_src_temp_reg(),
--          false)[ucode::AluInstruction::GetSwizzledComponentIndex(scalar_src_swizzle, 0)];
-+          false)[ucode::AluInstruction::GetSwizzledComponentIndex(
+           instr.GetScalarConstRegOpSrcTempReg(),
+-          false)[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(scalar_src_swizzle, 0)];
++          false)[xenos::ucode::AluInstruction::GetSwizzledComponentIndex(
 +          scalar_src_swizzle, 0)];
      } break;
-   }
-   if (scalar_operand_component_count) {
-@@ -619,7 +682,8 @@
-     for (uint32_t i = 0; i < scalar_operand_component_count; ++i) {
-       float scalar_operand = FlushDenormal(scalar_operands[i]);
-       *reinterpret_cast<uint32_t*>(&scalar_operand) =
--          (*reinterpret_cast<const uint32_t*>(&scalar_operand) & scalar_src_absolute_mask) ^
-+          (*reinterpret_cast<const uint32_t*>(&scalar_operand) &
-+           scalar_src_absolute_mask) ^
-           scalar_src_negate_bit;
-       scalar_operands[i] = scalar_operand;
-     }
-@@ -633,13 +697,28 @@
-     case ucode::AluScalarOpcode::kAddsPrev: {
+     default:
+       break;
+@@ -630,13 +681,29 @@
+     case xenos::ucode::AluScalarOpcode::kAddsPrev: {
        state_.previous_scalar = scalar_operands[0] + state_.previous_scalar;
      } break;
--    case ucode::AluScalarOpcode::kMuls:
--    case ucode::AluScalarOpcode::kMulsc0:
--    case ucode::AluScalarOpcode::kMulsc1: {
-+    case ucode::AluScalarOpcode::kMuls: {
-       // Direct3D 9 behavior (0 or denormal * anything = +0).
-       state_.previous_scalar = (scalar_operands[0] && scalar_operands[1])
+-    case xenos::ucode::AluScalarOpcode::kMuls:
+-    case xenos::ucode::AluScalarOpcode::kMulsc0:
+-    case xenos::ucode::AluScalarOpcode::kMulsc1: {
++    case xenos::ucode::AluScalarOpcode::kMuls: {
++      // Direct3D 9 behavior (0 or denormal * anything = +0).
+       // Direct3D 9 gives +0 for 0 or denormal * anything.
+       state_.previous_scalar = (scalar_operands[0] != 0.0f && scalar_operands[1] != 0.0f)
                                     ? scalar_operands[0] * scalar_operands[1]
                                     : 0.0f;
 +    } break;
-+    case ucode::AluScalarOpcode::kMulsc0:
-+    case ucode::AluScalarOpcode::kMulsc1: {
++    case xenos::ucode::AluScalarOpcode::kMulsc0:
++    case xenos::ucode::AluScalarOpcode::kMulsc1: {
 +      // Direct3D 9 behavior (0 or denormal * anything = +0).
-+      float product = 0.0f;
++      f32 product = 0.0f;
 +      if (scalar_operands[0] && scalar_operands[1]) {
 +        product = scalar_operands[0] * scalar_operands[1];
-+        if (REXCVAR_GET(mulsc_round_toward_zero) && std::isfinite(product)) {
-+          const double exact_product =
-+              double(scalar_operands[0]) * double(scalar_operands[1]);
++        if (mulsc_round_toward_zero_ && std::isfinite(product)) {
++          const f64 exact_product =
++              static_cast<f64>(scalar_operands[0]) * static_cast<f64>(scalar_operands[1]);
 +          // Step back if the float multiply rounded away from zero.
-+          if (std::abs(double(product)) > std::abs(exact_product)) {
++          if (std::abs(static_cast<f64>(product)) > std::abs(exact_product)) {
 +            product = std::nextafter(product, 0.0f);
 +          }
 +        }
 +      }
 +      state_.previous_scalar = product;
      } break;
-     case ucode::AluScalarOpcode::kMulsPrev: {
-       // Direct3D 9 behavior (0 or denormal * anything = +0).
-@@ -648,25 +727,30 @@
+     case xenos::ucode::AluScalarOpcode::kMulsPrev: {
+       // Direct3D 9 gives +0 for 0 or denormal * anything.
+@@ -645,10 +712,13 @@
                                     : 0.0f;
      } break;
-     case ucode::AluScalarOpcode::kMulsPrev2: {
+     case xenos::ucode::AluScalarOpcode::kMulsPrev2: {
 -      if (state_.previous_scalar == -FLT_MAX || !std::isfinite(state_.previous_scalar) ||
 -          !std::isfinite(scalar_operands[1]) || std::islessequal(scalar_operands[1], 0.0f)) {
 +      if (state_.previous_scalar == -FLT_MAX ||
@@ -1040,17 +946,14 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +          std::islessequal(scalar_operands[1], 0.0f)) {
          state_.previous_scalar = -FLT_MAX;
        } else {
-         // Direct3D 9 behavior (0 or denormal * anything = +0).
--        state_.previous_scalar = (scalar_operands[0] && state_.previous_scalar)
--                                     ? scalar_operands[0] * state_.previous_scalar
--                                     : 0.0f;
-+        state_.previous_scalar =
-+            (scalar_operands[0] && state_.previous_scalar)
-+                ? scalar_operands[0] * state_.previous_scalar
-+                : 0.0f;
++        // Direct3D 9 behavior (0 or denormal * anything = +0).
+         // Direct3D 9 gives +0 for 0 or denormal * anything.
+         state_.previous_scalar = (scalar_operands[0] != 0.0f && state_.previous_scalar != 0.0f)
+                                      ? scalar_operands[0] * state_.previous_scalar
+@@ -656,14 +726,16 @@
        }
      } break;
-     case ucode::AluScalarOpcode::kMaxs: {
+     case xenos::ucode::AluScalarOpcode::kMaxs: {
 -      state_.previous_scalar = std::isgreaterequal(scalar_operands[0], scalar_operands[1])
 -                                   ? scalar_operands[0]
 -                                   : scalar_operands[1];
@@ -1059,7 +962,7 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +              ? scalar_operands[0]
 +              : scalar_operands[1];
      } break;
-     case ucode::AluScalarOpcode::kMins: {
+     case xenos::ucode::AluScalarOpcode::kMins: {
 -      state_.previous_scalar = std::isless(scalar_operands[0], scalar_operands[1])
 -                                   ? scalar_operands[0]
 -                                   : scalar_operands[1];
@@ -1068,35 +971,35 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +              ? scalar_operands[0]
 +              : scalar_operands[1];
      } break;
-     case ucode::AluScalarOpcode::kSeqs: {
-       state_.previous_scalar = float(scalar_operands[0] == 0.0f);
-@@ -675,13 +759,15 @@
-       state_.previous_scalar = float(std::isgreater(scalar_operands[0], 0.0f));
+     case xenos::ucode::AluScalarOpcode::kSeqs: {
+       state_.previous_scalar = static_cast<f32>(scalar_operands[0] == 0.0f);
+@@ -672,13 +744,15 @@
+       state_.previous_scalar = static_cast<f32>(std::isgreater(scalar_operands[0], 0.0f));
      } break;
-     case ucode::AluScalarOpcode::kSges: {
--      state_.previous_scalar = float(std::isgreaterequal(scalar_operands[0], 0.0f));
+     case xenos::ucode::AluScalarOpcode::kSges: {
+-      state_.previous_scalar = static_cast<f32>(std::isgreaterequal(scalar_operands[0], 0.0f));
 +      state_.previous_scalar =
-+          float(std::isgreaterequal(scalar_operands[0], 0.0f));
++          static_cast<f32>(std::isgreaterequal(scalar_operands[0], 0.0f));
      } break;
-     case ucode::AluScalarOpcode::kSnes: {
-       state_.previous_scalar = float(scalar_operands[0] != 0.0f);
+     case xenos::ucode::AluScalarOpcode::kSnes: {
+       state_.previous_scalar = static_cast<f32>(scalar_operands[0] != 0.0f);
      } break;
-     case ucode::AluScalarOpcode::kFrcs: {
+     case xenos::ucode::AluScalarOpcode::kFrcs: {
 -      state_.previous_scalar = scalar_operands[0] - std::floor(scalar_operands[0]);
 +      state_.previous_scalar =
 +          scalar_operands[0] - std::floor(scalar_operands[0]);
      } break;
-     case ucode::AluScalarOpcode::kTruncs: {
+     case xenos::ucode::AluScalarOpcode::kTruncs: {
        state_.previous_scalar = std::trunc(scalar_operands[0]);
-@@ -690,19 +776,23 @@
+@@ -687,19 +761,23 @@
        state_.previous_scalar = std::floor(scalar_operands[0]);
      } break;
-     case ucode::AluScalarOpcode::kExp: {
+     case xenos::ucode::AluScalarOpcode::kExp: {
 -      state_.previous_scalar = std::exp2(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(std::exp2(scalar_operands[0]), 21);
      } break;
-     case ucode::AluScalarOpcode::kLogc: {
+     case xenos::ucode::AluScalarOpcode::kLogc: {
 -      state_.previous_scalar = std::log2(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(std::log2(scalar_operands[0]), 21);
@@ -1104,91 +1007,92 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
          state_.previous_scalar = -FLT_MAX;
        }
      } break;
-     case ucode::AluScalarOpcode::kLog: {
+     case xenos::ucode::AluScalarOpcode::kLog: {
 -      state_.previous_scalar = std::log2(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(std::log2(scalar_operands[0]), 21);
      } break;
-     case ucode::AluScalarOpcode::kRcpc: {
+     case xenos::ucode::AluScalarOpcode::kRcpc: {
 -      state_.previous_scalar = 1.0f / scalar_operands[0];
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / scalar_operands[0], 21);
        if (state_.previous_scalar == -INFINITY) {
          state_.previous_scalar = -FLT_MAX;
        } else if (state_.previous_scalar == INFINITY) {
-@@ -710,7 +800,8 @@
+@@ -707,7 +785,8 @@
        }
      } break;
-     case ucode::AluScalarOpcode::kRcpf: {
+     case xenos::ucode::AluScalarOpcode::kRcpf: {
 -      state_.previous_scalar = 1.0f / scalar_operands[0];
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / scalar_operands[0], 21);
        if (state_.previous_scalar == -INFINITY) {
          state_.previous_scalar = -0.0f;
        } else if (state_.previous_scalar == INFINITY) {
-@@ -718,10 +809,12 @@
+@@ -715,10 +794,12 @@
        }
      } break;
-     case ucode::AluScalarOpcode::kRcp: {
+     case xenos::ucode::AluScalarOpcode::kRcp: {
 -      state_.previous_scalar = 1.0f / scalar_operands[0];
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / scalar_operands[0], 21);
      } break;
-     case ucode::AluScalarOpcode::kRsqc: {
+     case xenos::ucode::AluScalarOpcode::kRsqc: {
 -      state_.previous_scalar = 1.0f / std::sqrt(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / std::sqrt(scalar_operands[0]), 21);
        if (state_.previous_scalar == -INFINITY) {
          state_.previous_scalar = -FLT_MAX;
        } else if (state_.previous_scalar == INFINITY) {
-@@ -729,7 +822,8 @@
+@@ -726,7 +807,8 @@
        }
      } break;
-     case ucode::AluScalarOpcode::kRsqf: {
+     case xenos::ucode::AluScalarOpcode::kRsqf: {
 -      state_.previous_scalar = 1.0f / std::sqrt(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / std::sqrt(scalar_operands[0]), 21);
        if (state_.previous_scalar == -INFINITY) {
          state_.previous_scalar = -0.0f;
        } else if (state_.previous_scalar == INFINITY) {
-@@ -737,21 +831,24 @@
+@@ -734,21 +816,24 @@
        }
      } break;
-     case ucode::AluScalarOpcode::kRsq: {
+     case xenos::ucode::AluScalarOpcode::kRsq: {
 -      state_.previous_scalar = 1.0f / std::sqrt(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(1.0f / std::sqrt(scalar_operands[0]), 21);
      } break;
-     case ucode::AluScalarOpcode::kMaxAs: {
--      state_.address_register =
--          int32_t(std::floor(rex::clamp_float(scalar_operands[0], -256.0f, 255.0f) + 0.5f));
--      state_.previous_scalar = std::isgreaterequal(scalar_operands[0], scalar_operands[1])
--                                   ? scalar_operands[0]
--                                   : scalar_operands[1];
-+      state_.address_register = int32_t(std::floor(
+     case xenos::ucode::AluScalarOpcode::kMaxAs: {
++      state_.address_register = static_cast<i32>(std::floor(
 +          rex::clamp_float(scalar_operands[0], 0.0f, 255.0f) + 0.5f));
 +      state_.previous_scalar =
 +          std::isgreaterequal(scalar_operands[0], scalar_operands[1])
 +              ? scalar_operands[0]
 +              : scalar_operands[1];
-     } break;
-     case ucode::AluScalarOpcode::kMaxAsf: {
--      state_.address_register =
--          int32_t(std::floor(rex::clamp_float(scalar_operands[0], -256.0f, 255.0f)));
++    } break;
++    case xenos::ucode::AluScalarOpcode::kMaxAsf: {
+       state_.address_register = static_cast<i32>(
+-          std::floor(rex::clamp_float(scalar_operands[0], -256.0f, 255.0f) + 0.5f));
 -      state_.previous_scalar = std::isgreaterequal(scalar_operands[0], scalar_operands[1])
 -                                   ? scalar_operands[0]
 -                                   : scalar_operands[1];
-+      state_.address_register = int32_t(
+-    } break;
+-    case xenos::ucode::AluScalarOpcode::kMaxAsf: {
+-      state_.address_register =
+-          static_cast<i32>(std::floor(rex::clamp_float(scalar_operands[0], -256.0f, 255.0f)));
+-      state_.previous_scalar = std::isgreaterequal(scalar_operands[0], scalar_operands[1])
+-                                   ? scalar_operands[0]
+-                                   : scalar_operands[1];
 +          std::floor(rex::clamp_float(scalar_operands[0], 0.0f, 255.0f)));
 +      state_.previous_scalar =
 +          std::isgreaterequal(scalar_operands[0], scalar_operands[1])
 +              ? scalar_operands[0]
 +              : scalar_operands[1];
      } break;
-     case ucode::AluScalarOpcode::kSubs:
-     case ucode::AluScalarOpcode::kSubsc0:
-@@ -780,7 +877,9 @@
-     case ucode::AluScalarOpcode::kSetpInv: {
+     case xenos::ucode::AluScalarOpcode::kSubs:
+     case xenos::ucode::AluScalarOpcode::kSubsc0:
+@@ -777,7 +862,9 @@
+     case xenos::ucode::AluScalarOpcode::kSetpInv: {
        state_.predicate = scalar_operands[0] == 1.0f;
        state_.previous_scalar =
 -          state_.predicate ? 0.0f : (scalar_operands[0] == 0.0f ? 1.0f : scalar_operands[0]);
@@ -1196,717 +1100,661 @@ diff --git a/src/graphics/pipeline/shader/interpreter.cpp b/src/graphics/pipelin
 +              ? 0.0f
 +              : (scalar_operands[0] == 0.0f ? 1.0f : scalar_operands[0]);
      } break;
-     case ucode::AluScalarOpcode::kSetpPop: {
-       float new_counter = scalar_operands[0] - 1.0f;
-@@ -804,7 +903,8 @@
-       state_.previous_scalar = float(std::isgreater(scalar_operands[0], 0.0f));
+     case xenos::ucode::AluScalarOpcode::kSetpPop: {
+       f32 new_counter = scalar_operands[0] - 1.0f;
+@@ -799,7 +886,8 @@
+       state_.previous_scalar = static_cast<f32>(std::isgreater(scalar_operands[0], 0.0f));
      } break;
-     case ucode::AluScalarOpcode::kKillsGe: {
--      state_.previous_scalar = float(std::isgreaterequal(scalar_operands[0], 0.0f));
+     case xenos::ucode::AluScalarOpcode::kKillsGe: {
+-      state_.previous_scalar = static_cast<f32>(std::isgreaterequal(scalar_operands[0], 0.0f));
 +      state_.previous_scalar =
-+          float(std::isgreaterequal(scalar_operands[0], 0.0f));
++          static_cast<f32>(std::isgreaterequal(scalar_operands[0], 0.0f));
      } break;
-     case ucode::AluScalarOpcode::kKillsNe: {
-       state_.previous_scalar = float(scalar_operands[0] != 0.0f);
-@@ -813,7 +913,8 @@
-       state_.previous_scalar = float(scalar_operands[0] == 1.0f);
+     case xenos::ucode::AluScalarOpcode::kKillsNe: {
+       state_.previous_scalar = static_cast<f32>(scalar_operands[0] != 0.0f);
+@@ -808,7 +896,8 @@
+       state_.previous_scalar = static_cast<f32>(scalar_operands[0] == 1.0f);
      } break;
-     case ucode::AluScalarOpcode::kSqrt: {
+     case xenos::ucode::AluScalarOpcode::kSqrt: {
 -      state_.previous_scalar = std::sqrt(scalar_operands[0]);
 +      state_.previous_scalar =
 +          ReduceFloatPrecision(std::sqrt(scalar_operands[0]), 21);
      } break;
-     case ucode::AluScalarOpcode::kSin: {
+     case xenos::ucode::AluScalarOpcode::kSin: {
        state_.previous_scalar = std::sin(scalar_operands[0]);
-@@ -833,16 +934,18 @@
-       vector_result[i] = rex::saturate(vector_result[i]);
-     }
-   }
--  float scalar_result =
--      instr.scalar_clamp() ? rex::saturate(state_.previous_scalar) : state_.previous_scalar;
-+  float scalar_result = instr.scalar_clamp()
-+                            ? rex::saturate(state_.previous_scalar)
-+                            : state_.previous_scalar;
- 
-   uint32_t scalar_result_write_mask = instr.GetScalarOpResultWriteMask();
-   if (instr.is_export()) {
+@@ -836,8 +925,9 @@
      if (export_sink_) {
-       float export_value[4];
-       uint32_t export_constant_1_mask = instr.GetConstant1WriteMask();
--      uint32_t export_mask = vector_result_write_mask | scalar_result_write_mask |
--                             instr.GetConstant0WriteMask() | export_constant_1_mask;
-+      uint32_t export_mask =
+       f32 export_value[4];
+       u32 export_constant_1_mask = instr.GetConstant1WriteMask();
+-      u32 export_mask = vector_result_write_mask | scalar_result_write_mask |
+-                        instr.GetConstant0WriteMask() | export_constant_1_mask;
++      u32 export_mask =
 +          vector_result_write_mask | scalar_result_write_mask |
 +          instr.GetConstant0WriteMask() | export_constant_1_mask;
-       for (uint32_t i = 0; i < 4; ++i) {
-         uint32_t export_component_bit = UINT32_C(1) << i;
-         float export_component = 0.0f;
-@@ -857,13 +960,15 @@
-         }
-         export_value[i] = export_component;
-       }
--      export_sink_->Export(ucode::ExportRegister(instr.vector_dest()), export_value,
--                           vector_result_write_mask | scalar_result_write_mask |
--                               instr.GetConstant0WriteMask() | export_constant_1_mask);
-+      export_sink_->Export(
-+          ucode::ExportRegister(instr.vector_dest()), export_value,
-+          vector_result_write_mask | scalar_result_write_mask |
-+              instr.GetConstant0WriteMask() | export_constant_1_mask);
+       for (u32 i = 0; i < 4; ++i) {
+         u32 export_component_bit = UINT32_C(1) << i;
+         f32 export_component = 0.0f;
+@@ -857,7 +947,8 @@
      }
    } else {
      if (vector_result_write_mask) {
--      float* vector_dest = GetTempRegister(instr.vector_dest(), instr.is_vector_dest_relative());
-+      float* vector_dest =
-+          GetTempRegister(instr.vector_dest(), instr.is_vector_dest_relative());
-       for (uint32_t i = 0; i < 4; ++i) {
+-      f32* vector_dest = GetTempRegister(instr.GetVectorDest(), instr.IsVectorDestRelative());
++      f32* vector_dest =
++          GetTempRegister(instr.GetVectorDest(), instr.IsVectorDestRelative());
+       for (u32 i = 0; i < 4; ++i) {
          if (vector_result_write_mask & (UINT32_C(1) << i)) {
            vector_dest[i] = vector_result[i];
-@@ -871,7 +976,8 @@
+@@ -865,7 +956,8 @@
        }
      }
      if (scalar_result_write_mask) {
--      float* scalar_dest = GetTempRegister(instr.scalar_dest(), instr.is_scalar_dest_relative());
-+      float* scalar_dest =
-+          GetTempRegister(instr.scalar_dest(), instr.is_scalar_dest_relative());
-       for (uint32_t i = 0; i < 4; ++i) {
+-      f32* scalar_dest = GetTempRegister(instr.GetScalarDest(), instr.IsScalarDestRelative());
++      f32* scalar_dest =
++          GetTempRegister(instr.GetScalarDest(), instr.IsScalarDestRelative());
+       for (u32 i = 0; i < 4; ++i) {
          if (scalar_result_write_mask & (UINT32_C(1) << i)) {
            scalar_dest[i] = scalar_result;
-diff --git a/src/graphics/pipeline/shader/spirv_translator_alu.cpp b/src/graphics/pipeline/shader/spirv_translator_alu.cpp
---- a/src/graphics/pipeline/shader/spirv_translator_alu.cpp
-+++ b/src/graphics/pipeline/shader/spirv_translator_alu.cpp
-@@ -17,6 +17,7 @@
- #include <SPIRV/GLSL.std.450.h>
- 
- #include <rex/assert.h>
-+#include <rex/graphics/flags.h>
- #include <rex/graphics/pipeline/shader/spirv_translator.h>
- #include <rex/math.h>
- 
-@@ -801,9 +802,77 @@
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator_alu.cpp
+@@ -695,9 +695,77 @@
    return spv::NoResult;
  }
  
-+spv::Id SpirvShaderTranslator::ReduceFloatPrecision(spv::Id value,
-+                                                    uint32_t mantissa_bits) {
+-spv::Id SPIRVShaderTranslator::ProcessScalarALUOperation(const ParsedALUInstruction& instr,
+-                                                         u8 memexport_em_potentially_written_before,
+-                                                         bool& predicate_written) {
++spv::Id SPIRVShaderTranslator::ReduceFloatPrecision(spv::Id value,
++                                                    u32 mantissa_bits) {
 +  // Round to nearest, with halfway values away from zero. We don't know the
 +  // actual midpoint behavior, this is the one 4E4D07D1 needs. Signed zero stays
 +  // signed. Denormals still follow the host float controls.
-+  assert_true(mantissa_bits > 0 && mantissa_bits < 23);
++  REX_ASSERT(mantissa_bits > 0 && mantissa_bits < 23);
 +
-+  EnsureBuildPointAvailable();
++  StartNewBlockIfTerminated();
 +
 +  spv::Id value_bits =
-+      builder_->createUnaryOp(spv::OpBitcast, type_uint_, value);
++      builder_->createUnaryOp(spv::OpBitcast, type_uint, value);
 +
-+  uint32_t truncate_bits = 23 - mantissa_bits;
++  u32 truncate_bits = 23 - mantissa_bits;
 +
 +  // Keep the sign, exponent and the requested mantissa bits.
-+  uint32_t truncate_mask = ~((1u << truncate_bits) - 1);
-+  uint32_t round_bit = 1u << (truncate_bits - 1);
++  u32 truncate_mask = ~((1u << truncate_bits) - 1);
++  u32 round_bit = 1u << (truncate_bits - 1);
 +
 +  spv::Id truncated_bits =
-+      builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, value_bits,
++      builder_->createBinOp(spv::OpBitwiseAnd, type_uint, value_bits,
 +                            builder_->makeUintConstant(truncate_mask));
 +
 +  // The discarded bits decide if the truncated value rounds up.
 +  spv::Id discarded_bits =
-+      builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, value_bits,
++      builder_->createBinOp(spv::OpBitwiseAnd, type_uint, value_bits,
 +                            builder_->makeUintConstant(~truncate_mask));
 +
 +  spv::Id should_round_up = builder_->createBinOp(
-+      spv::OpUGreaterThanEqual, type_bool_, discarded_bits,
++      spv::OpUGreaterThanEqual, type_bool, discarded_bits,
 +      builder_->makeUintConstant(round_bit));
 +
 +  spv::Id ulp = builder_->makeUintConstant(1u << truncate_bits);
 +  spv::Id rounded_up_bits =
-+      builder_->createBinOp(spv::OpIAdd, type_uint_, truncated_bits, ulp);
++      builder_->createBinOp(spv::OpIAdd, type_uint, truncated_bits, ulp);
 +
 +  spv::Id original_exp =
-+      builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, value_bits,
++      builder_->createBinOp(spv::OpBitwiseAnd, type_uint, value_bits,
 +                            builder_->makeUintConstant(0x7F800000u));
 +  spv::Id rounded_exp =
-+      builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, rounded_up_bits,
++      builder_->createBinOp(spv::OpBitwiseAnd, type_uint, rounded_up_bits,
 +                            builder_->makeUintConstant(0x7F800000u));
 +
 +  // Don't let this rounding turn a finite host result into infinity. Keep the
 +  // truncated value when it would.
 +  spv::Id original_finite =
-+      builder_->createBinOp(spv::OpINotEqual, type_bool_, original_exp,
++      builder_->createBinOp(spv::OpINotEqual, type_bool, original_exp,
 +                            builder_->makeUintConstant(0x7F800000u));
 +  spv::Id rounded_inf =
-+      builder_->createBinOp(spv::OpIEqual, type_bool_, rounded_exp,
++      builder_->createBinOp(spv::OpIEqual, type_bool, rounded_exp,
 +                            builder_->makeUintConstant(0x7F800000u));
-+  spv::Id would_overflow = builder_->createBinOp(spv::OpLogicalAnd, type_bool_,
++  spv::Id would_overflow = builder_->createBinOp(spv::OpLogicalAnd, type_bool,
 +                                                 original_finite, rounded_inf);
 +
 +  spv::Id safe_rounded =
-+      builder_->createTriOp(spv::OpSelect, type_uint_, would_overflow,
++      builder_->createTriOp(spv::OpSelect, type_uint, would_overflow,
 +                            truncated_bits, rounded_up_bits);
 +
 +  spv::Id result_bits = builder_->createTriOp(
-+      spv::OpSelect, type_uint_, should_round_up, safe_rounded, truncated_bits);
++      spv::OpSelect, type_uint, should_round_up, safe_rounded, truncated_bits);
 +
 +  // Keep Inf and NaN exactly as the host instruction gave them. This only
 +  // reduces finite results and shouldn't make a nonfinite value look finite.
-+  result_bits = builder_->createTriOp(spv::OpSelect, type_uint_,
++  result_bits = builder_->createTriOp(spv::OpSelect, type_uint,
 +                                      original_finite, result_bits, value_bits);
 +
-+  return builder_->createUnaryOp(spv::OpBitcast, type_float_, result_bits);
++  return builder_->createUnaryOp(spv::OpBitcast, type_float, result_bits);
 +}
 +
- spv::Id SpirvShaderTranslator::ProcessScalarAluOperation(
--    const ParsedAluInstruction& instr, uint8_t memexport_eM_potentially_written_before,
--    bool& predicate_written) {
-+    const ParsedAluInstruction& instr,
-+    uint8_t memexport_eM_potentially_written_before, bool& predicate_written) {
++spv::Id SPIRVShaderTranslator::ProcessScalarALUOperation(
++    const ParsedALUInstruction& instr,
++    u8 memexport_em_potentially_written_before, bool& predicate_written) {
    predicate_written = false;
  
    spv::Id operand_storage[2] = {};
-@@ -816,7 +885,7 @@
-   EnsureBuildPointAvailable();
+@@ -707,10 +775,11 @@
  
-   // Lookup table for variants of instructions with similar structure.
+   StartNewBlockIfTerminated();
+ 
 -  static const unsigned int kOps[] = {
+-      static_cast<unsigned int>(spv::OpFAdd),
+-      static_cast<unsigned int>(spv::OpFAdd),
+-      static_cast<unsigned int>(spv::OpNop),
++  // Lookup table for variants of instructions with similar structure.
 +  static constexpr unsigned int kOps[] = {
-       static_cast<unsigned int>(spv::OpFAdd),                  // kAdds
-       static_cast<unsigned int>(spv::OpFAdd),                  // kAddsPrev
-       static_cast<unsigned int>(spv::OpNop),                   // kMuls
-@@ -875,86 +944,101 @@
-     case ucode::AluScalarOpcode::kSubs: {
++      static_cast<unsigned int>(spv::OpFAdd),                  // kAdds
++      static_cast<unsigned int>(spv::OpFAdd),                  // kAddsPrev
++      static_cast<unsigned int>(spv::OpNop),                   // kMuls
+       static_cast<unsigned int>(spv::OpNop),
+       static_cast<unsigned int>(spv::OpNop),
+       static_cast<unsigned int>(spv::OpFOrdGreaterThanEqual),
+@@ -779,62 +848,98 @@
+     case xenos::ucode::AluScalarOpcode::kMuls: {
        spv::Id a, b;
        GetOperandScalarXY(operand_storage[0], instr.scalar_operands[0], a, b);
--      return builder_->createNoContractionBinOp(spv::Op(kOps[size_t(instr.scalar_opcode)]),
--                                                type_float_, a, b);
-+      return builder_->createNoContractionBinOp(
-+          spv::Op(kOps[size_t(instr.scalar_opcode)]), type_float_, a, b);
-     }
-     case ucode::AluScalarOpcode::kAddsPrev:
-     case ucode::AluScalarOpcode::kSubsPrev: {
-       return builder_->createNoContractionBinOp(
-           spv::Op(kOps[size_t(instr.scalar_opcode)]), type_float_,
--          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
-+          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
-+                               0b0001),
-           builder_->createLoad(var_main_previous_scalar_, spv::NoPrecision));
-     }
-     case ucode::AluScalarOpcode::kMuls: {
-       spv::Id a, b;
-       GetOperandScalarXY(operand_storage[0], instr.scalar_operands[0], a, b);
--      spv::Id result = builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, b);
+-      spv::Id result = builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, b);
 +      spv::Id result =
-+          builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, b);
++          builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, b);
        if (a != b) {
-         // Shader Model 3: +0 or denormal * anything = +-0.
 -        result = ZeroIfAnyOperandIsZero(result, GetAbsoluteOperand(a, instr.scalar_operands[0]),
 -                                        GetAbsoluteOperand(b, instr.scalar_operands[0]));
++        // Shader Model 3: +0 or denormal * anything = +-0.
 +        result = ZeroIfAnyOperandIsZero(
 +            result, GetAbsoluteOperand(a, instr.scalar_operands[0]),
 +            GetAbsoluteOperand(b, instr.scalar_operands[0]));
        }
        return result;
      }
-     case ucode::AluScalarOpcode::kMulsPrev: {
+     case xenos::ucode::AluScalarOpcode::kMulsPrev: {
 -      spv::Id a = GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001);
 -      spv::Id ps = builder_->createLoad(var_main_previous_scalar_, spv::NoPrecision);
--      spv::Id result = builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, ps);
+-      spv::Id result = builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, ps);
 +      spv::Id a = GetOperandComponents(operand_storage[0],
 +                                       instr.scalar_operands[0], 0b0001);
 +      spv::Id ps =
 +          builder_->createLoad(var_main_previous_scalar_, spv::NoPrecision);
 +      spv::Id result =
-+          builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, ps);
-       // Shader Model 3: +0 or denormal * anything = +-0.
--      return ZeroIfAnyOperandIsZero(result, GetAbsoluteOperand(a, instr.scalar_operands[0]),
--                                    builder_->createUnaryBuiltinCall(
--                                        type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps));
-+      return ZeroIfAnyOperandIsZero(
-+          result, GetAbsoluteOperand(a, instr.scalar_operands[0]),
-+          builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
++          builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, ps);
++      // Shader Model 3: +0 or denormal * anything = +-0.
++      // Shader Model 3: +0 or denormal * anything = +-0.
+       return ZeroIfAnyOperandIsZero(
+           result, GetAbsoluteOperand(a, instr.scalar_operands[0]),
+-          builder_->CreateUnaryBuiltinCall(type_float, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps));
++          builder_->CreateUnaryBuiltinCall(type_float, ext_inst_glsl_std_450_,
 +                                           GLSLstd450FAbs, ps));
      }
-     case ucode::AluScalarOpcode::kMulsPrev2: {
-       // Check if need to select the src0.a * ps case.
-       // Selection merge must be the penultimate instruction in the block, check
-       // the condition before it.
+     case xenos::ucode::AluScalarOpcode::kMulsPrev2: {
++      // Check if need to select the src0.a * ps case.
+       // Compute the condition before OpSelectionMerge, which must be the penultimate instruction.
 -      spv::Id ps = builder_->createLoad(var_main_previous_scalar_, spv::NoPrecision);
++      // Check if need to select the src0.a * ps case.
++      // Selection merge must be the penultimate instruction in the block, check
++      // the condition before it.
 +      spv::Id ps =
 +          builder_->createLoad(var_main_previous_scalar_, spv::NoPrecision);
-       // ps != -FLT_MAX.
++      // ps != -FLT_MAX.
++      // ps != -FLT_MAX.
        spv::Id const_float_max_neg = builder_->makeFloatConstant(-FLT_MAX);
 -      spv::Id condition =
--          builder_->createBinOp(spv::OpFUnordNotEqual, type_bool_, ps, const_float_max_neg);
-+      spv::Id condition = builder_->createBinOp(
-+          spv::OpFUnordNotEqual, type_bool_, ps, const_float_max_neg);
-       // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since -FLT_MAX
-       // is already loaded to an SGPR, this is also false if it's NaN.
+-          builder_->createBinOp(spv::OpFUnordNotEqual, type_bool, ps, const_float_max_neg);
 -      spv::Id ps_abs =
--          builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps);
--      spv::Id ps_abs_neg =
--          builder_->createNoContractionUnaryOp(spv::OpFNegate, type_float_, ps_abs);
+-          builder_->CreateUnaryBuiltinCall(type_float, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps);
+-      spv::Id ps_abs_neg = builder_->CreateNoContractionUnaryOp(spv::OpFNegate, type_float, ps_abs);
 -      condition =
--          builder_->createBinOp(spv::OpLogicalAnd, type_bool_, condition,
--                                builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool_,
+-          builder_->createBinOp(spv::OpLogicalAnd, type_bool, condition,
+-                                builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool,
 -                                                      ps_abs_neg, const_float_max_neg));
-+      spv::Id ps_abs = builder_->createUnaryBuiltinCall(
-+          type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps);
-+      spv::Id ps_abs_neg = builder_->createNoContractionUnaryOp(
-+          spv::OpFNegate, type_float_, ps_abs);
-+      condition = builder_->createBinOp(
-+          spv::OpLogicalAnd, type_bool_, condition,
-+          builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool_,
-+                                ps_abs_neg, const_float_max_neg));
-       // isfinite(src0.b), or -|src0.b| >= -FLT_MAX for the same reason.
 -      spv::Id b = GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0010);
++      spv::Id condition = builder_->createBinOp(
++          spv::OpFUnordNotEqual, type_bool, ps, const_float_max_neg);
++      // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since -FLT_MAX
++      // is already loaded to an SGPR, this is also false if it's NaN.
++      // isfinite(ps), or |ps| <= FLT_MAX, or -|ps| >= -FLT_MAX, since -FLT_MAX
++      // is already loaded to an SGPR, this is also false if it's NaN.
++      spv::Id ps_abs = builder_->CreateUnaryBuiltinCall(
++          type_float, ext_inst_glsl_std_450_, GLSLstd450FAbs, ps);
++      spv::Id ps_abs_neg = builder_->CreateNoContractionUnaryOp(
++          spv::OpFNegate, type_float, ps_abs);
++      condition = builder_->createBinOp(
++          spv::OpLogicalAnd, type_bool, condition,
++          builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool,
++                                ps_abs_neg, const_float_max_neg));
++      // isfinite(src0.b), or -|src0.b| >= -FLT_MAX for the same reason.
 +      spv::Id b = GetOperandComponents(operand_storage[0],
 +                                       instr.scalar_operands[0], 0b0010);
        spv::Id b_abs_neg = b;
        if (!instr.scalar_operands[0].is_absolute_value) {
--        b_abs_neg = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+-        b_abs_neg = builder_->CreateUnaryBuiltinCall(type_float, ext_inst_glsl_std_450_,
 -                                                     GLSLstd450FAbs, b_abs_neg);
 -      }
 -      if (!instr.scalar_operands[0].is_absolute_value || !instr.scalar_operands[0].is_negated) {
--        b_abs_neg = builder_->createNoContractionUnaryOp(spv::OpFNegate, type_float_, b_abs_neg);
+-        b_abs_neg = builder_->CreateNoContractionUnaryOp(spv::OpFNegate, type_float, b_abs_neg);
 -      }
 -      condition =
--          builder_->createBinOp(spv::OpLogicalAnd, type_bool_, condition,
--                                builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool_,
+-          builder_->createBinOp(spv::OpLogicalAnd, type_bool, condition,
+-                                builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool,
 -                                                      b_abs_neg, const_float_max_neg));
-+        b_abs_neg = builder_->createUnaryBuiltinCall(
-+            type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, b_abs_neg);
++        b_abs_neg = builder_->CreateUnaryBuiltinCall(
++            type_float, ext_inst_glsl_std_450_, GLSLstd450FAbs, b_abs_neg);
 +      }
 +      if (!instr.scalar_operands[0].is_absolute_value ||
 +          !instr.scalar_operands[0].is_negated) {
-+        b_abs_neg = builder_->createNoContractionUnaryOp(
-+            spv::OpFNegate, type_float_, b_abs_neg);
++        b_abs_neg = builder_->CreateNoContractionUnaryOp(
++            spv::OpFNegate, type_float, b_abs_neg);
 +      }
-+      condition = builder_->createBinOp(
-+          spv::OpLogicalAnd, type_bool_, condition,
-+          builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool_,
-+                                b_abs_neg, const_float_max_neg));
-       // src0.b > 0 (need !(src0.b <= 0), but src0.b has already been checked
-       // for NaN).
        condition = builder_->createBinOp(
-           spv::OpLogicalAnd, type_bool_, condition,
--          builder_->createBinOp(spv::OpFOrdGreaterThan, type_bool_, b, const_float_0_));
--      SpirvBuilder::IfBuilder multiply_if(condition, spv::SelectionControlMaskNone, *builder_);
-+          builder_->createBinOp(spv::OpFOrdGreaterThan, type_bool_, b,
-+                                const_float_0_));
-+      SpirvBuilder::IfBuilder multiply_if(
+           spv::OpLogicalAnd, type_bool, condition,
+-          builder_->createBinOp(spv::OpFOrdGreaterThan, type_bool, b, const_float_0));
+-      SPIRVBuilder::IfBuilder multiply_if(condition, spv::SelectionControlMaskNone, *builder_);
++          builder_->createBinOp(spv::OpFOrdGreaterThanEqual, type_bool,
++                                b_abs_neg, const_float_max_neg));
++      // src0.b > 0 (need !(src0.b <= 0), but src0.b has already been checked
++      // for NaN).
++      // for NaN).
++      condition = builder_->createBinOp(
++          spv::OpLogicalAnd, type_bool, condition,
++          builder_->createBinOp(spv::OpFOrdGreaterThan, type_bool, b,
++                                const_float_0));
++      SPIRVBuilder::IfBuilder multiply_if(
 +          condition, spv::SelectionControlMaskNone, *builder_);
        spv::Id product;
        {
-         // Multiplication case.
 -        spv::Id a =
 -            instr.scalar_operands[0].GetComponent(0) != instr.scalar_operands[0].GetComponent(1)
 -                ? GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001)
 -                : b;
--        product = builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, ps);
+-        product = builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, ps);
+-        product = ZeroIfAnyOperandIsZero(product, GetAbsoluteOperand(a, instr.scalar_operands[0]),
+-                                         ps_abs);
++        // Multiplication case.
 +        spv::Id a = instr.scalar_operands[0].GetComponent(0) !=
 +                            instr.scalar_operands[0].GetComponent(1)
 +                        ? GetOperandComponents(operand_storage[0],
 +                                               instr.scalar_operands[0], 0b0001)
 +                        : b;
 +        product =
-+            builder_->createNoContractionBinOp(spv::OpFMul, type_float_, a, ps);
-         // Shader Model 3: +0 or denormal * anything = +-0.
--        product = ZeroIfAnyOperandIsZero(product, GetAbsoluteOperand(a, instr.scalar_operands[0]),
--                                         ps_abs);
++            builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, a, ps);
++        // Shader Model 3: +0 or denormal * anything = +-0.
++        // Shader Model 3: +0 or denormal * anything = +-0.
 +        product = ZeroIfAnyOperandIsZero(
 +            product, GetAbsoluteOperand(a, instr.scalar_operands[0]), ps_abs);
        }
-       multiply_if.makeEndIf();
-       // Merge - choose between the product and -FLT_MAX.
-@@ -969,12 +1053,14 @@
+       multiply_if.MakeEndIf();
++      // Merge - choose between the product and -FLT_MAX.
+       return multiply_if.CreateMergePhi(product, const_float_max_neg);
+     }
+ 
+@@ -846,10 +951,14 @@
        GetOperandScalarXY(operand_storage[0], instr.scalar_operands[0], a, b);
-       if (instr.scalar_opcode == ucode::AluScalarOpcode::kMaxAs ||
-           instr.scalar_opcode == ucode::AluScalarOpcode::kMaxAsf) {
--        // maxas: a0 = (int)clamp(floor(src0.a + 0.5), -256.0, 255.0)
--        // maxasf: a0 = (int)clamp(floor(src0.a), -256.0, 255.0)
+       if (instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kMaxAs ||
+           instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kMaxAsf) {
 +        // Scalar maxas/maxasf clamp a0 to [0, 255] (non-negative), unlike the
 +        // vector maxa which allows [-256, 255]. Matches DxbcShaderTranslator.
 +        // maxas: a0 = (int)clamp(floor(src0.a + 0.5), 0.0, 255.0)
 +        // maxasf: a0 = (int)clamp(floor(src0.a), 0.0, 255.0)
          spv::Id maxa_address;
-         if (instr.scalar_opcode == ucode::AluScalarOpcode::kMaxAs) {
--          maxa_address = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_, a,
+         if (instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kMaxAs) {
+-          maxa_address = builder_->CreateNoContractionBinOp(spv::OpFAdd, type_float, a,
 -                                                            builder_->makeFloatConstant(0.5f));
-+          maxa_address = builder_->createNoContractionBinOp(
-+              spv::OpFAdd, type_float_, a, builder_->makeFloatConstant(0.5f));
++          maxa_address = builder_->CreateNoContractionBinOp(
++              spv::OpFAdd, type_float, a, builder_->makeFloatConstant(0.5f));
          } else {
            maxa_address = a;
          }
-@@ -983,9 +1069,11 @@
-                 spv::OpConvertFToS, type_int_,
-                 builder_->createTriBuiltinCall(
-                     type_float_, ext_inst_glsl_std_450_, GLSLstd450NClamp,
--                    builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+@@ -858,9 +967,11 @@
+                 spv::OpConvertFToS, type_int,
+                 builder_->CreateTriBuiltinCall(
+                     type_float, ext_inst_glsl_std_450_, GLSLstd450NClamp,
+-                    builder_->CreateUnaryBuiltinCall(type_float, ext_inst_glsl_std_450_,
 -                                                     GLSLstd450Floor, maxa_address),
 -                    builder_->makeFloatConstant(-256.0f), builder_->makeFloatConstant(255.0f))),
-+                    builder_->createUnaryBuiltinCall(
-+                        type_float_, ext_inst_glsl_std_450_, GLSLstd450Floor,
++                    builder_->CreateUnaryBuiltinCall(
++                        type_float, ext_inst_glsl_std_450_, GLSLstd450Floor,
 +                        maxa_address),
 +                    builder_->makeFloatConstant(0.0f),
 +                    builder_->makeFloatConstant(255.0f))),
              var_main_address_register_);
        }
        if (a == b) {
-@@ -996,8 +1084,9 @@
-       // are undefined for NaN or NMax/NMin which return the non-NaN operand).
-       return builder_->createTriOp(
-           spv::OpSelect, type_float_,
--          builder_->createBinOp(spv::Op(kOps[size_t(instr.scalar_opcode)]), type_bool_, a, b), a,
--          b);
-+          builder_->createBinOp(spv::Op(kOps[size_t(instr.scalar_opcode)]),
-+                                type_bool_, a, b),
-+          a, b);
-     }
- 
-     case ucode::AluScalarOpcode::kSeqs:
-@@ -1008,94 +1097,142 @@
-           spv::OpSelect, type_float_,
-           builder_->createBinOp(
-               spv::Op(kOps[size_t(instr.scalar_opcode)]), type_bool_,
--              GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
-+              GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
-+                                   0b0001),
-               const_float_0_),
-           const_float_1_, const_float_0_);
- 
-     case ucode::AluScalarOpcode::kFrcs:
-     case ucode::AluScalarOpcode::kTruncs:
-     case ucode::AluScalarOpcode::kFloors:
--    case ucode::AluScalarOpcode::kExp:
--    case ucode::AluScalarOpcode::kLog:
--    case ucode::AluScalarOpcode::kRsq:
--    case ucode::AluScalarOpcode::kSqrt:
-     case ucode::AluScalarOpcode::kSin:
-     case ucode::AluScalarOpcode::kCos:
-       return builder_->createUnaryBuiltinCall(
--          type_float_, ext_inst_glsl_std_450_, GLSLstd450(kOps[size_t(instr.scalar_opcode)]),
+@@ -889,86 +1000,138 @@
+     case xenos::ucode::AluScalarOpcode::kFrcs:
+     case xenos::ucode::AluScalarOpcode::kTruncs:
+     case xenos::ucode::AluScalarOpcode::kFloors:
+-    case xenos::ucode::AluScalarOpcode::kExp:
+-    case xenos::ucode::AluScalarOpcode::kLog:
+-    case xenos::ucode::AluScalarOpcode::kRsq:
+-    case xenos::ucode::AluScalarOpcode::kSqrt:
+     case xenos::ucode::AluScalarOpcode::kSin:
+     case xenos::ucode::AluScalarOpcode::kCos:
+       return builder_->CreateUnaryBuiltinCall(
+           type_float, ext_inst_glsl_std_450_,
+           static_cast<GLSLstd450>(kOps[static_cast<size_t>(instr.scalar_opcode)]),
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
-+          type_float_, ext_inst_glsl_std_450_,
-+          GLSLstd450(kOps[size_t(instr.scalar_opcode)]),
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
-+    case ucode::AluScalarOpcode::kExp: {
-+      spv::Id result = builder_->createUnaryBuiltinCall(
-+          type_float_, ext_inst_glsl_std_450_, GLSLstd450Exp2,
-+          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
-+                               0b0001));
-+      return ReduceFloatPrecision(result, 21);
-+    }
-+    case ucode::AluScalarOpcode::kLog: {
-+      spv::Id result = builder_->createUnaryBuiltinCall(
-+          type_float_, ext_inst_glsl_std_450_, GLSLstd450Log2,
++    case xenos::ucode::AluScalarOpcode::kExp: {
++      spv::Id result = builder_->CreateUnaryBuiltinCall(
++          type_float, ext_inst_glsl_std_450_, GLSLstd450Exp2,
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      return ReduceFloatPrecision(result, 21);
 +    }
-+    case ucode::AluScalarOpcode::kSqrt: {
-+      spv::Id result = builder_->createUnaryBuiltinCall(
-+          type_float_, ext_inst_glsl_std_450_, GLSLstd450Sqrt,
++    case xenos::ucode::AluScalarOpcode::kLog: {
++      spv::Id result = builder_->CreateUnaryBuiltinCall(
++          type_float, ext_inst_glsl_std_450_, GLSLstd450Log2,
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      return ReduceFloatPrecision(result, 21);
 +    }
-+    case ucode::AluScalarOpcode::kRsq: {
-+      spv::Id result = builder_->createUnaryBuiltinCall(
-+          type_float_, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
++    case xenos::ucode::AluScalarOpcode::kSqrt: {
++      spv::Id result = builder_->CreateUnaryBuiltinCall(
++          type_float, ext_inst_glsl_std_450_, GLSLstd450Sqrt,
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      return ReduceFloatPrecision(result, 21);
 +    }
-     case ucode::AluScalarOpcode::kLogc: {
-       spv::Id result = builder_->createUnaryBuiltinCall(
-           type_float_, ext_inst_glsl_std_450_, GLSLstd450Log2,
++    case xenos::ucode::AluScalarOpcode::kRsq: {
++      spv::Id result = builder_->CreateUnaryBuiltinCall(
++          type_float, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
++          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
++                               0b0001));
++      return ReduceFloatPrecision(result, 21);
++    }
+     case xenos::ucode::AluScalarOpcode::kLogc: {
+       spv::Id result = builder_->CreateUnaryBuiltinCall(
+           type_float, ext_inst_glsl_std_450_, GLSLstd450Log2,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
--      return builder_->createTriOp(spv::OpSelect, type_float_,
--                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      return builder_->createTriOp(spv::OpSelect, type_float,
+-                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                         builder_->makeFloatConstant(-INFINITY)),
 -                                   builder_->makeFloatConstant(-FLT_MAX), result);
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      result = ReduceFloatPrecision(result, 21);
 +      return builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(-INFINITY)),
 +          builder_->makeFloatConstant(-FLT_MAX), result);
      }
-     case ucode::AluScalarOpcode::kRcpc: {
-       spv::Id result = builder_->createNoContractionBinOp(
-           spv::OpFDiv, type_float_, const_float_1_,
+     case xenos::ucode::AluScalarOpcode::kRcpc: {
+       spv::Id result = builder_->CreateNoContractionBinOp(
+           spv::OpFDiv, type_float, const_float_1,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
--      result = builder_->createTriOp(spv::OpSelect, type_float_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      result = builder_->createTriOp(spv::OpSelect, type_float,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(-INFINITY)),
 -                                     builder_->makeFloatConstant(-FLT_MAX), result);
--      return builder_->createTriOp(spv::OpSelect, type_float_,
--                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      return builder_->createTriOp(spv::OpSelect, type_float,
+-                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                         builder_->makeFloatConstant(INFINITY)),
 -                                   builder_->makeFloatConstant(FLT_MAX), result);
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      result = ReduceFloatPrecision(result, 21);
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(-INFINITY)),
 +          builder_->makeFloatConstant(-FLT_MAX), result);
 +      return builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(INFINITY)),
 +          builder_->makeFloatConstant(FLT_MAX), result);
      }
-     case ucode::AluScalarOpcode::kRcpf: {
-       spv::Id result = builder_->createNoContractionBinOp(
-           spv::OpFDiv, type_float_, const_float_1_,
+     case xenos::ucode::AluScalarOpcode::kRcpf: {
+       spv::Id result = builder_->CreateNoContractionBinOp(
+           spv::OpFDiv, type_float, const_float_1,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
--      result = builder_->createTriOp(spv::OpSelect, type_float_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      result = builder_->createTriOp(spv::OpSelect, type_float,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(INFINITY)),
--                                     const_float_0_, result);
+-                                     const_float_0, result);
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      result = ReduceFloatPrecision(result, 21);
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(INFINITY)),
-+          const_float_0_, result);
-       // Can't create -0.0f with makeFloatConstant due to float comparison
-       // internally, cast to bit pattern.
--      result = builder_->createTriOp(spv::OpSelect, type_uint_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          const_float_0, result);
++      // Can't create -0.0f with makeFloatConstant due to float comparison
++      // internally, cast to bit pattern.
+       // Cannot create -0.0f with makeFloatConstant (float comparison), use the bit pattern.
+-      result = builder_->createTriOp(spv::OpSelect, type_uint,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(-INFINITY)),
--                                     builder_->makeUintConstant(uint32_t(INT32_MIN)),
--                                     builder_->createUnaryOp(spv::OpBitcast, type_uint_, result));
+-                                     builder_->makeUintConstant(static_cast<u32>(INT32_MIN)),
+-                                     builder_->createUnaryOp(spv::OpBitcast, type_uint, result));
++      // Can't create -0.0f with makeFloatConstant due to float comparison
++      // internally, cast to bit pattern.
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_uint_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_uint,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(-INFINITY)),
-+          builder_->makeUintConstant(uint32_t(INT32_MIN)),
-+          builder_->createUnaryOp(spv::OpBitcast, type_uint_, result));
-       return builder_->createUnaryOp(spv::OpBitcast, type_float_, result);
++          builder_->makeUintConstant(static_cast<u32>(INT32_MIN)),
++          builder_->createUnaryOp(spv::OpBitcast, type_uint, result));
+       return builder_->createUnaryOp(spv::OpBitcast, type_float, result);
      }
-     case ucode::AluScalarOpcode::kRcp: {
--      return builder_->createNoContractionBinOp(
-+      spv::Id result = builder_->createNoContractionBinOp(
-           spv::OpFDiv, type_float_, const_float_1_,
+     case xenos::ucode::AluScalarOpcode::kRcp: {
+-      return builder_->CreateNoContractionBinOp(
++      spv::Id result = builder_->CreateNoContractionBinOp(
+           spv::OpFDiv, type_float, const_float_1,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      return ReduceFloatPrecision(result, 21);
      }
-     case ucode::AluScalarOpcode::kRsqc: {
-       spv::Id result = builder_->createUnaryBuiltinCall(
-           type_float_, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
+     case xenos::ucode::AluScalarOpcode::kRsqc: {
+       spv::Id result = builder_->CreateUnaryBuiltinCall(
+           type_float, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
--      result = builder_->createTriOp(spv::OpSelect, type_float_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      result = builder_->createTriOp(spv::OpSelect, type_float,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(-INFINITY)),
 -                                     builder_->makeFloatConstant(-FLT_MAX), result);
--      return builder_->createTriOp(spv::OpSelect, type_float_,
--                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      return builder_->createTriOp(spv::OpSelect, type_float,
+-                                   builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                         builder_->makeFloatConstant(INFINITY)),
 -                                   builder_->makeFloatConstant(FLT_MAX), result);
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      result = ReduceFloatPrecision(result, 21);
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(-INFINITY)),
 +          builder_->makeFloatConstant(-FLT_MAX), result);
 +      return builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(INFINITY)),
 +          builder_->makeFloatConstant(FLT_MAX), result);
      }
-     case ucode::AluScalarOpcode::kRsqf: {
-       spv::Id result = builder_->createUnaryBuiltinCall(
-           type_float_, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
+     case xenos::ucode::AluScalarOpcode::kRsqf: {
+       spv::Id result = builder_->CreateUnaryBuiltinCall(
+           type_float, ext_inst_glsl_std_450_, GLSLstd450InverseSqrt,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001));
--      result = builder_->createTriOp(spv::OpSelect, type_float_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
+-      result = builder_->createTriOp(spv::OpSelect, type_float,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(INFINITY)),
--                                     const_float_0_, result);
+-                                     const_float_0, result);
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001));
 +      result = ReduceFloatPrecision(result, 21);
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_float_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_float,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(INFINITY)),
-+          const_float_0_, result);
-       // Can't create -0.0f with makeFloatConstant due to float comparison
-       // internally, cast to bit pattern.
--      result = builder_->createTriOp(spv::OpSelect, type_uint_,
--                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          const_float_0, result);
++      // Can't create -0.0f with makeFloatConstant due to float comparison
++      // internally, cast to bit pattern.
+       // Cannot create -0.0f with makeFloatConstant (float comparison), use the bit pattern.
+-      result = builder_->createTriOp(spv::OpSelect, type_uint,
+-                                     builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 -                                                           builder_->makeFloatConstant(-INFINITY)),
--                                     builder_->makeUintConstant(uint32_t(INT32_MIN)),
--                                     builder_->createUnaryOp(spv::OpBitcast, type_uint_, result));
+-                                     builder_->makeUintConstant(static_cast<u32>(INT32_MIN)),
+-                                     builder_->createUnaryOp(spv::OpBitcast, type_uint, result));
 +      result = builder_->createTriOp(
-+          spv::OpSelect, type_uint_,
-+          builder_->createBinOp(spv::OpFOrdEqual, type_bool_, result,
++          spv::OpSelect, type_uint,
++          builder_->createBinOp(spv::OpFOrdEqual, type_bool, result,
 +                                builder_->makeFloatConstant(-INFINITY)),
-+          builder_->makeUintConstant(uint32_t(INT32_MIN)),
-+          builder_->createUnaryOp(spv::OpBitcast, type_uint_, result));
-       return builder_->createUnaryOp(spv::OpBitcast, type_float_, result);
++          builder_->makeUintConstant(static_cast<u32>(INT32_MIN)),
++          builder_->createUnaryOp(spv::OpBitcast, type_uint, result));
+       return builder_->createUnaryOp(spv::OpBitcast, type_float, result);
      }
  
-@@ -1105,46 +1242,55 @@
-     case ucode::AluScalarOpcode::kSetpGe: {
-       spv::Id predicate = builder_->createBinOp(
-           spv::Op(kOps[size_t(instr.scalar_opcode)]), type_bool_,
--          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
-+          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
-+                               0b0001),
-           const_float_0_);
+@@ -982,41 +1145,50 @@
+           const_float_0);
        builder_->createStore(predicate, var_main_predicate_);
        predicate_written = true;
--      return builder_->createTriOp(spv::OpSelect, type_float_, predicate, const_float_0_,
--                                   const_float_1_);
-+      return builder_->createTriOp(spv::OpSelect, type_float_, predicate,
-+                                   const_float_0_, const_float_1_);
+-      return builder_->createTriOp(spv::OpSelect, type_float, predicate, const_float_0,
+-                                   const_float_1);
++      return builder_->createTriOp(spv::OpSelect, type_float, predicate,
++                                   const_float_0, const_float_1);
      }
-     case ucode::AluScalarOpcode::kSetpInv: {
+     case xenos::ucode::AluScalarOpcode::kSetpInv: {
 -      spv::Id a = GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001);
--      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a, const_float_1_);
+-      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool, a, const_float_1);
 +      spv::Id a = GetOperandComponents(operand_storage[0],
 +                                       instr.scalar_operands[0], 0b0001);
-+      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a,
-+                                                const_float_1_);
++      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool, a,
++                                                const_float_1);
        builder_->createStore(predicate, var_main_predicate_);
        predicate_written = true;
        return builder_->createTriOp(
-           spv::OpSelect, type_float_, predicate, const_float_0_,
+           spv::OpSelect, type_float, predicate, const_float_0,
            builder_->createTriOp(
-               spv::OpSelect, type_float_,
--              builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a, const_float_0_),
-+              builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a,
-+                                    const_float_0_),
-               const_float_1_, a));
+               spv::OpSelect, type_float,
+-              builder_->createBinOp(spv::OpFOrdEqual, type_bool, a, const_float_0), const_float_1,
+-              a));
++              builder_->createBinOp(spv::OpFOrdEqual, type_bool, a,
++                                    const_float_0),
++              const_float_1, a));
      }
-     case ucode::AluScalarOpcode::kSetpPop: {
-       spv::Id a_minus_1 = builder_->createNoContractionBinOp(
-           spv::OpFSub, type_float_,
+     case xenos::ucode::AluScalarOpcode::kSetpPop: {
+       spv::Id a_minus_1 = builder_->CreateNoContractionBinOp(
+           spv::OpFSub, type_float,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
 +                               0b0001),
-           const_float_1_);
+           const_float_1);
 -      spv::Id predicate =
--          builder_->createBinOp(spv::OpFOrdLessThanEqual, type_bool_, a_minus_1, const_float_0_);
+-          builder_->createBinOp(spv::OpFOrdLessThanEqual, type_bool, a_minus_1, const_float_0);
 +      spv::Id predicate = builder_->createBinOp(
-+          spv::OpFOrdLessThanEqual, type_bool_, a_minus_1, const_float_0_);
++          spv::OpFOrdLessThanEqual, type_bool, a_minus_1, const_float_0);
        builder_->createStore(predicate, var_main_predicate_);
        predicate_written = true;
--      return builder_->createTriOp(spv::OpSelect, type_float_, predicate, const_float_0_,
--                                   a_minus_1);
-+      return builder_->createTriOp(spv::OpSelect, type_float_, predicate,
-+                                   const_float_0_, a_minus_1);
+-      return builder_->createTriOp(spv::OpSelect, type_float, predicate, const_float_0, a_minus_1);
++      return builder_->createTriOp(spv::OpSelect, type_float, predicate,
++                                   const_float_0, a_minus_1);
      }
-     case ucode::AluScalarOpcode::kSetpClr:
+     case xenos::ucode::AluScalarOpcode::kSetpClr:
 -      builder_->createStore(builder_->makeBoolConstant(false), var_main_predicate_);
 +      builder_->createStore(builder_->makeBoolConstant(false),
 +                            var_main_predicate_);
        return builder_->makeFloatConstant(FLT_MAX);
-     case ucode::AluScalarOpcode::kSetpRstr: {
+     case xenos::ucode::AluScalarOpcode::kSetpRstr: {
 -      spv::Id a = GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001);
--      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a, const_float_0_);
+-      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool, a, const_float_0);
 +      spv::Id a = GetOperandComponents(operand_storage[0],
 +                                       instr.scalar_operands[0], 0b0001);
-+      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool_, a,
-+                                                const_float_0_);
++      spv::Id predicate = builder_->createBinOp(spv::OpFOrdEqual, type_bool, a,
++                                                const_float_0);
        builder_->createStore(predicate, var_main_predicate_);
        predicate_written = true;
--      return builder_->createTriOp(spv::OpSelect, type_float_, predicate, const_float_0_, a);
-+      return builder_->createTriOp(spv::OpSelect, type_float_, predicate,
-+                                   const_float_0_, a);
+-      return builder_->createTriOp(spv::OpSelect, type_float, predicate, const_float_0, a);
++      return builder_->createTriOp(spv::OpSelect, type_float, predicate,
++                                   const_float_0, a);
      }
  
-     case ucode::AluScalarOpcode::kKillsEq:
-@@ -1154,26 +1300,61 @@
-     case ucode::AluScalarOpcode::kKillsOne: {
-       KillPixel(builder_->createBinOp(
-                     spv::Op(kOps[size_t(instr.scalar_opcode)]), type_bool_,
--                    GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
--                    instr.scalar_opcode == ucode::AluScalarOpcode::kKillsOne ? const_float_1_
--                                                                             : const_float_0_),
-+                    GetOperandComponents(operand_storage[0],
+     case xenos::ucode::AluScalarOpcode::kKillsEq:
+@@ -1027,25 +1199,61 @@
+       KillPixel(
+           builder_->createBinOp(
+               static_cast<spv::Op>(kOps[static_cast<size_t>(instr.scalar_opcode)]), type_bool,
+-              GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
+-              instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kKillsOne ? const_float_1
+-                                                                              : const_float_0),
++              GetOperandComponents(operand_storage[0],
 +                                         instr.scalar_operands[0], 0b0001),
-+                    instr.scalar_opcode == ucode::AluScalarOpcode::kKillsOne
-+                        ? const_float_1_
-+                        : const_float_0_),
-                 memexport_eM_potentially_written_before);
-       return const_float_0_;
++                    instr.scalar_opcode == xenos::ucode::AluScalarOpcode::kKillsOne
++                        ? const_float_1
++                        : const_float_0),
+           memexport_em_potentially_written_before);
+       return const_float_0;
      }
  
-     case ucode::AluScalarOpcode::kMulsc0:
-     case ucode::AluScalarOpcode::kMulsc1: {
+     case xenos::ucode::AluScalarOpcode::kMulsc0:
+     case xenos::ucode::AluScalarOpcode::kMulsc1: {
 -      spv::Id operand_0 =
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001);
 -      spv::Id operand_1 =
 -          GetOperandComponents(operand_storage[1], instr.scalar_operands[1], 0b0001);
 -      spv::Id result =
--          builder_->createNoContractionBinOp(spv::OpFMul, type_float_, operand_0, operand_1);
+-          builder_->CreateNoContractionBinOp(spv::OpFMul, type_float, operand_0, operand_1);
 -      if (!(instr.scalar_operands[0].GetIdenticalComponents(instr.scalar_operands[1]) & 0b0001)) {
+-        result =
+-            ZeroIfAnyOperandIsZero(result, GetAbsoluteOperand(operand_0, instr.scalar_operands[0]),
+-                                   GetAbsoluteOperand(operand_1, instr.scalar_operands[1]));
 +      spv::Id operand_0 = GetOperandComponents(
 +          operand_storage[0], instr.scalar_operands[0], 0b0001);
 +      spv::Id operand_1 = GetOperandComponents(
 +          operand_storage[1], instr.scalar_operands[1], 0b0001);
-+      spv::Id result = builder_->createNoContractionBinOp(
-+          spv::OpFMul, type_float_, operand_0, operand_1);
++      spv::Id result = builder_->CreateNoContractionBinOp(
++          spv::OpFMul, type_float, operand_0, operand_1);
 +      // TODO(boma): Experimental round to zero for Volition titles (5451080D,
 +      // 4B4D07F6, 5451086D) that experience camera-independent, batch-boundary
 +      // vertex explosions with the default round-to-nearest behavior.
 +      // Real hardware rounding behavior needs to be verified.
-+      if (REXCVAR_GET(mulsc_round_toward_zero)) {
++      if (static_cast<bool>(GetSPIRVShaderModification().value & Modification::kMulscRTZ)) {
 +        // Keep the Fma as one operation so it can recover the product error.
-+        spv::Id error = builder_->createTriBuiltinCall(
-+            type_float_, ext_inst_glsl_std_450_, GLSLstd450Fma, operand_0,
++        spv::Id error = builder_->CreateTriBuiltinCall(
++            type_float, ext_inst_glsl_std_450_, GLSLstd450Fma, operand_0,
 +            operand_1,
-+            builder_->createUnaryOp(spv::OpFNegate, type_float_, result));
++            builder_->createUnaryOp(spv::OpFNegate, type_float, result));
 +        builder_->addDecoration(error, spv::DecorationNoContraction);
 +        spv::Id rounded_away = builder_->createBinOp(
-+            spv::OpLogicalNotEqual, type_bool_,
-+            builder_->createBinOp(spv::OpFOrdLessThan, type_bool_, error,
-+                                  const_float_0_),
-+            builder_->createBinOp(spv::OpFOrdLessThan, type_bool_, result,
-+                                  const_float_0_));
++            spv::OpLogicalNotEqual, type_bool,
++            builder_->createBinOp(spv::OpFOrdLessThan, type_bool, error,
++                                  const_float_0),
++            builder_->createBinOp(spv::OpFOrdLessThan, type_bool, result,
++                                  const_float_0));
 +        rounded_away = builder_->createBinOp(
-+            spv::OpLogicalAnd, type_bool_, rounded_away,
-+            builder_->createBinOp(spv::OpFOrdNotEqual, type_bool_, error,
-+                                  const_float_0_));
++            spv::OpLogicalAnd, type_bool, rounded_away,
++            builder_->createBinOp(spv::OpFOrdNotEqual, type_bool, error,
++                                  const_float_0));
 +        // Opposite signs mean the product rounded away from zero.
 +        spv::Id result_toward_zero = builder_->createUnaryOp(
-+            spv::OpBitcast, type_float_,
++            spv::OpBitcast, type_float,
 +            builder_->createBinOp(
-+                spv::OpISub, type_uint_,
-+                builder_->createUnaryOp(spv::OpBitcast, type_uint_, result),
++                spv::OpISub, type_uint,
++                builder_->createUnaryOp(spv::OpBitcast, type_uint, result),
 +                builder_->makeUintConstant(1)));
-+        result = builder_->createTriOp(spv::OpSelect, type_float_, rounded_away,
++        result = builder_->createTriOp(spv::OpSelect, type_float, rounded_away,
 +                                       result_toward_zero, result);
 +      }
 +      if (!(instr.scalar_operands[0].GetIdenticalComponents(
 +                instr.scalar_operands[1]) &
 +            0b0001)) {
-         // Shader Model 3: +0 or denormal * anything = +-0.
--        result =
--            ZeroIfAnyOperandIsZero(result, GetAbsoluteOperand(operand_0, instr.scalar_operands[0]),
--                                   GetAbsoluteOperand(operand_1, instr.scalar_operands[1]));
++        // Shader Model 3: +0 or denormal * anything = +-0.
 +        result = ZeroIfAnyOperandIsZero(
 +            result, GetAbsoluteOperand(operand_0, instr.scalar_operands[0]),
 +            GetAbsoluteOperand(operand_1, instr.scalar_operands[1]));
        }
        return result;
      }
-@@ -1183,8 +1364,10 @@
-     case ucode::AluScalarOpcode::kSubsc1: {
-       return builder_->createNoContractionBinOp(
-           spv::Op(kOps[size_t(instr.scalar_opcode)]), type_float_,
+@@ -1055,8 +1263,10 @@
+     case xenos::ucode::AluScalarOpcode::kSubsc1: {
+       return builder_->CreateNoContractionBinOp(
+           static_cast<spv::Op>(kOps[static_cast<size_t>(instr.scalar_opcode)]), type_float,
 -          GetOperandComponents(operand_storage[0], instr.scalar_operands[0], 0b0001),
 -          GetOperandComponents(operand_storage[1], instr.scalar_operands[1], 0b0001));
 +          GetOperandComponents(operand_storage[0], instr.scalar_operands[0],
@@ -1915,4 +1763,91 @@ diff --git a/src/graphics/pipeline/shader/spirv_translator_alu.cpp b/src/graphic
 +                               0b0001));
      }
  
-     case ucode::AluScalarOpcode::kRetainPrev:
+     case xenos::ucode::AluScalarOpcode::kRetainPrev:
+diff --git a/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp b/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
+--- a/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
++++ b/src/gpu/xenos/pipeline/shader/dxbc_translator.cpp
+@@ -87,6 +87,7 @@
+   if (options_.unorm8_fixed16)
+     shader_modification.value |= Modification::kUnorm8Fixed16;
+   if (!options_.scaled_texture_offsets) shader_modification.value |= Modification::kScaledTextureOffsetsDisabled;
++  if (settings_.mulsc_round_toward_zero.Get()) shader_modification.value |= Modification::kMulscRTZ;
+   return shader_modification.value;
+ }
+ 
+@@ -101,6 +102,7 @@
+   if (!options_.scaled_texture_offsets) shader_modification.value |= Modification::kScaledTextureOffsetsDisabled;
+   shader_modification.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kOne;
+   shader_modification.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
++  if (settings_.mulsc_round_toward_zero.Get()) shader_modification.value |= Modification::kMulscRTZ;
+   return shader_modification.value;
+ }
+ 
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
+@@ -83,6 +83,7 @@
+       dynamic_addressable_register_count;
+   shader_modification.vertex.host_vertex_shader_type = host_vertex_shader_type;
+   if (!scaled_texture_offsets_) shader_modification.value |= Modification::kScaledTextureOffsetsDisabled;
++  if (mulsc_round_toward_zero_) shader_modification.value |= Modification::kMulscRTZ;
+   return shader_modification.value;
+ }
+ 
+@@ -93,6 +94,7 @@
+   if (!scaled_texture_offsets_) shader_modification.value |= Modification::kScaledTextureOffsetsDisabled;
+   shader_modification.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kOne;
+   shader_modification.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
++  if (mulsc_round_toward_zero_) shader_modification.value |= Modification::kMulscRTZ;
+   return shader_modification.value;
+ }
+ 
+diff --git a/src/gpu/xenos/draw_extent_estimator.h b/src/gpu/xenos/draw_extent_estimator.h
+--- a/src/gpu/xenos/draw_extent_estimator.h
++++ b/src/gpu/xenos/draw_extent_estimator.h
+@@ -30,7 +30,7 @@
+       : register_file_(register_file),
+         settings_(settings),
+         physical_memory_(memory),
+-        shader_interpreter_(register_file, memory) {}
++        shader_interpreter_(register_file, memory, settings.mulsc_round_toward_zero.Get()) {}
+ 
+   /**
+    * Returns the maximum Y in pixels covered by the vertices of the current draw. The bound is
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -113,7 +113,8 @@
+       render_target_cache_.IsMSAA2xNoAttachmentsSupported(), edram_fragment_shader_interlock,
+       render_target_cache_.GetDrawResolutionScaleX(),
+       render_target_cache_.GetDrawResolutionScaleY(),
+-      command_processor_.GetXenosSettings().draw_resolution_scaled_texture_offsets.Get());
++      command_processor_.GetXenosSettings().draw_resolution_scaled_texture_offsets.Get(),
++      command_processor_.GetXenosSettings().mulsc_round_toward_zero.Get());
+ 
+   if (edram_fragment_shader_interlock) {
+     std::vector<u8> depth_only_fragment_shader_code =
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -34,6 +34,8 @@
+   REX_SETTING(i32, query_occlusion_fake_sample_count, 1000,
+               "Fake sample count for occlusion queries", Range{1, 100000});
+   REX_SETTING(bool, allow_invalid_fetch_constants, false, "Allow invalid fetch constants");
++  REX_SETTING(bool, mulsc_round_toward_zero, false,
++              "Opt-in mulsc rounding toward zero; hardware behavior remains unconfirmed", kRestart);
+   REX_SETTING(bool, draw_resolution_scaled_texture_offsets, true,
+               "Scale texture offsets with draw resolution");
+   REX_SETTING(std::string, dump_shaders, "", "Path to dump shaders to");
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -139,6 +139,8 @@
+     {"vulkan.prefer_fill_mode_non_solid", "gpu.vulkan.prefer_fill_mode_non_solid"},
+     {"xenos.vulkan_readback_resolve", "gpu.vulkan.readback_resolve"},
+     {"xenos.vulkan_readback_memexport", "gpu.vulkan.readback_memexport"},
++    {"mulsc_round_toward_zero", "gpu.xenos.mulsc_round_toward_zero"},
++    {"xenos.mulsc_round_toward_zero", "gpu.xenos.mulsc_round_toward_zero"},
+     {"occlusion_query", "gpu.xenos.occlusion_query"},
+     {"xenos.occlusion_query", "gpu.xenos.occlusion_query"},
+     {"occlusion_query_viz", "gpu.xenos.occlusion_query_viz"},

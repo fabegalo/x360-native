@@ -1,9 +1,8 @@
-diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
-index f73329d..73b4acf 100644
---- a/include/rex/kernel/xam/module.h
-+++ b/include/rex/kernel/xam/module.h
-@@ -49,7 +49,7 @@ class XamModule : public system::KernelModule {
-   bool BeginSystemUi(uint32_t module, uint32_t slot, uint32_t user) {
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -31,7 +31,7 @@
+   bool BeginSystemUi(u32 module, u32 slot, u32 user) {
      std::lock_guard lock(system_apps_mutex_);
      auto it = system_apps_.find(slot);
 -    if (system_ui_.module || user >= 4 || it == system_apps_.end() ||
@@ -11,9 +10,9 @@ index f73329d..73b4acf 100644
          it->second.module != module) return false;
      system_ui_ = {module, user};
      return true;
-@@ -66,7 +66,8 @@ class XamModule : public system::KernelModule {
+@@ -48,7 +48,8 @@
    }
-   bool EnableSystemUiInput(uint32_t user, bool enable) {
+   bool EnableSystemUiInput(u32 user, bool enable) {
      std::lock_guard lock(system_apps_mutex_);
 -    if (!system_ui_.module || user != system_ui_.user) return false;
 +    if (!system_ui_.module || (user != system_ui_.user &&
@@ -21,75 +20,81 @@ index f73329d..73b4acf 100644
      system_ui_.input_enabled = enable;
      return true;
    }
-diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
-index 61953b7..83e494c 100644
---- a/src/kernel/xam/xam_input.cpp
-+++ b/src/kernel/xam/xam_input.cpp
-@@ -42,7 +42,7 @@ rex::input::InputSystem* input_system() {
- bool SystemUiOwnsInput(uint32_t user) {
-   auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
-   const auto ui = xam->GetSystemUiSession();
+diff --git a/src/xam/xam_input.cpp b/src/xam/xam_input.cpp
+--- a/src/xam/xam_input.cpp
++++ b/src/xam/xam_input.cpp
+@@ -48,7 +48,7 @@
+ 
+ bool SystemUiOwnsInput(u32 user) {
+   const auto ui = CurrentXAM().GetSystemUI().GetSystemUiSession();
 -  return ui.visible && ui.user == user;
 +  return ui.visible && (ui.user == user || ui.user == 0xFF);
  }
  
- void XamResetInactivity_entry() {
-@@ -119,7 +119,9 @@ u32 XamInputGetState_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_STATE> i
+ u32 NormalizeUser(u32 user_index, u32 flags) {
+@@ -131,7 +131,7 @@
+   if (!input || actual_user_index >= rex::hid::IInputSystem::kMaxUsers) {
+     return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
    }
- 
-   auto* is = input_system();
 -  if (SystemUiOwnsInput(actual_user_index)) {
-+  // Original system apps use the privileged high bit for device-state queries.
-+  // Foreground title queries remain suppressed while the HUD owns input.
 +  if (!(flags & 0x80000000u) && SystemUiOwnsInput(actual_user_index)) {
      if (input_state) *input_state = {};
-     return X_ERROR_SUCCESS;
+     return kernel::X_ERROR_SUCCESS;
    }
-@@ -234,14 +236,45 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
-   const auto ui = xam->GetSystemUiSession();
-   const uint32_t user = ctx.r3.u32;
-   if (!ctx.r4.u32) { ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS; return; }
--  if (!ui.visible || !ui.input_enabled || user != ui.user) {
-+  if (!ui.visible || !ui.input_enabled ||
-+      (user != ui.user && !(ui.user == 0xFF && user < 4))) {
-     ctx.r3.u64 = X_ERROR_EMPTY;
-     return;
-   }
-   auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r4.u32);
-   ctx.r3.u64 = kernel::xam::input_system()->GetKeystroke(user, 1, stroke);
- }
--REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHudEx);
-+extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
-+  using namespace rex;
-+  // XAM 17559 816F4C78: user value, flags, output (unlike KeystrokeEx,
-+  // the first argument is not a pointer). FF selects any controller.
-+  const uint32_t user = ctx.r3.u32;
-+  if (!ctx.r5.u32 || (user >= 4 && user != 0xFF)) {
-+    ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS;
-+    return;
-+  }
-+  auto xam = REX_KERNEL_STATE()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
-+  const auto ui = xam->GetSystemUiSession();
-+  if (!ui.visible || !ui.input_enabled ||
-+      (ui.user != 0xFF && user != ui.user)) {
-+    ctx.r3.u64 = X_ERROR_EMPTY;
-+    return;
-+  }
-+  auto* input_backend = kernel::xam::input_system();
-+  if (!input_backend) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
-+  auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r5.u32);
-+  const uint32_t first = user == 0xFF ? 0 : user;
-+  const uint32_t end = user == 0xFF ? 4 : user + 1;
-+  for (uint32_t index = first; index < end; ++index) {
-+    const auto result = input_backend->GetKeystroke(index, 1, stroke);
-+    if (result == X_ERROR_SUCCESS) { ctx.r3.u64 = result; return; }
-+    if (result != X_ERROR_EMPTY && result != X_ERROR_DEVICE_NOT_CONNECTED) {
-+      ctx.r3.u64 = result;
-+      return;
-+    }
-+  }
-+  ctx.r3.u64 = X_ERROR_EMPTY;
+@@ -211,10 +211,28 @@
+ u32 XamInputGetKeystrokeHud_entry(u32 user, GuestPtrT<X_INPUT_KEYSTROKE> stroke) {
+   if (!stroke) return kernel::X_ERROR_BAD_ARGUMENTS;
+   const auto ui = CurrentXAM().GetSystemUI().GetSystemUiSession();
+-  if (!ui.visible || !ui.input_enabled || user != ui.user) return kernel::X_ERROR_EMPTY;
++  if (!ui.visible || !ui.input_enabled || (user != ui.user && !(ui.user == 0xFF && user < 4))) return kernel::X_ERROR_EMPTY;
+   auto* input = GetInput();
+   if (!input) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+   return TakeInputKeystroke(*input, user, 1, *stroke);
 +}
++
++u32 XamInputGetKeystrokeHudEx_entry(u32 user, [[maybe_unused]] u32 flags,
++                                   GuestPtrT<X_INPUT_KEYSTROKE> stroke) {
++  if (!stroke || (user >= 4 && user != 0xFF)) return kernel::X_ERROR_BAD_ARGUMENTS;
++  const auto ui = CurrentXAM().GetSystemUI().GetSystemUiSession();
++  if (!ui.visible || !ui.input_enabled || (ui.user != 0xFF && user != ui.user)) return kernel::X_ERROR_EMPTY;
++  auto* input = GetInput();
++  if (!input) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++  const u32 first = user == 0xFF ? 0 : user;
++  const u32 end = user == 0xFF ? 4 : user + 1;
++  for (u32 index = first; index < end; ++index) {
++    u32 selected = index;
++    const auto result = TakeInputKeystroke(*input, selected, 1, *stroke);
++    if (result == kernel::X_ERROR_SUCCESS) return result;
++    if (result != kernel::X_ERROR_EMPTY && result != kernel::X_ERROR_DEVICE_NOT_CONNECTED) return result;
++  }
++  return kernel::X_ERROR_EMPTY;
+ }
+ 
+ }  // namespace xam
+@@ -233,3 +251,5 @@
+ REX_XAM_BODY(__imp__XamInputGetDeviceStats, rex::xam::XamInputGetDeviceStats_entry)
+ 
+ REX_XAM_BODY(__imp__XamInputGetKeystrokeHud, rex::xam::XamInputGetKeystrokeHud_entry)
++
++REX_XAM_BODY(__imp__XamInputGetKeystrokeHudEx, rex::xam::XamInputGetKeystrokeHudEx_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1097,7 +1097,7 @@
+ REX_EXPORT_STUB(__imp__XamInputGetFailedConnectionOrBind);
+ REX_EXPORT_STUB(__imp__XamInputGetKeyLocks);
+ 
+-REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHudEx);
++
  REX_EXPORT_STUB(__imp__XamInputGetUserVibrationLevel);
  REX_EXPORT_STUB(__imp__XamInputNonControllerGetRaw);
  REX_EXPORT_STUB(__imp__XamInputNonControllerGetRawEx);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -342,3 +342,5 @@
+ REX_XAM_FORWARD(__imp__XamAppUnloadStack)
+ 
+ REX_XAM_FORWARD(__imp__XamEnableSystemAppInput)
++
++REX_XAM_FORWARD(__imp__XamInputGetKeystrokeHudEx)

@@ -1,7 +1,6 @@
 #include "../../src/native/textures/texture_load.h"
 #include "../../src/native/d3d12/d3d12_commands.h"
-#include <rex/graphics/pipeline/texture/info.h>
-#include <rex/graphics/flags.h>
+#include <rex/xenos/texture.h>
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -11,45 +10,41 @@
 #include <vector>
 using Microsoft::WRL::ComPtr;
 using namespace x360n::native;
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
+using namespace rex::xenos;
 TEST_CASE("Native samples type 0 texture fetches only under gpu_allow_invalid_fetch_constants") {
   // Motocross Madness binds its terrain color sources as type 0; the pinned
   // Xenos texture cache samples them under this flag (title manifest).
-  xe_gpu_texture_fetch_t f{}; f.type = FetchConstantType::kInvalidTexture;
+  TextureFetch f{}; f.type = FetchConstantType::kInvalidTexture;
   f.dimension = DataDimension::k2DOrStacked; f.format = TextureFormat::k_8_8_8_8; f.swizzle = 0x688;
-  const bool saved = REXCVAR_GET(gpu_allow_invalid_fetch_constants);
-  REXCVAR_SET(gpu_allow_invalid_fetch_constants, false);
-  CHECK_FALSE(TextureFetchSampled(f));
-  CHECK_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false));
-  REXCVAR_SET(gpu_allow_invalid_fetch_constants, true);
-  CHECK(TextureFetchSampled(f));
-  CHECK(TextureViewActive(f, FetchOpDimension::k2D, false));
+  CHECK_FALSE(TextureFetchSampled(f, false));
+  CHECK_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false, false));
+  CHECK(TextureFetchSampled(f, true));
+  CHECK(TextureViewActive(f, FetchOpDimension::k2D, false, true));
   f.type = FetchConstantType::kVertex;  // Never a texture.
-  CHECK_FALSE(TextureFetchSampled(f));
-  REXCVAR_SET(gpu_allow_invalid_fetch_constants, saved);
+  CHECK_FALSE(TextureFetchSampled(f, false));
+  CHECK_FALSE(TextureFetchSampled(f, true));
 }
 TEST_CASE("Native inactive texture alternatives do not require guest memory") {
-  xe_gpu_texture_fetch_t f{}; f.type = FetchConstantType::kTexture;
+  TextureFetch f{}; f.type = FetchConstantType::kTexture;
   f.dimension = DataDimension::k2DOrStacked; f.format = TextureFormat::k_2_10_10_10; f.swizzle = 0x688;
   REQUIRE(NeedsCpuConversion(f.format, true, false));
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true));
-  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false));
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, false));
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true, false));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, false, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, false, false));
   f.sign_x = TextureSign::kSigned;
-  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true));
-  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true, false));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false, false));
   f.sign_y = f.sign_z = f.sign_w = TextureSign::kSigned;
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false, false));
   f.dimension = DataDimension::k3D;
-  REQUIRE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, true));
-  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, true, false));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true, false));
   f.dimension = DataDimension::kCube;
-  REQUIRE(TextureViewActive(f, FetchOpDimension::kCube, true));
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::kCube, true, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true, false));
   f.type = FetchConstantType::kInvalidTexture;
-  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, true));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, true, false));
 }
 namespace {
 struct Gpu {
@@ -250,7 +245,7 @@ TEST_CASE("Native Vulkan load regions read the D3D12 copy blocks") {
     const auto shader = GpuLoadShader(t);
     REQUIRE(shader != LoadShader::kUnknown);
     const auto plan = PlanGpuTextureLoad(t, shader);
-    const uint32_t bw = info->block_width, bytes = info->bytes_per_block(), levels = high + 1;
+    const uint32_t bw = info->block_width, bytes = info->GetBytesPerBlock(), levels = high + 1;
     const auto regions = PlanBufferImageRegions(plan, levels, bytes, bw, {width, height, volume ? depth : 1u});
     REQUIRE(regions.size() == plan.copies.size());
     for (size_t i = 0; i < regions.size(); ++i) {

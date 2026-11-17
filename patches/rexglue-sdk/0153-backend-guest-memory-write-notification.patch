@@ -1,88 +1,168 @@
-diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
---- a/include/rex/graphics/command_processor.h
-+++ b/include/rex/graphics/command_processor.h
-@@ -177,6 +177,9 @@
-   // A system command buffer ran and its completion fence is about to become
-   // visible to the guest: backends that defer guest-memory results publish them.
-   virtual void OnSystemCommandsExecuted() {}
-+  // The decoder wrote through the unprotected physical view. Backends with
-+  // resident guest-memory caches invalidate aliases after the actual store.
-+  virtual void OnGuestMemoryWrite(uint32_t address, uint32_t length) {}
-   void ExecuteIndirectBuffer(uint32_t ptr, uint32_t length);
-   bool ExecutePacket(memory::RingBuffer* reader);
-   bool ExecutePacketType0(memory::RingBuffer* reader, uint32_t packet);
-diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
---- a/src/graphics/command_processor.cpp
-+++ b/src/graphics/command_processor.cpp
-@@ -265,6 +265,7 @@
-     if (read_ptr_writeback_ptr_) {
-       memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(read_ptr_writeback_ptr_),
-                                        read_ptr_index_);
-+      OnGuestMemoryWrite(read_ptr_writeback_ptr_, sizeof(uint32_t));
-     }
+diff --git a/include/rex/guest.h b/include/rex/guest.h
+--- a/include/rex/guest.h
++++ b/include/rex/guest.h
+@@ -96,6 +96,9 @@
+    * @return The value, or an error when the address is outside physical memory.
+    */
+   [[nodiscard]] virtual Result<u32> LoadAcquire32(u32 address) = 0;
++
++  /** Publishes completed writes through a writable physical span to every watched alias. */
++  [[nodiscard]] virtual Result<void> NotifyPhysicalWrite(PhysicalRange range) = 0;
+ };
  
-     // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
-@@ -402,6 +403,7 @@
-       uint32_t scratch_addr = regs.values[XE_GPU_REG_SCRATCH_ADDR];
-       uint32_t mem_addr = scratch_addr + (scratch_reg * 4);
-       memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(mem_addr), value);
-+      OnGuestMemoryWrite(mem_addr, sizeof(uint32_t));
-     }
-   } else {
-     switch (index) {
-@@ -1082,6 +1084,7 @@
-   bin_mask_ = bin_mask;
-   OnSystemCommandsExecuted();
-   memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(fence), sequence);
-+  OnGuestMemoryWrite(fence, sizeof(uint32_t));
-   return true;
- }
+ class IPhysicalWriteWatch {
+diff --git a/src/kernel/title_context.h b/src/kernel/title_context.h
+--- a/src/kernel/title_context.h
++++ b/src/kernel/title_context.h
+@@ -45,6 +45,7 @@
+   [[nodiscard]] Result<std::span<std::byte>> GetWritablePhysicalSpan(PhysicalRange range) override;
+   [[nodiscard]] Result<void> StoreRelease32(u32 address, u32 value) override;
+   [[nodiscard]] Result<u32> LoadAcquire32(u32 address) override;
++  [[nodiscard]] Result<void> NotifyPhysicalWrite(PhysicalRange range) override;
+   [[nodiscard]] ScopeGuard AddWriteListener(IPhysicalWriteListener& listener) override;
+   void WatchPhysicalWrites(PhysicalRange range) override;
+   [[nodiscard]] ScopeGuard LockWriteWatches() override;
+diff --git a/src/kernel/title_context.cpp b/src/kernel/title_context.cpp
+--- a/src/kernel/title_context.cpp
++++ b/src/kernel/title_context.cpp
+@@ -1,5 +1,6 @@
+ #include "kernel/title_context.h"
  
-@@ -1216,6 +1219,7 @@
-   mem_addr &= ~0x3;
-   reg_val = GpuSwap(reg_val, endianness);
-   memory::store(memory_->TranslatePhysical(mem_addr), reg_val);
-+  OnGuestMemoryWrite(mem_addr, sizeof(uint32_t));
++#include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <cstring>
+@@ -24,8 +25,6 @@
  
-   return true;
- }
-@@ -1223,6 +1227,7 @@
- bool CommandProcessor::ExecutePacketType3_MEM_WRITE(memory::RingBuffer* reader, uint32_t packet,
-                                                     uint32_t count) {
-   uint32_t write_addr = reader->ReadAndSwap<uint32_t>();
-+  const uint32_t write_start = write_addr & ~uint32_t(3);
-   for (uint32_t i = 0; i < count - 1; i++) {
-     uint32_t write_data = reader->ReadAndSwap<uint32_t>();
+ constexpr u64 kPhysicalSize = 0x20000000;
+ constexpr std::array<u32, 3> kPhysicalViewBases = {0xA0000000, 0xC0000000, 0xE0000000};
+-constexpr u32 kLastViewBase = 0xE0000000;
+-constexpr u32 kLastViewOffset = 0x1000;
+ constexpr u32 kHostThreadStackSize = 128 * 1024;
  
-@@ -1232,6 +1237,7 @@
-     memory::store(memory_->TranslatePhysical(addr), write_data);
-     write_addr += 4;
+ thread_local bool t_host_thread = false;
+@@ -98,18 +97,23 @@
    }
-+  OnGuestMemoryWrite(write_start, (count - 1) * sizeof(uint32_t));
+   kernel::GuestAddressSpace& memory = *StateOf(runtime_).GetAddressSpace();
+   std::memcpy(memory.TranslatePhysical<u8*>(address), data.data(), data.size());
+-  if (!data.empty()) {
+-    const u32 length = static_cast<u32>(data.size());
+-    for (const u32 view_base : kPhysicalViewBases) {
+-      const u32 offset = view_base == kLastViewBase ? kLastViewOffset : 0;
+-      if (address < offset) {
+-        continue;
+-      }
+-      kernel::BaseHeap* heap = memory.LookupHeap(view_base + address - offset);
+-      if (heap != nullptr && heap->GetHeapType() == kernel::HeapType::kGuestPhysical) {
+-        static_cast<kernel::PhysicalHeap*>(heap)->TriggerCallbacks(view_base + address - offset,
+-                                                                   length, true, true);
+-      }
++  return NotifyPhysicalWrite({address, static_cast<u32>(data.size())});
++}
++
++Result<void> TitleContext::NotifyPhysicalWrite(PhysicalRange range) {
++  if (!InPhysical(range.address, range.length)) return std::unexpected(OutOfRange());
++  if (!range.length) return {};
++  kernel::GuestAddressSpace& memory = *StateOf(runtime_).GetAddressSpace();
++  const u64 end = u64{range.address} + range.length;
++  for (const u32 view_base : kPhysicalViewBases) {
++    kernel::BaseHeap* heap = memory.LookupHeap(view_base);
++    if (!heap || heap->GetHeapType() != kernel::HeapType::kGuestPhysical) continue;
++    const u32 origin = memory.GetPhysicalAddress(view_base);
++    const u64 first = std::max<u64>(range.address, origin);
++    const u64 last = std::min<u64>(end, u64{origin} + heap->GetHeapSize());
++    if (first < last) {
++      static_cast<kernel::PhysicalHeap*>(heap)->TriggerCallbacks(
++          view_base + static_cast<u32>(first - origin), static_cast<u32>(last - first), true, true);
+     }
+   }
+   return {};
+@@ -142,7 +146,7 @@
+   }
+   StateOf(runtime_).GetAddressSpace()->TranslatePhysical<be_u32*>(address)->Store(
+       value, std::memory_order_release);
+-  return {};
++  return NotifyPhysicalWrite({address, sizeof(u32)});
+ }
  
+ Result<u32> TitleContext::LoadAcquire32(u32 address) {
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -1221,6 +1221,9 @@
+     return true;
+   }
+   memory::copy_and_swap_16_unaligned(extents_destination, extents, rex::CountOf(extents));
++  if (auto notified = physical_memory_.NotifyPhysicalWrite({address, sizeof(extents)}); !notified) {
++    REXGPU_FAIL(false, "Cannot publish GPU extent write: {}", notified.error().message);
++  }
    return true;
  }
-@@ -1291,6 +1297,7 @@
-       write_reg_addr &= ~0x3;
-       write_data = GpuSwap(write_data, endianness);
-       memory::store(memory_->TranslatePhysical(write_reg_addr), write_data);
-+      OnGuestMemoryWrite(write_reg_addr, sizeof(uint32_t));
-     } else {
-       // Register.
-       WriteRegister(write_reg_addr, write_data);
-@@ -1336,6 +1343,7 @@
-   address &= ~0x3;
-   data_value = GpuSwap(data_value, endianness);
-   memory::store(memory_->TranslatePhysical(address), data_value);
-+  OnGuestMemoryWrite(address, sizeof(uint32_t));
-   return true;
- }
  
-@@ -1364,6 +1372,7 @@
-   assert_true(endianness == xenos::Endian::k8in16);
-   memory::copy_and_swap_16_unaligned(memory_->TranslatePhysical(address), extents,
-                                      rex::countof(extents));
-+  OnGuestMemoryWrite(address, sizeof(extents));
-   return true;
- }
+diff --git a/tests/unit/gpu/fake_title_context.h b/tests/unit/gpu/fake_title_context.h
+--- a/tests/unit/gpu/fake_title_context.h
++++ b/tests/unit/gpu/fake_title_context.h
+@@ -10,6 +10,7 @@
  
+ #pragma once
+ 
++#include <algorithm>
+ #include <cstring>
+ #include <memory>
+ #include <mutex>
+@@ -37,7 +38,7 @@
+   }
+   Result<void> CopyToPhysical(u32 address, std::span<const std::byte> data) override {
+     std::memcpy(memory_.TranslatePhysical<u8*>(address), data.data(), data.size());
+-    return {};
++    return NotifyPhysicalWrite({address, static_cast<u32>(data.size())});
+   }
+   Result<std::span<const std::byte>> GetReadOnlyPhysicalSpan(PhysicalRange range) override {
+     return std::span<const std::byte>(memory_.TranslatePhysical<const std::byte*>(range.address),
+@@ -52,14 +53,20 @@
+       stores_.push_back({address, value});
+     }
+     memory_.TranslatePhysical<be_u32*>(address)->Store(value, std::memory_order_release);
+-    return {};
++    return NotifyPhysicalWrite({address, sizeof(u32)});
+   }
+   Result<u32> LoadAcquire32(u32 address) override {
+     return memory_.TranslatePhysical<const be_u32*>(address)->Load(std::memory_order_acquire);
+   }
++  Result<void> NotifyPhysicalWrite(PhysicalRange range) override {
++    if (u64{range.address} + range.length > 0x20000000ull)
++      return Err(ErrorCategory::kMemory, "physical write outside memory");
++    if (range.length) for (auto* listener : listeners) listener->OnPhysicalWrite(range, true);
++    return {};
++  }
+   ScopeGuard AddWriteListener(IPhysicalWriteListener& listener) override {
+     listeners.push_back(&listener);
+-    return ScopeGuard();
++    return ScopeGuard([this, &listener] { std::erase(listeners, &listener); });
+   }
+   void WatchPhysicalWrites(PhysicalRange) override {}
+   ScopeGuard LockWriteWatches() override { return ScopeGuard(); }
+diff --git a/include/rex/driver_module.h b/include/rex/driver_module.h
+--- a/include/rex/driver_module.h
++++ b/include/rex/driver_module.h
+@@ -29,7 +29,7 @@
+  * A module that provides drivers to the runtime. The app opens only the modules named
+  * rexapu-<name>, rexhid-<name>, rexui-<name> and rexgpu-<family>-<name> for the selected drivers.
+  */
+-REX_DECLARE_INTERFACE(IDriverModule, 1)
++REX_DECLARE_INTERFACE(IDriverModule, 2)
+   virtual std::span<const DriverRegistration> GetDrivers() const = 0;
+ };
+ 
+diff --git a/include/rex/gpu/graphics_system.h b/include/rex/gpu/graphics_system.h
+--- a/include/rex/gpu/graphics_system.h
++++ b/include/rex/gpu/graphics_system.h
+@@ -51,7 +51,7 @@
+  * Vd calls and GPU register accesses to a Xenos driver. With no driver a project that presents
+  * itself calls ReportFrame and UISystem::DrawOverlays from its own present.
+  */
+-REX_DECLARE_INTERFACE(IGraphicsSystem, 1)
++REX_DECLARE_INTERFACE(IGraphicsSystem, 2)
+   virtual GraphicsSettings& GetSettings() = 0;
+ 
+   virtual bool HasDriver() const = 0;

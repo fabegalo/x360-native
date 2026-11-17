@@ -1,0 +1,389 @@
+diff --git a/src/hid/input_internal.h b/src/hid/input_internal.h
+--- a/src/hid/input_internal.h
++++ b/src/hid/input_internal.h
+@@ -132,10 +132,12 @@
+    * @return The keystroke without its user, or kNotFound.
+    */
+   Result<rex::hid::PadKeystroke> Next(const rex::hid::PadState& state, u32 now_ms);
++  void Observe(const rex::hid::PadState& state, u32 now_ms);
+ 
+  private:
+   enum class Repeat : u8 { kIdle, kWaiting, kRepeating };
+   u64 held_ = 0;
++  std::deque<rex::hid::PadKeystroke> pending_;
+   Repeat repeat_ = Repeat::kIdle;
+   u32 repeat_index_ = 0;
+   u32 repeat_time_ = 0;
+@@ -220,6 +222,8 @@
+ /** The keyboard and mouse as a pad, or as a keyboard that sends its keys as keystrokes. */
+ class KeyboardMousePad final : public rex::hid::IInputDriver {
+  public:
++  Result<rex::hid::PadState> PeekDeviceState(rex::hid::PadDeviceID id);
++  void Reset();
+   KeyboardMousePad(rex::hid::InputSettings& settings, hid::IBindingSet& bindings,
+                    const std::atomic<bool>& focused);
+   ~KeyboardMousePad() override;
+@@ -252,6 +256,7 @@
+   void RefreshBinds();
+ 
+  private:
++  Result<rex::hid::PadState> ReadState(rex::hid::PadDeviceID id, bool consume_motion);
+   bool IsEnabled() const;
+   void OnKey(const InputEvent& event, bool down);
+   void OnChar(const InputEvent& event);
+diff --git a/src/hid/keyboard_mouse_pad.cpp b/src/hid/keyboard_mouse_pad.cpp
+--- a/src/hid/keyboard_mouse_pad.cpp
++++ b/src/hid/keyboard_mouse_pad.cpp
+@@ -233,6 +233,14 @@
+ }
+ 
+ Result<rex::hid::PadState> KeyboardMousePad::GetDeviceState(rex::hid::PadDeviceID id) {
++  return ReadState(id, true);
++}
++
++Result<rex::hid::PadState> KeyboardMousePad::PeekDeviceState(rex::hid::PadDeviceID id) {
++  return ReadState(id, false);
++}
++
++Result<rex::hid::PadState> KeyboardMousePad::ReadState(rex::hid::PadDeviceID id, bool consume_motion) {
+   if (!IsEnabled() || id != kKeyboardMouseDevice) {
+     return std::unexpected(NotConnected());
+   }
+@@ -308,8 +316,10 @@
+     rx += static_cast<i32>(static_cast<f64>(mouse_dx_) * sensitivity * kMouseBaseScale);
+     ry += static_cast<i32>(static_cast<f64>(-mouse_dy_) * sensitivity * kMouseBaseScale);
+   }
+-  mouse_dx_ = 0.0f;
+-  mouse_dy_ = 0.0f;
++  if (consume_motion) {
++    mouse_dx_ = 0.0f;
++    mouse_dy_ = 0.0f;
++  }
+ 
+   auto clamp16 = [](i32 value) {
+     return static_cast<i16>(
+@@ -468,6 +478,14 @@
+   mouse_dy_ += event.dy;
+ }
+ 
++void KeyboardMousePad::Reset() {
++  pointer_lock_.store(false, std::memory_order_relaxed);
++  std::lock_guard lock(mutex_);
++  std::memset(key_down_, 0, sizeof(key_down_));
++  mouse_dx_ = mouse_dy_ = 0.0f;
++  queue_.clear();
++}
++
+ void KeyboardMousePad::OnFocusLost() {
+   pointer_lock_.store(false, std::memory_order_relaxed);
+   std::lock_guard lock(mutex_);
+diff --git a/src/hid/keystroke.cpp b/src/hid/keystroke.cpp
+--- a/src/hid/keystroke.cpp
++++ b/src/hid/keystroke.cpp
+@@ -102,42 +102,41 @@
+ 
+ }  // namespace
+ 
++void KeystrokeSynth::Observe(const rex::hid::PadState& state, u32 now_ms) {
++  const u64 current = static_cast<u64>(state.buttons) | AnalogToKeyfield(state);
++  const u64 changed = current ^ held_;
++  for (bool release : {true, false}) {
++    for (u32 i = 0; i < kKeyForBit.size(); ++i) {
++      const u64 bit = u64{1} << i;
++      if (!(changed & bit) || kKeyForBit[i] == VirtualKey::kNone) continue;
++      const bool pressed = (current & bit) != 0;
++      if (release == pressed) continue;
++      if (pending_.size() == 256) pending_.pop_front();
++      pending_.push_back(MakeKeystroke(kKeyForBit[i], pressed ? kKeystrokeKeyDown : kKeystrokeKeyUp));
++      if (pressed) {
++        repeat_ = Repeat::kWaiting;
++        repeat_index_ = i;
++        repeat_time_ = now_ms;
++      } else if (repeat_index_ == i) {
++        repeat_ = Repeat::kIdle;
++      }
++    }
++  }
++  held_ = current;
++}
++
+ Result<rex::hid::PadKeystroke> KeystrokeSynth::Next(const rex::hid::PadState& state, u32 now_ms) {
+-  const u64 current = static_cast<u64>(state.buttons) | AnalogToKeyfield(state);
+-
+-  if (repeat_ == Repeat::kWaiting && repeat_time_ + kRepeatDelayMs < now_ms) {
++  Observe(state, now_ms);
++  if (!pending_.empty()) {
++    auto key = pending_.front();
++    pending_.pop_front();
++    return key;
++  }
++  if (repeat_ == Repeat::kWaiting && repeat_time_ + kRepeatDelayMs < now_ms)
+     repeat_ = Repeat::kRepeating;
+-  }
+   if (repeat_ == Repeat::kRepeating && repeat_time_ + kRepeatRateMs < now_ms) {
+     repeat_time_ = now_ms;
+     return MakeKeystroke(kKeyForBit[repeat_index_], kKeystrokeKeyDown | kKeystrokeRepeat);
+-  }
+-
+-  const u64 changed = current ^ held_;
+-  if (changed == 0) {
+-    return Err<rex::hid::PadKeystroke>(ErrorCategory::kNotFound, "no keystroke is waiting");
+-  }
+-
+-  for (bool clear_pass : {true, false}) {
+-    for (u32 i = 0; i < kKeyForBit.size(); ++i) {
+-      const u64 bit = u64{1} << i;
+-      if (!(changed & bit) || kKeyForBit[i] == VirtualKey::kNone) {
+-        continue;
+-      }
+-      const bool pressed = (current & bit) != 0;
+-      if (clear_pass && !pressed) {
+-        held_ &= ~bit;
+-        repeat_ = Repeat::kIdle;
+-        return MakeKeystroke(kKeyForBit[i], kKeystrokeKeyUp);
+-      }
+-      if (!clear_pass && pressed) {
+-        held_ |= bit;
+-        repeat_ = Repeat::kWaiting;
+-        repeat_index_ = i;
+-        repeat_time_ = now_ms;
+-        return MakeKeystroke(kKeyForBit[i], kKeystrokeKeyDown);
+-      }
+-    }
+   }
+   return Err<rex::hid::PadKeystroke>(ErrorCategory::kNotFound, "no keystroke is waiting");
+ }
+diff --git a/src/hid/input_system.cpp b/src/hid/input_system.cpp
+--- a/src/hid/input_system.cpp
++++ b/src/hid/input_system.cpp
+@@ -107,8 +107,8 @@
+   void RefreshDevicesLocked(std::vector<ConnectionEvent>& events);
+   const detail::Device* FindDeviceLocked(const detail::DeviceKey& key) const;
+   bool ChooseDeviceLocked(u32 user, detail::DeviceKey& out) const;
+-  Result<rex::hid::PadState> ReadRawLocked(u32 user);
+-  Result<InputSystem::PadReading> ReadUserLocked(u32 user);
++  Result<rex::hid::PadState> ReadRawLocked(u32 user, bool peek_keyboard = false);
++  Result<InputSystem::PadReading> ReadUserLocked(u32 user, bool peek_keyboard = false);
+   void UpdateConnectionsLocked(std::vector<ConnectionEvent>& events);
+   void Fire(const std::vector<ConnectionEvent>& events) const;
+ };
+@@ -207,14 +207,15 @@
+   return true;
+ }
+ 
+-Result<rex::hid::PadState> InputSystem::State::ReadRawLocked(u32 user) {
++Result<rex::hid::PadState> InputSystem::State::ReadRawLocked(u32 user, bool peek_keyboard) {
+   if (user >= detail::kMaxUsers || users[user].empty()) {
+     return std::unexpected(NotFound("no pad is assigned to the user"));
+   }
+   rex::hid::PadState merged;
+   bool any = false;
+   for (const detail::DeviceKey& key : users[user]) {
+-    auto state = sources[key.source]->GetDeviceState(key.id);
++    auto state = peek_keyboard && key.source == keyboard_mouse_source
++        ? keyboard_mouse->PeekDeviceState(key.id) : sources[key.source]->GetDeviceState(key.id);
+     if (!state) {
+       continue;
+     }
+@@ -240,8 +241,8 @@
+   return merged;
+ }
+ 
+-Result<InputSystem::PadReading> InputSystem::State::ReadUserLocked(u32 user) {
+-  auto raw = ReadRawLocked(user);
++Result<InputSystem::PadReading> InputSystem::State::ReadUserLocked(u32 user, bool peek_keyboard) {
++  auto raw = ReadRawLocked(user, peek_keyboard);
+   if (!raw) {
+     return std::unexpected(raw.error());
+   }
+@@ -367,6 +368,8 @@
+   state.users = {};
+   state.revisions.clear();
+   state.connected = {};
++  state.synth = {};
++  state.keyboard_mouse->Reset();
+   state.started = false;
+ }
+ 
+@@ -645,6 +648,27 @@
+       break;
+   }
+   state.keyboard_mouse->OnEvent(forwarded);
++  if (settings_.mnk_mode.Get() && !state.keyboard_mouse->IsPassthrough() &&
++      (event.type == Type::kKeyDown || event.type == Type::kKeyUp ||
++       event.type == Type::kButtonDown || event.type == Type::kButtonUp ||
++       event.type == Type::kFocusLost)) {
++    std::vector<ConnectionEvent> events;
++    {
++      std::lock_guard lock(state.mutex);
++      if (state.started) {
++        state.RefreshDevicesLocked(events);
++        for (u32 user = 0; user < detail::kMaxUsers; ++user) {
++          if (std::ranges::none_of(state.users[user], [&](const detail::DeviceKey& key) {
++                return key.source == state.keyboard_mouse_source;
++              })) continue;
++          // Preserve every binding edge between polls without consuming pending mouse motion.
++          if (auto reading = state.ReadUserLocked(user, true))
++            state.synth[user].Observe(reading->state, Clock::GetGuestUptimeMillis());
++        }
++      }
++    }
++    state.Fire(events);
++  }
+ }
+ 
+ void InputSystem::SetInputCaptured(bool captured) {
+diff --git a/tests/unit/hid/input_system_test.cpp b/tests/unit/hid/input_system_test.cpp
+--- a/tests/unit/hid/input_system_test.cpp
++++ b/tests/unit/hid/input_system_test.cpp
+@@ -11,6 +11,8 @@
+ #include "rex_test.h"
+ 
+ #include "input_harness.h"
++#include "hid/input_system.h"
++#include "hid/input_internal.h"
+ #include "../ui/ui_harness.h"
+ 
+ #include <mutex>
+@@ -455,3 +457,141 @@
+   CHECK_FALSE(input.GetKeystroke(0, kAllSources).has_value());
+   app.Shutdown();
+ }
++
++REX_TEST_CASE("MNK taps and modifier changes keep ordered edges between guest polls", "[hid][mnk-transitions]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  REQUIRE(input.GetSettings().mnk_mode.Set(true));
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "hid.keybind_a", "G,H"));
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "hid.keybind_b", "Shift+G"));
++  auto event = [&](bool down, rex::VirtualKey key) {
++    rex::test_ui::DeliverKey(down ? rex::InputEvent::Type::kKeyDown : rex::InputEvent::Type::kKeyUp, key);
++  };
++  event(true, rex::VirtualKey::kG);
++  event(true, rex::VirtualKey::kShift);
++  event(false, rex::VirtualKey::kShift);
++  event(false, rex::VirtualKey::kG);
++  app.Pump();
++  CHECK(input.GetState(0)->state.buttons == 0);
++  CHECK_FALSE(input.GetKeystroke(0, rex::hid::KeystrokeSource::kKeyboard));
++  const std::pair<rex::VirtualKey, rex::u16> expected[] = {
++    {rex::VirtualKey::kXInputPadA, 1}, {rex::VirtualKey::kXInputPadA, 2},
++    {rex::VirtualKey::kXInputPadB, 1}, {rex::VirtualKey::kXInputPadB, 2},
++    {rex::VirtualKey::kXInputPadA, 1}, {rex::VirtualKey::kXInputPadA, 2}};
++  for (const auto& [key, flags] : expected) {
++    auto stroke = input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad);
++    REQUIRE(stroke);
++    CHECK(stroke->virtual_key == static_cast<rex::u16>(key));
++    CHECK(stroke->flags == flags);
++  }
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  // Alternate bindings hold a single logical button until the last key is released.
++  event(true, rex::VirtualKey::kG); event(true, rex::VirtualKey::kH);
++  event(false, rex::VirtualKey::kG); event(false, rex::VirtualKey::kH);
++  app.Pump();
++  auto down = input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad);
++  auto up = input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad);
++  REQUIRE(down); REQUIRE(up);
++  CHECK(down->virtual_key == static_cast<rex::u16>(rex::VirtualKey::kXInputPadA));
++  CHECK(down->flags == 1); CHECK(up->flags == 2);
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  app.Shutdown();
++}
++
++REX_TEST_CASE("MNK restart discards earlier transition queues and held bindings", "[hid][mnk-transitions]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = static_cast<rex::hid::InputSystem&>(app.GetInput());
++  REQUIRE(input.GetSettings().mnk_mode.Set(true));
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "hid.keybind_a", "G"));
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG);
++  app.Pump();
++  input.Stop();
++  REQUIRE(input.Start({}));
++  CHECK(input.GetState(0)->state.buttons == 0);
++  CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++  app.Shutdown();
++}
++
++REX_TEST_CASE("a released keystroke takes precedence over its overdue repeat", "[hid][mnk-transitions]") {
++  rex::hid::detail::KeystrokeSynth synth;
++  rex::hid::PadState state{};
++  state.buttons = rex::hid::kPadA;
++  auto down = synth.Next(state, 0);
++  REQUIRE(down); CHECK(down->flags == 1);
++  auto repeat = synth.Next(state, 501);
++  REQUIRE(repeat); CHECK(repeat->flags == 5);
++  state.buttons = 0;
++  auto up = synth.Next(state, 1002);
++  REQUIRE(up); CHECK(up->flags == 2);
++  CHECK_FALSE(synth.Next(state, 1600));
++}
++
++REX_TEST_CASE("every configured MNK button and trigger retains a complete tap", "[hid][mnk-transitions]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  REQUIRE(input.GetSettings().mnk_mode.Set(true));
++  const std::pair<const char*, rex::VirtualKey> buttons[] = {
++    {"a", rex::VirtualKey::kXInputPadA}, {"b", rex::VirtualKey::kXInputPadB},
++    {"x", rex::VirtualKey::kXInputPadX}, {"y", rex::VirtualKey::kXInputPadY},
++    {"left_shoulder", rex::VirtualKey::kXInputPadLShoulder},
++    {"right_shoulder", rex::VirtualKey::kXInputPadRShoulder},
++    {"left_trigger", rex::VirtualKey::kXInputPadLTrigger},
++    {"right_trigger", rex::VirtualKey::kXInputPadRTrigger},
++    {"lstick_press", rex::VirtualKey::kXInputPadLThumbPress},
++    {"rstick_press", rex::VirtualKey::kXInputPadRThumbPress},
++    {"back", rex::VirtualKey::kXInputPadBack}, {"start", rex::VirtualKey::kXInputPadStart},
++    {"dpad_up", rex::VirtualKey::kXInputPadDPadUp}, {"dpad_down", rex::VirtualKey::kXInputPadDPadDown},
++    {"dpad_left", rex::VirtualKey::kXInputPadDPadLeft}, {"dpad_right", rex::VirtualKey::kXInputPadDPadRight}};
++  for (const auto& [name, key] : buttons) {
++    (void)key;
++    REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, std::string("hid.keybind_") + name, ""));
++  }
++  for (const auto& [name, key] : buttons) {
++    const auto setting = std::string("hid.keybind_") + name;
++    REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, setting, "G"));
++    rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG);
++    rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, rex::VirtualKey::kG);
++    app.Pump();
++    for (rex::u16 flags : {1, 2}) {
++      auto stroke = input.GetKeystroke(0, rex::hid::KeystrokeSource::kPad);
++      REQUIRE(stroke);
++      CHECK(stroke->virtual_key == static_cast<rex::u16>(key));
++      CHECK(stroke->flags == flags);
++    }
++    CHECK_FALSE(input.GetKeystroke(0, kAllSources));
++    REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, setting, ""));
++  }
++  app.Shutdown();
++}
++
++REX_TEST_CASE("capturing MNK button edges preserves unpolled mouse motion", "[hid][mnk-transitions]") {
++  rex::test_ui::UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  REQUIRE(input.GetSettings().mnk_mode.Set(true));
++  REQUIRE(input.GetSettings().mnk_mouse.Set(true));
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "hid.keybind_a", "G"));
++  input.SetInputCaptured(true);
++  REQUIRE(input.GetState(0));
++  rex::InputEvent motion{.type = rex::InputEvent::Type::kMotion, .dx = 5.0f, .dy = -3.0f};
++  input.OnInputEvent(motion);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyDown, rex::VirtualKey::kG);
++  rex::test_ui::DeliverKey(rex::InputEvent::Type::kKeyUp, rex::VirtualKey::kG);
++  app.Pump();
++  auto first = input.GetState(0);
++  REQUIRE(first);
++  CHECK(first->state.thumb_rx > 0);
++  CHECK(first->state.thumb_ry > 0);
++  auto second = input.GetState(0);
++  REQUIRE(second);
++  CHECK(second->state.thumb_rx == 0);
++  CHECK(second->state.thumb_ry == 0);
++  app.Shutdown();
++}

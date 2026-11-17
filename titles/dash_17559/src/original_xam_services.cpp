@@ -1,23 +1,28 @@
 #include "system_ui.h"
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/user_module.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/module.h>
+#include <rex/kernel/object/kernel_thread.h>
+#include <rex/kernel/heap.h>
+#include <rex/kernel/types/io.h>
+#include <rex/logging/log_category.h>
+#include <rex/ppc/hook.h>
+#include <rex/ppc/call.h>
+#include <rex/xam/app_manager.h>
+#include <rex/xam/title_lifecycle.h>
+#include <rex/xam/system_ui.h>
 #include <mutex>
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/kernel/xam/offline_achievement_helpers.h>
-#include <rex/system/xio.h>
-#include <rex/system/xam/app_manager.h>
-#include <rex/kernel/xam/module.h>
 #include <array>
 
-REXCVAR_DECLARE(bool, dash17559_storage_io_diagnostics);
-namespace rex::kernel::xam {
-uint32_t XMsgCancelIORequest_entry(rex::MappedPtr<rex::system::XAM_OVERLAPPED>, uint32_t);
-void XamContentRegisterChangeCallback_entry(uint32_t);
+namespace {
+auto* GuestMemory() {
+  auto* thread = rex::kernel::KernelThread::GetCallingThread();
+  REX_CHECK(thread, "17559 original XAM import requires a guest calling thread");
+  return thread->GetAddressSpace();
+}
+bool GuestSpan(rex::kernel::GuestAddressSpace* memory, uint32_t address, uint32_t size,
+               uint32_t protection) {
+  return address && memory->IsGuestRangeAccessible(address, size, protection);
+}
 }
 
 namespace dash17559 {
@@ -29,41 +34,40 @@ namespace {
 void CallOriginalXam(PPCContext& ctx, uint8_t* base, uint32_t address, const char* name,
                      uint32_t unavailable = 0x80004001) {
   static std::mutex mapping;
-  auto& runtime = *rex::Runtime::instance();
-  auto* state = runtime.kernel_state();
+  auto& runtime = *REX_RUNTIME();
+  auto& modules = runtime.GetModuleRegistry();
   {
     std::lock_guard lock(mapping);
     const auto& path = SystemXamPath();
-    if (path.empty() || (!state->GetModule(path) && !state->LoadUserModule(path, false))) {
+    if (path.empty() || (!modules.GetModule(path) && !modules.LoadUserModule(path, false))) {
       REXLOG_ERROR("17559: original XAM image unavailable for {}", name);
       ctx.r3.u64 = unavailable;
       return;
     }
   }
-  auto* fn = runtime.function_dispatcher()->GetFunction(address);
+  auto fn = runtime.FindFunction(address);
   if (!fn) {
     REXLOG_ERROR("17559: missing original {} {:08X}", name, address);
     ctx.r3.u64 = unavailable;
     return;
   }
-  fn(ctx, base);
+  (*fn)(ctx, base);
 }
 }  // namespace
 }  // namespace dash17559
 // Original export 0x1E6 (816E35A8): (str1, str2, count, flags) UTF-16 collation.
-extern "C" REX_FUNC(__imp__XamUniSortCmpString) {
+REX_HOOK_RAW(__imp__XamUniSortCmpString) {
   dash17559::CallOriginalXam(ctx, base, 0x816E35A8, "XamUniSortCmpString");
 }
 // Original export 0x283 (816EE090): localized title/display strings of a
 // content metadata block in the console language; 87 without metadata.
-extern "C" REX_FUNC(__imp__XamContentGetLocalizedString) {
+REX_HOOK_RAW(__imp__XamContentGetLocalizedString) {
   dash17559::CallOriginalXam(ctx, base, 0x816EE090, "XamContentGetLocalizedString");
 }
 
-extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
-  auto& runtime = *rex::Runtime::instance();
+REX_HOOK_RAW(__imp__XMsgInProcessCall) {
   if (ctx.r3.u32 != 0xFC || ctx.r4.u32 != 0x58072) {
-    ctx.r3.u64 = runtime.kernel_state()->app_manager()->DispatchMessageSync(
+    ctx.r3.u64 = rex::xam::XMsgInProcessCall_entry(
         ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32);
     return;
   }
@@ -71,37 +75,37 @@ extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
   // 818E1828 does not use `this`: it parses the supplied filters and computes
   // the actual URI/header/schema/task scratch size, including flag-dependent
   // buffers. Storage constructs this task even for a local device transfer.
-  auto* memory = runtime.memory();
+  auto* memory = GuestMemory();
   const auto packet = ctx.r5.u32;
   if ((ctx.r6.u32 && ctx.r6.u32 != 20) ||
-      !rex::kernel::xam::AchievementGuestSpan(memory, packet, 20, rex::memory::kMemoryProtectRead)) {
+      !GuestSpan(memory, packet, 20, rex::kernel::kMemoryProtectRead)) {
     ctx.r3.u64 = 0x80070057;
     return;
   }
   const auto output = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(packet + 16));
-  if (!rex::kernel::xam::AchievementGuestSpan(memory, output, 4, rex::memory::kMemoryProtectWrite)) {
+  if (!GuestSpan(memory, output, 4, rex::kernel::kMemoryProtectWrite)) {
     ctx.r3.u64 = 0x80070057;
     return;
   }
   ctx.r3.u64 = 0; // Unused original object parameter.
   ctx.r4.u64 = packet;
   dash17559::CallOriginalXam(ctx, base, 0x818E1828, "XOnlineGetWebServiceTaskBufferSize");
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics))
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get())
     REXLOG_INFO("17559 web task size: result={:08X} bytes={}", ctx.r3.u32,
                 rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(output)));
 }
 
 // Export 020F returns a pointer into the original localized XUS table. The
 // dashboard copies these labels when constructing its confirmation dialogs.
-extern "C" REX_FUNC(__imp__XamLookupCommonStringByIndex) {
+REX_HOOK_RAW(__imp__XamLookupCommonStringByIndex) {
   const auto index = ctx.r3.u32;
   dash17559::CallOriginalXam(ctx, base, 0x816E0BF0, "XamLookupCommonStringByIndex", 0);
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics)) {
-    auto* memory = rex::Runtime::instance()->memory();
-    if (!rex::kernel::xam::AchievementGuestSpan(memory, 0x81AA3EC4, 4,
-                                               rex::memory::kMemoryProtectRead)) return;
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) {
+    auto* memory = GuestMemory();
+    if (!GuestSpan(memory, 0x81AA3EC4, 4,
+                                               rex::kernel::kMemoryProtectRead)) return;
     const auto table = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA3EC4));
-    if (rex::kernel::xam::AchievementGuestSpan(memory, table, 16, rex::memory::kMemoryProtectRead)) {
+    if (GuestSpan(memory, table, 16, rex::kernel::kMemoryProtectRead)) {
       REXLOG_INFO("17559 common string: index={} result={:08X} table={:08X} count={} flags={:08X}",
                   index, ctx.r3.u32, table,
                   rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(table)),
@@ -110,33 +114,34 @@ extern "C" REX_FUNC(__imp__XamLookupCommonStringByIndex) {
   }
 }
 
-extern "C" REX_FUNC(__imp__XMsgCancelIORequest) {
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics)) {
-    auto* memory = rex::Runtime::instance()->memory();
-    if (rex::kernel::xam::AchievementGuestSpan(memory, ctx.r3.u32, sizeof(rex::system::XAM_OVERLAPPED),
-                                               rex::memory::kMemoryProtectRead)) {
-      const auto* io = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(ctx.r3.u32);
+REX_HOOK_RAW(__imp__XMsgCancelIORequest) {
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) {
+    auto* memory = GuestMemory();
+    if (GuestSpan(memory, ctx.r3.u32, sizeof(rex::kernel::XOVERLAPPED),
+                                               rex::kernel::kMemoryProtectRead)) {
+      const auto* io = memory->TranslateVirtual<rex::kernel::XOVERLAPPED*>(ctx.r3.u32);
       REXLOG_INFO("17559 cancel I/O: lr={:08X} io={:08X} wait={} result={:08X} event={:08X}",
-                  uint32_t(ctx.lr), ctx.r3.u32, ctx.r4.u32, uint32_t(io->result), uint32_t(io->event));
+                  uint32_t(ctx.lr), ctx.r3.u32, ctx.r4.u32, rex::kernel::XOverlappedGetResult(const_cast<rex::kernel::XOVERLAPPED*>(io)), uint32_t(io->event));
     }
   }
-  rex::ppc::HostToGuestFunction<rex::kernel::xam::XMsgCancelIORequest_entry>(ctx, base);
+  rex::ppc::GuestToHostThunk<rex::xam::XMsgCancelIORequest_entry>(ctx, base);
 }
 
-extern "C" REX_FUNC(__imp__XamContentRegisterChangeCallback) {
+REX_HOOK_RAW(__imp__XamContentRegisterChangeCallback) {
   const auto callback = ctx.r3.u32;
-  rex::ppc::HostToGuestFunction<rex::kernel::xam::XamContentRegisterChangeCallback_entry>(ctx, base);
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics)) {
-    auto module = rex::Runtime::instance()->kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  rex::ppc::GuestToHostThunk<rex::xam::XamContentRegisterChangeCallback_entry>(ctx, base);
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) {
+    auto* services = REX_INTERFACE(rex::xam::IXAMTitleServices);
+    REX_CHECK(services, "17559 XAM services unavailable");
     REXLOG_INFO("17559 content callback register: lr={:08X} requested={:08X} stored={:08X}",
-                uint32_t(ctx.lr), callback, module->content_change_callback.load());
+                uint32_t(ctx.lr), callback, services->GetSystemUI().content_change_callback.load());
   }
 }
 
 void Trace17559StorageContentEvent(PPCRegister& reason, PPCRegister& item) {
-  if (!REXCVAR_GET(dash17559_storage_io_diagnostics)) return;
-  auto* memory = rex::Runtime::instance()->memory();
-  if (!rex::kernel::xam::AchievementGuestSpan(memory, item.u32, 512, rex::memory::kMemoryProtectRead)) return;
+  if (!dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) return;
+  auto* memory = GuestMemory();
+  if (!GuestSpan(memory, item.u32, 512, rex::kernel::kMemoryProtectRead)) return;
   const auto* bytes = memory->TranslateVirtual<uint8_t*>(item.u32);
   const auto manager = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x9296F5F8));
   REXLOG_INFO("17559 content event: reason={} item={:08X} manager={:08X} device={} title={:08X} size={} flags={:08X}",
@@ -147,29 +152,31 @@ void Trace17559StorageContentEvent(PPCRegister& reason, PPCRegister& item) {
 }
 
 void Trace17559StorageContentDispatch(PPCRegister& reason, PPCRegister& item, PPCRegister& manager) {
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics))
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get())
     REXLOG_INFO("17559 content dispatch: reason={} item={:08X} manager={:08X}",
                 reason.u32, item.u32, manager.u32);
 }
 
-void Trace17559StorageScene(PPCRegister& result, PPCRegister& name, PPCRegister& stack) {
-  if (!REXCVAR_GET(dash17559_storage_io_diagnostics)) return;
-  auto* memory = rex::Runtime::instance()->memory();
+void Trace17559StorageScene(PPCRegister& result, PPCRegister& name, PPCContext& context) {
+  if (!dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) return;
+  auto* memory = GuestMemory();
   uint32_t scene = 0;
-  if (rex::kernel::xam::AchievementGuestSpan(memory, stack.u32 + 80, 4, rex::memory::kMemoryProtectRead))
-    scene = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(stack.u32 + 80));
+  // The official mid-asm call moves r1 below the guest red zone while the hook runs.
+  const auto address = uint32_t(context.r1.u64 + rex::ppc::kRedZone + 80);
+  if (GuestSpan(memory, address, 4, rex::kernel::kMemoryProtectRead))
+    scene = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(address));
   REXLOG_INFO("17559 storage scene: name={:08X} result={:08X} scene={:08X}", name.u32, result.u32, scene);
 }
 
 void Trace17559StorageProgressInit(PPCRegister& result, PPCRegister& object) {
-  if (REXCVAR_GET(dash17559_storage_io_diagnostics))
+  if (dash17559::GetSystemUiSettings().storage_io_diagnostics.Get())
     REXLOG_INFO("17559 storage progress init: object={:08X} result={:08X}", object.u32, result.u32);
 }
 
 void Trace17559StorageProgressTick(PPCRegister& object) {
-  if (!REXCVAR_GET(dash17559_storage_io_diagnostics)) return;
-  auto* memory = rex::Runtime::instance()->memory();
-  if (!rex::kernel::xam::AchievementGuestSpan(memory, object.u32, 228, rex::memory::kMemoryProtectRead)) return;
+  if (!dash17559::GetSystemUiSettings().storage_io_diagnostics.Get()) return;
+  auto* memory = GuestMemory();
+  if (!GuestSpan(memory, object.u32, 228, rex::kernel::kMemoryProtectRead)) return;
   auto word = [&](uint32_t offset) {
     return rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(object.u32 + offset));
   };

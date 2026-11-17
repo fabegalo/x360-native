@@ -9,9 +9,18 @@
 #include <iterator>
 #include <utility>
 #include <vector>
-#include <fmt/format.h>
-#include <rex/cvar.h>
-#include "../../external/rexglue-sdk/thirdparty/crypto/TinySHA1.hpp"
+#include <format>
+#include <rex/kernel/runtime_settings.h>
+#include "kernel/settings_access.h"
+#include "temp_folder.h"
+#include "excrypt.h"
+#include <rex/string/text.h>
+#include <rex/utility.h>
+#include <rex/kernel/types/io.h>
+#include <rex/kernel/types/status.h>
+#include <rex/platform/file.h>
+#include "kernel/kernel_fixture.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
@@ -33,7 +42,7 @@ namespace fs = std::filesystem;
 
 void WriteKeys(const fs::path& path, const std::string& text) {
   std::ofstream(path) << text;
-  rex::cvar::SetFlagByName("xekeys_rsa_public_file", path.string());
+  REQUIRE(rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Set(rex::string::PathToUTF8(path)));
 }
 }  // namespace
 
@@ -84,9 +93,11 @@ TEST_CASE("Kernel RSA signatures are verified against a local public key", "[sdk
   CHECK_FALSE(VerifyRsaSignature(key.data(), digest, signature.data()));
 
   std::string hex;
-  for (auto b : key) hex += fmt::format("{:02x}", b);
+  for (auto b : key) hex += std::format("{:02x}", b);
   std::array<uint8_t, 0x110> loaded{};
-  const auto file = fs::temp_directory_path() / "x360n-rsa-public-keys.txt";
+  rex::test::TempFolder temporary("x360n_rsa_");
+  rex::ScopeGuard reset([] { (void)rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Reset(); });
+  const auto file = temporary.path / "rsa-public-keys.txt";
   WriteKeys(file, "# local\nrsa-pub-0 " + hex + "\n");
   CHECK(rex::kernel::xboxkrnl::LoadRsaPublicKey(0, loaded));
   CHECK(loaded == key);
@@ -96,7 +107,7 @@ TEST_CASE("Kernel RSA signatures are verified against a local public key", "[sdk
   WriteKeys(file, "rsa-pub-0 00\n");
   CHECK_FALSE(rex::kernel::xboxkrnl::LoadRsaPublicKey(0, loaded));
   fs::remove(file);
-  rex::cvar::SetFlagByName("xekeys_rsa_public_file", (fs::temp_directory_path() / "x360n-missing-rsa.txt").string());
+  REQUIRE(rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Set(rex::string::PathToUTF8(temporary.path / "missing-rsa.txt")));
   CHECK_FALSE(rex::kernel::xboxkrnl::LoadRsaPublicKey(0, loaded));
 
   // XeCryptBnQwBeSigVerify: block shape here; the positive case is the original
@@ -130,7 +141,8 @@ TEST_CASE("XeCryptRotSumSha matches the original 17559 XenonSCLatin.xtt digest",
 
   // The signature at +4 needs the user's XeKeysGetKey(0x39) public key.
   const auto keys = fs::path(X360N_SOURCE_ROOT) / ".local/keys/rsa-public-keys.txt";
-  rex::cvar::SetFlagByName("xekeys_rsa_public_file", keys.string());
+  rex::ScopeGuard reset([] { (void)rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Reset(); });
+  REQUIRE(rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Set(rex::string::PathToUTF8(keys)));
   std::array<uint8_t, 0x110> key{};
   if (!fs::exists(keys) || !rex::kernel::xboxkrnl::LoadLocalKey("xekey-0x39", key, true))
     SKIP("needs xekey-0x39 in " + keys.string());
@@ -151,6 +163,7 @@ TEST_CASE("XeCryptRotSumSha matches the original 17559 XenonSCLatin.xtt digest",
 TEST_CASE("The original 17559 system.manifest verifies with the user's kernel key 0", "[sdk][xekeys-rsa][local]") {
   const fs::path root = X360N_SOURCE_ROOT;
   const auto keys = root / ".local/keys/rsa-public-keys.txt";
+  rex::ScopeGuard reset([] { (void)rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Reset(); });
   const auto manifest = root / ".local/inputs/dashboards/17559/runtime/systemext/system.manifest";
   if (!fs::exists(keys) || !fs::exists(manifest)) SKIP("needs local " + keys.string() + " and " + manifest.string());
   std::ifstream in(manifest, std::ios::binary);
@@ -160,11 +173,9 @@ TEST_CASE("The original 17559 system.manifest verifies with the user's kernel ke
   const uint32_t length = uint32_t(bytes[316]) << 24 | bytes[317] << 16 | bytes[318] << 8 | bytes[319];
   REQUIRE(length <= bytes.size() - 312);
   uint8_t digest[20];
-  sha1::SHA1 sha;
-  sha.processBytes(bytes.data() + 312, length);
-  sha.finalize(digest);
+  ExCryptSha(bytes.data() + 312, length, nullptr, 0, nullptr, 0, digest, sizeof(digest));
   REQUIRE(std::memcmp(digest, bytes.data() + 36, 20) == 0);
-  rex::cvar::SetFlagByName("xekeys_rsa_public_file", keys.string());
+  REQUIRE(rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Set(rex::string::PathToUTF8(keys)));
   std::array<uint8_t, 0x110> key{};
   REQUIRE(rex::kernel::xboxkrnl::LoadRsaPublicKey(0, key));
   CHECK(rex::kernel::xboxkrnl::VerifyRsaSignature(key.data(), digest, bytes.data() + 56));
@@ -178,6 +189,7 @@ TEST_CASE("Pinned original signatures are exactly the ones the user's keys verif
   const fs::path root = X360N_SOURCE_ROOT;
   const auto runtime = root / ".local/inputs/dashboards/17559/runtime";
   const auto keys = root / ".local/keys/rsa-public-keys.txt";
+  rex::ScopeGuard reset([] { (void)rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Reset(); });
   const uint8_t junk[0x100] = {};
   CHECK_FALSE(rex::kernel::xboxkrnl::IsOriginalSignature({{junk, 4}, {junk, 20}, {junk, 0x100}}));
   if (!fs::exists(runtime / "systemext/system.manifest")) SKIP("needs local " + runtime.string());
@@ -186,15 +198,13 @@ TEST_CASE("Pinned original signatures are exactly the ones the user's keys verif
     return std::vector<uint8_t>{std::istreambuf_iterator<char>(in), {}};
   };
   const bool have_keys = fs::exists(keys);
-  rex::cvar::SetFlagByName("xekeys_rsa_public_file", keys.string());
+  REQUIRE(rex::kernel::GetRuntimeSettings().xekeys_rsa_public_file.Set(rex::string::PathToUTF8(keys)));
   const auto manifest = read(runtime / "systemext/system.manifest");
   REQUIRE(manifest.size() > 320);
   const uint32_t length = uint32_t(manifest[316]) << 24 | manifest[317] << 16 | manifest[318] << 8 | manifest[319];
   REQUIRE(length <= manifest.size() - 312);
   uint8_t digest[20];
-  sha1::SHA1 sha;
-  sha.processBytes(manifest.data() + 312, length);
-  sha.finalize(digest);
+  ExCryptSha(manifest.data() + 312, length, nullptr, 0, nullptr, 0, digest, sizeof(digest));
   const uint8_t key0[4] = {};
   CHECK(rex::kernel::xboxkrnl::IsOriginalSignature({{key0, 4}, {digest, 20}, {manifest.data() + 56, 0x100}}));
   const uint8_t key1[4] = {0, 0, 0, 1};
@@ -213,9 +223,7 @@ TEST_CASE("Pinned original signatures are exactly the ones the user's keys verif
                       (std::string("FFFE07DF0000000") + index), std::ios::binary)
         .read(reinterpret_cast<char*>(package.data()), package.size());
     REQUIRE(std::equal(package.begin(), package.begin() + 4, "PIRS"));
-    sha1::SHA1 header;
-    header.processBytes(package.data() + 0x22C, 0x344 - 0x22C);
-    header.finalize(digest);
+    ExCryptSha(package.data() + 0x22C, 0x344 - 0x22C, nullptr, 0, nullptr, 0, digest, sizeof(digest));
     CHECK(rex::kernel::xboxkrnl::IsOriginalSignature({{key0, 4}, {digest, 20}, {package.data() + 4, 0x100}}));
     if (have_key0) CHECK(rex::kernel::xboxkrnl::VerifyRsaSignature(key.data(), digest, package.data() + 4));
     digest[0] ^= 1;
@@ -238,3 +246,41 @@ TEST_CASE("Pinned original signatures are exactly the ones the user's keys verif
   if (!have_xtt_key) WARN("pins checked without xekey-0x39: real verification skipped");
 }
 #endif
+
+TEST_CASE("XEX header loading preserves the counted ANSI ABI and relocated security pointer", "[sdk][xekeys-rsa]") {
+  std::vector<uint8_t> header(0x200);
+  std::memcpy(header.data(), "XEX2", 4);
+  const auto put = [&](size_t offset, uint32_t value) {
+    for (unsigned i = 0; i < 4; ++i) header[offset + i] = uint8_t(value >> (24 - i * 8));
+  };
+  put(8, 0x200); put(16, 0x40);
+  rex::test::KernelFixture fixture([&](const auto& directory) {
+    REQUIRE(rex::platform::WriteHostFile(directory / "headers.xex", header));
+    const std::array<uint8_t, 8> truncated{};
+    REQUIRE(rex::platform::WriteHostFile(directory / "truncated.xex", truncated));
+  });
+  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
+    const auto descriptor = c.Alloc(sizeof(rex::kernel::X_ANSI_STRING));
+    const auto set_path = [&](std::string_view name) {
+      c.Store32(descriptor, (uint32_t(name.size()) << 16) | uint32_t(name.size() + 1));
+      c.Store32(descriptor + 4, c.AllocString(name));
+    };
+    const auto out = c.Alloc(0x200);
+    set_path("game:\\headers.xex");
+    c.Store32(out, 0xDEADBEEF);
+    CHECK(c.Kernel("XexLoadImageHeaders", {descriptor, out, 0x100}) == rex::kernel::X_STATUS_BUFFER_TOO_SMALL);
+    CHECK(c.Load32(out) == 0xDEADBEEF);
+    REQUIRE(c.Kernel("XexLoadImageHeaders", {descriptor, out, 0x200}) == 0);
+    CHECK(c.Load32(out) == 0x58455832);
+    CHECK(c.Load32(out + 8) == 0x200);
+    CHECK(c.Load32(out + 16) == out + 0x40);
+    CHECK(c.Kernel("XexLoadImageHeaders", {descriptor, 0xFFFFFFF0, 0x200}) == rex::kernel::X_STATUS_INVALID_PARAMETER);
+    CHECK(c.Kernel("XexLoadImageHeaders", {0, out, 0x200}) == rex::kernel::X_STATUS_INVALID_PARAMETER);
+    set_path("game:\\truncated.xex");
+    CHECK(c.Kernel("XexLoadImageHeaders", {descriptor, out, 0x200}) == 0xC000007B);
+    set_path("game:\\absent.xex");
+    CHECK(c.Kernel("XexLoadImageHeaders", {descriptor, out, 0x200}) == rex::kernel::X_STATUS_OBJECT_NAME_NOT_FOUND);
+    CHECK(c.Kernel("XeKeysVerifyRSASignature", {0, 0xFFFFFFF0, out}) == 0);
+    CHECK(c.Kernel("XeCryptBnQwBeSigVerify", {out, 0xFFFFFFF0, out, out}) == 0);
+  });
+}

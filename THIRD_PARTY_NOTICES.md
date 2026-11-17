@@ -17,20 +17,20 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | Componente incorporado ao ZIP desktop | Forma | Termos originais |
 |---|---|---|
 | ReXGlue / partes derivadas de Xenia | Leitores ISO/STFS e utilitários compilados no extrator; headers e patches no payload | [BSD-3-Clause](licenses/rexglue-sdk.txt), [atribuições por arquivo](licenses/rexglue-attributions.txt) |
-| fmt | Biblioteca estática | [MIT](licenses/fmt.txt) |
+| ExCrypt, emoose | Primitivas criptográficas oficiais do filesystem; AES-CBC/SHA-1 do extrator em POSIX | [BSD-3-Clause](licenses/excrypt.txt) |
+| xxHash | Biblioteca estática da base oficial | [BSD-2-Clause](licenses/xxHash.txt) |
 | CLI11 | Headers compilados | [BSD-3-Clause](licenses/cli11.txt) |
 | toml++ | Headers compilados | [MIT](licenses/tomlplusplus.txt) |
 | nlohmann/json 3.11.3, vendorizado por inja | Headers compilados no supervisor; copyright 2013–2023 Niels Lohmann no header | [MIT original vendorizada](licenses/nlohmann-json.txt) |
-| spdlog | Biblioteca estática | [MIT](licenses/spdlog.txt); fmt externo listado acima |
-| SIMDe | Disponível no include path; nenhum header observado nos comandos de dependências desktop | [MIT](licenses/simde.txt); não atribuído a código incorporado |
-| utfcpp | Headers usados pelo extrator | [BSL-1.0](licenses/utfcpp.txt) |
+| spdlog | Biblioteca estática, usando a formatação da biblioteca padrão | [MIT](licenses/spdlog.txt) |
+| SIMDe | Headers utilizados pela base oficial | [MIT](licenses/simde.txt) |
 | Microsoft C++ Standard Library | Templates/objetos incorporados | [Apache-2.0 WITH LLVM-exception](licenses/microsoft-stl.txt), copyright Microsoft Corporation |
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
 | GNU libstdc++/libgcc (GCC 12.3) | Pacote Linux: templates e objetos estáticos | [GPL-3.0-or-later WITH GCC-exception-3.1](licenses/gcc-runtime.txt), copyright Free Software Foundation |
 | GNU C Library 2.35 | Pacote Linux: biblioteca do sistema, não distribuída; objetos de inicialização ligados sob a exceção | [LGPL-2.1-or-later](licenses/glibc.txt), copyright Free Software Foundation |
 | SDL | Biblioteca estática no launcher `x360-native` (janela, entrada, diálogos, SDL_GPU) e trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
 | Dear ImGui | Interface do launcher, com os backends SDL3/SDL_GPU, estática | [MIT](licenses/imgui.txt) |
-| Vulkan-Headers | Headers da verificação opcional de dispositivo Vulkan do launcher; o loader é o do sistema | [Apache-2.0 OR MIT](licenses/vulkan-headers.txt) |
+| Vulkan-Headers, cópia do SDL fixado | Headers da verificação opcional de dispositivo Vulkan do launcher; o loader é o do sistema | [Apache-2.0](licenses/vulkan-headers.txt) |
 | Noto Sans CJK JP Regular/Medium, Adobe | Família incorporada sem alteração no launcher, igual em todas as plataformas | [OFL-1.1](licenses/launcher-fonts.txt) |
 | miniz 1.15, cópia do SDL fixado | Leitor ZIP/inflate estático no extrator; sem SDL.dll | [Unlicense](licenses/miniz.txt) |
 | libmspack | Decoder LZX em `app/x360n-mspack.dll`, substituível, para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e reconstrução](licenses/relinking.txt) |
@@ -101,6 +101,7 @@ os arquivos legais dos arquivos baixados. Esses componentes têm termos próprio
 - LLVM/Clang: [Apache-2.0 WITH LLVM-exception e avisos adicionais](licenses/llvm.txt).
 - CMake: [BSD-3-Clause e terceiros incluídos](licenses/cmake.txt).
 - Ninja: [Apache-2.0](licenses/ninja.txt).
+- Vulkan Memory Allocator (commit `1d8f600`, header do caminho Vulkan): MIT, aviso integral preservado no header fixado pelos patches do SDK.
 - AMD FidelityFX SDK (commit `eee08db`, efeitos CAS/FSR do presenter):
   [MIT](licenses/fidelityfx.txt). Compilado no runtime do SDK; a cópia fica em
   `.local/deps` e não entra no pacote do launcher.

@@ -1,0 +1,193 @@
+diff --git a/src/ui/overlay/achievement_toast.h b/src/ui/overlay/achievement_toast.h
+--- a/src/ui/overlay/achievement_toast.h
++++ b/src/ui/overlay/achievement_toast.h
+@@ -13,6 +13,7 @@
+ #include <chrono>
+ #include <deque>
+ #include <mutex>
++#include <memory>
+ #include <optional>
+ #include <rex/platform.h>
+ #include <rex/types.h>
+@@ -33,6 +34,9 @@
+ 
+   bool Draw(ImGuiIO& io) override;
+ 
++ protected:
++  bool DrawAt(ImGuiIO& io, std::chrono::steady_clock::time_point now);
++
+  private:
+   static constexpr f32 kDisplaySeconds = 4.5f;
+ 
+@@ -43,8 +47,14 @@
+     std::optional<std::chrono::steady_clock::time_point> visible_since = {};
+   };
+ 
+-  mutable std::mutex mutex_;
+-  std::deque<PendingToast> queue_;
++  struct State {
++    std::mutex mutex;
++    std::deque<PendingToast> queue;
++    AchievementToastDialog* owner = nullptr; // UI thread only.
++    bool wake_pending = false;
++  };
++  std::shared_ptr<State> state_ = std::make_shared<State>();
++  std::optional<ScopeGuard> registration_;
+   AchievementIconCache icon_cache_;
+ };
+ 
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -8,43 +8,66 @@
+ namespace rex::ui {
+ 
+ AchievementToastDialog::AchievementToastDialog(const ModuleOverlayContext& context)
+-    : AchievementNotificationDialog(context), icon_cache_(context.achievements) {}
++    : AchievementNotificationDialog(context), icon_cache_(context.achievements) {
++  state_->owner = this;
++}
+ 
+-AchievementToastDialog::~AchievementToastDialog() {}
++AchievementToastDialog::~AchievementToastDialog() {
++  {
++    std::lock_guard lock(state_->mutex);
++    state_->owner = nullptr;
++    state_->queue.clear();
++  }
++  registration_.reset();
++}
+ 
+ void AchievementToastDialog::Push(const Achievement& achievement) {
+-  std::lock_guard<std::mutex> lock(mutex_);
+-  queue_.push_back({achievement, std::chrono::steady_clock::now()});
++  {
++    std::lock_guard lock(state_->mutex);
++    state_->queue.push_back({achievement, std::chrono::steady_clock::now()});
++    if (state_->wake_pending) return;
++    state_->wake_pending = true;
++  }
++  // Deferred work retains no dialog pointer across UI teardown.
++  ui_.PostTask([state = state_] {
++    std::lock_guard lock(state->mutex);
++    state->wake_pending = false;
++    if (state->owner && !state->owner->registration_)
++      state->owner->registration_ = state->owner->ui_.AddDialog(*state->owner);
++  });
+ }
+ 
+ bool AchievementToastDialog::NeedsContinuousPaint() const {
+-  std::lock_guard<std::mutex> lock(mutex_);
+-  return !queue_.empty();
++  std::lock_guard lock(state_->mutex);
++  return !state_->queue.empty();
+ }
+ 
+ bool AchievementToastDialog::Draw(ImGuiIO& io) {
+-  auto now = std::chrono::steady_clock::now();
++  return DrawAt(io, std::chrono::steady_clock::now());
++}
+ 
++bool AchievementToastDialog::DrawAt(ImGuiIO& io, std::chrono::steady_clock::time_point now) {
+   PendingToast toast;
+   f32 age = 0.0f;
+   {
+-    std::lock_guard<std::mutex> lock(mutex_);
+-    while (!queue_.empty()) {
+-      auto& visible_since = queue_.front().visible_since;
++    std::lock_guard lock(state_->mutex);
++    while (!state_->queue.empty()) {
++      auto& visible_since = state_->queue.front().visible_since;
+       if (!visible_since) {
+         visible_since = now;
+       }
+       age = std::chrono::duration<f32>(now - *visible_since).count();
+       if (age >= kDisplaySeconds) {
+-        queue_.pop_front();
++        state_->queue.pop_front();
+       } else {
+         break;
+       }
+     }
+-    if (queue_.empty()) {
++    if (state_->queue.empty()) {
++      registration_.reset();
+       return true;
+     }
+-    toast = queue_.front();
++    toast = state_->queue.front();
+   }
+ 
+   f32 alpha = 1.0f;
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -330,7 +330,6 @@
+     return;
+   }
+   toast = std::make_unique<ui::AchievementToastDialog>(*overlay_context);
+-  imgui->AddDialog(*toast);
+   toast_listener = achievements->OnAchievementUnlocked([this](const Achievement& achievement) {
+     std::lock_guard callback_lock(toast_mutex);
+     if (toast) {
+diff --git a/tests/unit/ui/ui_system_test.cpp b/tests/unit/ui/ui_system_test.cpp
+--- a/tests/unit/ui/ui_system_test.cpp
++++ b/tests/unit/ui/ui_system_test.cpp
+@@ -35,6 +35,9 @@
+ 
+ #include "base/driver_context.h"
+ #include "ui_harness.h"
++#include "ui/overlay/achievement_toast.h"
++#include "ui/overlay/console/model.h"
++#include "ui/overlay/console_host.h"
+ 
+ using rex::test_ui::g_ui;
+ using rex::test_ui::UIApp;
+@@ -720,3 +723,47 @@
+   app.Shutdown();
+ }
+ #endif
++
++
++REX_TEST_CASE("achievement toast is idle until unlocked and queued work cannot outlive it", "[ui][hid][toast-idle]") {
++  UIApp app;
++  app.input_drivers = "none";
++  REQUIRE(app.Start());
++  auto& ui = app.GetUI();
++  rex::log::LogCaptureSink capture;
++  rex::ui::ConsoleModel console(REX_SETTINGS(), capture, {});
++  rex::ui::ConsoleDockHost host(ui);
++  rex::IAchievementRegistry* achievements = nullptr;
++  rex::ui::FrameStatsProvider stats = [] { return rex::gpu::FrameStats{}; };
++  rex::ui::ModuleOverlayContext context{{ui, REX_SETTINGS()}, console, host, capture, achievements, stats};
++  class Toast final : public rex::ui::AchievementToastDialog {
++   public:
++    using AchievementToastDialog::AchievementToastDialog;
++    std::chrono::steady_clock::time_point now{};
++    bool Draw(ImGuiIO& io) override { return DrawAt(io, now); }
++  };
++  NullRenderer renderer;
++  CHECK_FALSE(ui.HasDialogs());
++  {
++    Toast toast(context);
++    CHECK_FALSE(toast.NeedsContinuousPaint());
++    CHECK_FALSE(ui.HasDialogs());
++    rex::Achievement achievement{}; achievement.label = "First";
++    std::thread worker([&] { toast.Push(achievement); }); worker.join();
++    CHECK_FALSE(ui.HasDialogs());
++    app.Pump();
++    CHECK(ui.HasDialogs()); CHECK(toast.NeedsContinuousPaint());
++    Frames(app, ui, renderer, 1);
++    achievement.label = "Second"; toast.Push(achievement); app.Pump();
++    toast.now += std::chrono::seconds(5);
++    Frames(app, ui, renderer, 1);
++    CHECK(ui.HasDialogs()); CHECK(toast.NeedsContinuousPaint());
++    toast.now += std::chrono::seconds(5);
++    Frames(app, ui, renderer, 1);
++    CHECK_FALSE(ui.HasDialogs()); CHECK_FALSE(toast.NeedsContinuousPaint());
++    std::thread pending([&] { toast.Push(achievement); }); pending.join();
++  }
++  app.Pump();
++  CHECK_FALSE(ui.HasDialogs());
++  app.Shutdown();
++}

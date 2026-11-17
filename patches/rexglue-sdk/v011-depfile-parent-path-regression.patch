@@ -1,0 +1,48 @@
+diff --git a/tests/unit/codegen/output_stamp_test.cpp b/tests/unit/codegen/output_stamp_test.cpp
+--- a/tests/unit/codegen/output_stamp_test.cpp
++++ b/tests/unit/codegen/output_stamp_test.cpp
+@@ -25,6 +25,20 @@
+ 
+ namespace {
+ 
++// Decode Make quoting before comparing semantic paths, including a quoted parent folder.
++std::string DecodeDepfile(std::string_view text) {
++  std::string decoded;
++  for (size_t i = 0; i < text.size(); ++i) {
++    if (text[i] == '\\' && i + 1 < text.size()) {
++      const char escaped = text[++i];
++      if (escaped != '\n') decoded += escaped;
++    } else if (text[i] == '$' && i + 1 < text.size() && text[i + 1] == '$') {
++      decoded += '$'; ++i;
++    } else decoded += text[i];
++  }
++  return decoded;
++}
++
+ struct Scratch {
+   rex::test::TempFolder folder;
+   fs::path root;
+@@ -203,6 +217,8 @@
+ 
+ REX_TEST_CASE("Depfile names the target and every input", "[codegen][output_stamp]") {
+   Scratch scratch("depfile");
++  scratch.root /= "root # $ with spaces";
++  fs::create_directories(scratch.root);
+   auto depfile = scratch.root / "codegen.d";
+   auto target = scratch.root / "codegen.build.stamp";
+   std::vector<fs::path> inputs{scratch.root / "game.xex", scratch.root / "config.toml"};
+@@ -212,9 +228,11 @@
+   std::ifstream in(depfile, std::ios::binary);
+   std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+ 
+-  CHECK(content.find(fs::absolute(target).generic_string() + ":") == 0);
+-  CHECK(content.find(fs::absolute(inputs[0]).generic_string()) != std::string::npos);
+-  CHECK(content.find(fs::absolute(inputs[1]).generic_string()) != std::string::npos);
++  CHECK(DecodeDepfile("x\\#y\\ z$$") == "x#y z$");
++  const auto decoded = DecodeDepfile(content);
++  CHECK(decoded.find(fs::absolute(target).generic_string() + ":") == 0);
++  CHECK(decoded.find(fs::absolute(inputs[0]).generic_string()) != std::string::npos);
++  CHECK(decoded.find(fs::absolute(inputs[1]).generic_string()) != std::string::npos);
+   CHECK(content.back() == '\n');
+ }
+ 

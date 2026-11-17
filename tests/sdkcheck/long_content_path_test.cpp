@@ -5,17 +5,15 @@
 #include <iterator>
 #include <string>
 #include <vector>
-#include <rex/filesystem.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/kernel/init.h>
-#include <rex/logging.h>
-#include <rex/memory/utils.h>
-#include <rex/runtime.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xam/content_manager.h>
+#include "kernel/kernel_fixture.h"
+#include <rex/filesystem/file_system.h>
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/platform/file.h>
+#include <rex/logging/logger.h>
+#include <rex/memory/endian.h>
+#include "xam/xam_state.h"
+#include "xam/content_manager.h"
 #include "../../src/supervisor/host_path.h"
-using rex::X_STATUS;
-
 namespace {
 namespace fs = std::filesystem;
 // Creates directories and files below MAX_PATH-unsafe depths without relying on
@@ -38,8 +36,8 @@ struct DeepRoot {
 
 TEST_CASE("Host paths use the extended form only where the host needs it", "[sdk][long-path]") {
 #ifdef _WIN32
-  using rex::filesystem::HostPath;
-  using rex::filesystem::OrdinaryPath;
+  using rex::platform::HostPath;
+  using rex::platform::OrdinaryPath;
   CHECK(HostPath(LR"(C:\a\.\b\..\c)") == fs::path(LR"(\\?\C:\a\c)"));
   CHECK(HostPath(L"C:/a/b") == fs::path(LR"(\\?\C:\a\b)"));
   CHECK(HostPath(LR"(\\server\share\x)") == fs::path(LR"(\\?\UNC\server\share\x)"));
@@ -51,8 +49,8 @@ TEST_CASE("Host paths use the extended form only where the host needs it", "[sdk
   CHECK(OrdinaryPath(LR"(\\?\UNC\server\share\x)") == fs::path(LR"(\\server\share\x)"));
   CHECK(OrdinaryPath(LR"(\\?\Volume{0}\x)") == fs::path(LR"(\\?\Volume{0}\x)"));
 #else
-  CHECK(rex::filesystem::HostPath("rel/x") == fs::path("rel/x"));
-  CHECK(rex::filesystem::OrdinaryPath("/a/b") == fs::path("/a/b"));
+  CHECK(rex::platform::HostPath("rel/x") == fs::path("rel/x"));
+  CHECK(rex::platform::OrdinaryPath("/a/b") == fs::path("/a/b"));
 #endif
 }
 
@@ -68,33 +66,31 @@ TEST_CASE("Content beyond MAX_PATH keeps its attributes and device entries", "[s
   std::ofstream(Long(deep / "asset.bin"), std::ios::binary).write("long-asset", 10);
   REQUIRE((deep / "asset.bin").native().size() > 300);
 
-  rex::Runtime rt(root.path, root.path);
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
-  rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+  rex::test::KernelFixture fixture({}, {}, {}, {}, {}, root.path);
+  rex::kernel::XCONTENT_AGGREGATE_DATA data{};
   data.device_id = 1;
   data.title_id = 0x12345678;
-  data.content_type = rex::system::XContentType(0x4000);
-  data.set_file_name("package");
+  data.content_type = rex::kernel::XContentType(0x4000);
+  data.SetFileName("package");
   uint8_t attributes[40]{};
-  REQUIRE(rt.kernel_state()->content_manager()->GetContentAttributes(data, attributes) == 0);
+  REQUIRE(rex::xam::CurrentXAM().GetContentManager().GetContentAttributes(data, attributes) == 0);
   CHECK(rex::memory::load_and_swap<uint32_t>(attributes) == 0x10);
   CHECK(rex::memory::load_and_swap<uint64_t>(attributes + 28) == 13);
 
   // A device mounted on the ordinary spelling resolves the same deep file.
-  rex::filesystem::HostPathDevice device("\\Deep", package, true);
-  REQUIRE(device.Initialize());
+  auto device = REX_INTERFACE(rex::filesystem::IFileSystemFactory)->Create();
+  rex::filesystem::MountEntry mount{};
+  mount.path = "\\Deep"; mount.source = package;
+  REQUIRE(device->Mount(mount));
   std::string guest;
   for (const auto& part : deep.lexically_relative(package)) guest += part.string() + "\\";
-  auto* entry = device.ResolvePath(guest + "asset.bin");
+  auto entry = device->Stat("\\Deep\\" + guest + "asset.bin");
   REQUIRE(entry);
-  CHECK(entry->size() == 10);
+  CHECK(entry->size == 10);
 }
 
 // The launcher (x360n::host_path, built without the SDK) and the runtime
-// (rex::filesystem::HostPath, patch 0252) must name the same host file, or a
+// (rex::platform::HostPath, patch 0252) must name the same host file, or a
 // handoff written by one is not found by the other.
 TEST_CASE("Launcher and runtime agree on host and ordinary paths", "[sdkcheck][long-path]") {
   std::vector<fs::path> inputs{fs::temp_directory_path() / "a" / "." / "b" / ".." / "c", fs::path("relative") / "x"};
@@ -107,8 +103,8 @@ TEST_CASE("Launcher and runtime agree on host and ordinary paths", "[sdkcheck][l
   for (const auto& input : inputs) {
     INFO(input.u8string().size());
     const auto host = x360n::host_path::Extended(input);
-    CHECK(host == rex::filesystem::HostPath(input));
-    CHECK(x360n::host_path::Ordinary(host) == rex::filesystem::OrdinaryPath(host));
+    CHECK(host == rex::platform::HostPath(input));
+    CHECK(x360n::host_path::Ordinary(host) == rex::platform::OrdinaryPath(host));
   }
 }
 
@@ -122,11 +118,13 @@ TEST_CASE("A log file beyond MAX_PATH opens in the host form", "[sdk][long-path]
   while (deep.native().size() < 300) deep /= std::string(30, 'l');
   const auto log = deep / "runs" / "rex.log";
   REQUIRE(log.native().size() > 300);
-  REQUIRE_NOTHROW(rex::InitLogging(log.string().c_str(), spdlog::level::info));
-  REXLOG_INFO("long log path check");
-  rex::FlushLogging();
-  // Drops the file sink, so the deep folder can be removed.
-  rex::InitLogging(nullptr, spdlog::level::err);
+  auto sink = rex::log::LogFileSink::Open(log, {});
+  REQUIRE(sink);
+  rex::log::Message message{};
+  message.level = rex::log::Level::kInfo; message.category = "test"; message.text = "long log path check";
+  (*sink)->Write(message);
+  (*sink)->Flush();
+  sink->reset();
   std::ifstream written(Long(log), std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(written)), std::istreambuf_iterator<char>());
   CHECK(text.find("long log path check") != std::string::npos);

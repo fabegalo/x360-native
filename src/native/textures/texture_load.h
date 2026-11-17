@@ -1,5 +1,5 @@
 #pragma once
-#include <rex/graphics/pipeline/texture/util.h>
+#include <rex/xenos/texture.h>
 #include "host_layout.h"
 #if defined(_WIN32)
 #include <wrl/client.h>
@@ -13,9 +13,9 @@ using D3D12Commands = BasicD3D12Commands<struct ID3D12GraphicsCommandList>;
 // Guest texture storage selected by a fetch constant, in the terms both the
 // CPU conversion and the GPU load use. Base/mip are byte addresses.
 struct TextureLoadInput {
-  rex::graphics::xenos::TextureFormat format;
-  rex::graphics::xenos::DataDimension dimension;
-  rex::graphics::xenos::Endian endian;
+  rex::xenos::TextureFormat format;
+  rex::xenos::DataDimension dimension;
+  rex::xenos::Endian endian;
   bool tiled, packed_mips;
   uint32_t width, height, depth_or_slices, pitch;  // pitch: fetch units (texels / 32)
   uint32_t base, mip;
@@ -25,7 +25,7 @@ struct TextureLoadInput {
   DXGI_FORMAT host_format;
   bool is_signed, num_format;
   uint32_t scale_x = 1, scale_y = 1;
-  rex::graphics::texture_util::TextureGuestLayout Layout() const;
+  rex::xenos::GuestTextureLayout Layout() const;
 };
 // Pinned SDK texture_load_* compute shaders Native dispatches (indices are
 // Native's own; TextureCache keeps its table protected).
@@ -39,15 +39,15 @@ struct LoadConstants {
 static_assert(sizeof(LoadConstants) == 40);
 constexpr uint32_t kLoadGuestXThreadsPerGroupLog2 = 2, kLoadGuestYBlocksPerGroupLog2 = 5;
 // RGBA4, signed RGB10A2 and integer 16-bit textures keep Native's CPU conversion.
-bool NeedsCpuConversion(rex::graphics::xenos::TextureFormat, bool is_signed, bool num_format);
+bool NeedsCpuConversion(rex::xenos::TextureFormat, bool is_signed, bool num_format);
 // A texture fetch constant whose data the GPU samples: type kTexture, or type 0
 // (kInvalidTexture) under --gpu_allow_invalid_fetch_constants, as in the pinned
 // Xenos texture cache (Motocross Madness binds terrain sources as type 0).
-bool TextureFetchSampled(const rex::graphics::xenos::xe_gpu_texture_fetch_t&);
+bool TextureFetchSampled(const rex::xenos::TextureFetch&, bool allow_invalid);
 // The translator declares alternative signed and dimensional views. Null
 // alternatives do not read guest bytes and must not trigger CPU synchronization.
-bool TextureViewActive(const rex::graphics::xenos::xe_gpu_texture_fetch_t&,
-    rex::graphics::xenos::FetchOpDimension, bool is_signed);
+bool TextureViewActive(const rex::xenos::TextureFetch&,
+    rex::xenos::FetchOpDimension, bool is_signed, bool allow_invalid);
 // Pinned SDK load shader whose output equals Native's CPU conversion for this
 // binding; LoadShader::kUnknown keeps the CPU conversion.
 LoadShader GpuLoadShader(const TextureLoadInput&);

@@ -2,7 +2,7 @@
 
 [project]
 name = "castle_crashers"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../.local/inputs/games/castle_crashers/content"
 
 [entrypoint]

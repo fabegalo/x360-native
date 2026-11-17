@@ -1,0 +1,165 @@
+diff --git a/src/xam/app/xgi_app.cpp b/src/xam/app/xgi_app.cpp
+--- a/src/xam/app/xgi_app.cpp
++++ b/src/xam/app/xgi_app.cpp
+@@ -19,6 +19,7 @@
+ #include <rex/xam/title_lifecycle.h>
+ #include "xam/stub_log.h"
+ #include "xam/xam_state.h"
++#include "xam/offline_achievement_helpers.h"
+ #include <rex/xam/user_profile.h>
+ 
+ namespace rex {
+@@ -28,8 +29,8 @@
+ namespace apps {
+ using namespace rex::kernel;
+ 
+-XGIApp::XGIApp(const XAMKernelInterfaces& title, rex::xam::IAchievementManager& achievements)
+-    : rex::xam::XAMApplet(title, 0xFB), achievements_(achievements) {}
++XGIApp::XGIApp(const XAMKernelInterfaces& title)
++    : rex::xam::XAMApplet(title, 0xFB) {}
+ 
+ kernel::X_HRESULT XGIApp::DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) {
+   switch (message) {
+@@ -93,51 +94,38 @@
+       return kernel::X_E_SUCCESS;
+     }
+     case 0x000B0008: {
+-      struct {
+-        be_u32 count;
+-        be_u32 achievements_ptr;
+-      }* args = membase_.TranslateVirtual<decltype(args)>(buffer_ptr);
+-      REX_STATIC_ASSERT_SIZE(decltype(*args), 8);
+-      u32 raw0 = buffer_length >= 4 ? u32{args->count} : 0;
+-      u32 raw4 = buffer_length >= 8 ? u32{args->achievements_ptr} : 0;
+-      REXXAM_DEBUG("XGIUserWriteAchievements called: buf_len={} raw[0]={:08X} raw[4]={:08X}",
+-                   buffer_length, raw0, raw4);
+-
+-      REX_ASSERT(!buffer_length || buffer_length == 8);
+-      u32 achievement_count = raw0;
+-      u32 achievements_ptr = raw4;
+-
+-      struct Entry {
+-        be_u32 user_index;
+-        be_u32 id;
+-      };
+-      REX_STATIC_ASSERT_SIZE(Entry, 8);
+-      static_assert(offsetof(Entry, id) == 4);
+-      constexpr u32 kMaxAchievements = 1000;
+-
+-      if (achievements_ptr && achievement_count > 0) {
+-        if (achievement_count > kMaxAchievements) {
+-          REXXAM_WARN("XGIUserWriteAchievements: count={} unreasonable, ignoring",
+-                      achievement_count);
+-          return kernel::X_E_FAIL;
+-        }
+-        u32 span_end = achievements_ptr + achievement_count * sizeof(Entry) - 1;
+-        if (!title_.heap.IsAddressMapped(achievements_ptr) ||
+-            !title_.heap.IsAddressMapped(span_end)) {
+-          REXXAM_WARN("XGIUserWriteAchievements: ptr {:08X} OOB", achievements_ptr);
+-          return kernel::X_E_FAIL;
+-        }
+-        const auto* entries = membase_.TranslateVirtual<const Entry*>(achievements_ptr);
+-        for (u32 i = 0; i < achievement_count; ++i) {
+-          u32 id = entries[i].id;
+-          REXXAM_DEBUG("XGIUserWriteAchievements: id={} ({})", id, i);
+-          (void)achievements_.UnlockAchievement(id, rex::xam::AchievementNotification::kShow);
+-        }
+-      } else {
+-        REXXAM_DEBUG("XGIUserWriteAchievements: skipped (count={} ptr={:08X})", achievement_count,
+-                     achievements_ptr);
++      // XGI_WRITEACHIEVEMENT: count, X_USER_ACHIEVEMENT*. Each entry is
++      // {DWORD user_index, DWORD achievement_id}; index is not padding.
++      // A zero message length is permitted by the XMsg in-process ABI.
++      if ((buffer_length && buffer_length != 8) ||
++          !AchievementGuestSpan( buffer_ptr, 8, kernel::kMemoryProtectRead)) return X_E_INVALIDARG;
++      const uint32_t count = memory::load_and_swap<uint32_t>(membase_.TranslateVirtual(buffer_ptr));
++      const uint32_t entries = memory::load_and_swap<uint32_t>(membase_.TranslateVirtual(buffer_ptr + 4));
++      if (!count || count > 65536 ||
++          !AchievementGuestSpan( entries, uint64_t(count) * 8, kernel::kMemoryProtectRead))
++        return X_E_INVALIDARG;
++      const auto identity = CurrentXAM().GetUserProfile().identity();
++      if (!identity.signin_state) return X_E_NO_SUCH_USER;
++      std::vector<uint32_t> ids;
++      ids.reserve(count);
++      const auto* input = membase_.TranslateVirtual<const u8*>(entries);
++      for (uint32_t i = 0; i < count; ++i) {
++        const auto user = memory::load_and_swap<uint32_t>(input + i * 8);
++        if (user >= 4) return X_E_INVALIDARG;
++        if (user != 0) return X_E_NO_SUCH_USER;
++        ids.push_back(memory::load_and_swap<uint32_t>(input + i * 8 + 4));
+       }
+-      return kernel::X_E_SUCCESS;
++      if (!CurrentXAM().GetTitleID()) return X_E_INVALIDARG;
++      const uint32_t title = CurrentXAM().GetTitleID();
++      std::vector<OfflineAchievementRecord> newly_unlocked;
++      const auto result = CurrentXAM().GetOfflineAchievements().UnlockBatch(
++          identity.xuid, title, ids, newly_unlocked);
++      const auto error = OfflineAchievementError(result);
++      if (error) return XHRESULTFromWin32(error);
++      for (const auto& record : newly_unlocked) {
++        CurrentXAM().GetSystemUI().NotifyAchievementUnlocked(identity.xuid, 0, title, record.info.id);
++      }
++      return X_E_SUCCESS;
+     }
+     case 0x000B0010: {
+       REX_ASSERT(!buffer_length || buffer_length == 28);
+diff --git a/src/xam/app/xam_apps.h b/src/xam/app/xam_apps.h
+--- a/src/xam/app/xam_apps.h
++++ b/src/xam/app/xam_apps.h
+@@ -54,12 +54,11 @@
+    * @param title The kernel interfaces of the title the app serves.
+    * @param achievements The achievement manager of the title.
+    */
+-  XGIApp(const XAMKernelInterfaces& title, rex::xam::IAchievementManager& achievements);
++  explicit XGIApp(const XAMKernelInterfaces& title);
+ 
+   kernel::X_HRESULT DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) override;
+ 
+  private:
+-  rex::xam::IAchievementManager& achievements_;
+ };
+ 
+ /** XLiveBase app 0xFC, which serves online service queries such as the logon ID and NAT type. */
+diff --git a/src/xam/xam_state.cpp b/src/xam/xam_state.cpp
+--- a/src/xam/xam_state.cpp
++++ b/src/xam/xam_state.cpp
+@@ -69,7 +69,7 @@
+   user_profile_->SetProfileChangedCallback([this] { title_.notifier.BroadcastNotification(0xE, 1); });
+   achievement_manager_ = std::make_unique<AchievementManager>();
+   app_manager_->RegisterApp(std::make_unique<apps::XMPApp>(title_));
+-  app_manager_->RegisterApp(std::make_unique<apps::XGIApp>(title_, *achievement_manager_));
++  app_manager_->RegisterApp(std::make_unique<apps::XGIApp>(title_));
+   app_manager_->RegisterApp(std::make_unique<apps::XLiveBaseApp>(title_));
+   app_manager_->RegisterApp(std::make_unique<apps::XAMApp>(title_, *content_manager_));
+   g_current.store(this, std::memory_order_release);
+diff --git a/src/xam/xam_msg.cpp b/src/xam/xam_msg.cpp
+--- a/src/xam/xam_msg.cpp
++++ b/src/xam/xam_msg.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include "xam/xam_state.h"
++#include "xam/offline_achievement_helpers.h"
+ #include "xam/xam_ui.h"
+ #include <rex/kernel/xboxkrnl.h>
+ #include <rex/logging/log_category.h>
+@@ -58,6 +59,19 @@
+ kernel::X_HRESULT XMsgStartIORequestEx(u32 app, u32 message, u32 overlapped_ptr, u32 buffer_ptr,
+                                        u32 buffer_length,
+                                        [[maybe_unused]] XMSGSTARTIOREQUEST_UNKNOWNARG* unknown) {
++  if (app == 0xFB && message == 0xB0008) {
++    if (overlapped_ptr && !AchievementGuestSpan(overlapped_ptr, sizeof(kernel::XOVERLAPPED),
++        kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite)) return kernel::X_E_INVALIDARG;
++    const auto result = CurrentXAM().GetAppManager().DispatchMessageAsync(app, message, buffer_ptr, buffer_length);
++    if (overlapped_ptr) {
++      CurrentTitle().overlapped_dispatcher.Complete(overlapped_ptr,
++          {.result = kernel::XFAILED(result) ? kernel::X_ERROR_FUNCTION_FAILED : kernel::X_ERROR_SUCCESS,
++           .extended_error = static_cast<u32>(result), .length = 0});
++    } else {
++      CurrentTitle().threads.GetCallingThread()->SetLastError(result);
++    }
++    return kernel::X_E_SUCCESS;
++  }
+   auto result =
+       CurrentXAM().GetAppManager().DispatchMessageAsync(app, message, buffer_ptr, buffer_length);
+   if (result == kernel::X_E_NOTFOUND) {

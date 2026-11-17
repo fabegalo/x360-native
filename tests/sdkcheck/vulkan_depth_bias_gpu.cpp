@@ -4,8 +4,8 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <StandAlone/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
-#include <rex/graphics/vulkan/depth_bias.h>
-#include <rex/ui/vulkan/instance.h>
+#include "gpu/xenos/vulkan/depth_bias.h"
+#include "gpu/xenos/host/vulkan/vulkan_instance.h"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -16,9 +16,9 @@
 #include <string_view>
 #include <vector>
 
-using namespace rex::graphics;
-using namespace rex::graphics::vulkan;
-using namespace rex::ui::vulkan;
+using namespace rex::xenos;
+using namespace rex::gpu::vulkan;
+namespace xenos=rex::xenos;
 namespace {
 void Need(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 std::vector<uint32_t> Compile(const char* source, EShLanguage stage) {
@@ -42,8 +42,8 @@ struct Cleanup {
   std::vector<std::function<void()>> actions;
   ~Cleanup() {
     // The only queue used by this fixture; idle it before destroying objects.
-    { auto queue = device.AcquireQueue(device.queue_family_graphics_compute(), 0);
-      fn.vkQueueWaitIdle(queue.queue()); }
+    { auto queue = device.AcquireQueue(device.GetQueueFamilyGraphicsCompute(), 0);
+      fn.vkQueueWaitIdle(queue.GetQueue()); }
     for (auto action = actions.rbegin(); action != actions.rend(); ++action) (*action)();
   }
 };
@@ -66,18 +66,19 @@ struct DriverCommands {
 };
 
 void Run(bool legacy, bool fallback) {
-  auto instance = VulkanInstance::Create(false, true);
+  auto instance = VulkanInstance::Create(false, true, false);
   Need(bool(instance), "Vulkan instance unavailable");
   std::vector<VkPhysicalDevice> physical;
   instance->EnumeratePhysicalDevices(physical);
   Need(!physical.empty(), "Vulkan GPU unavailable");
   // fallback creates a real device without GPU-emulation optional features.
-  auto device = VulkanDevice::CreateIfSupported(instance.get(), physical.front(), !fallback, false);
+  VulkanSettings settings;
+  auto device = VulkanDevice::CreateIfSupported(instance.get(), physical.front(), !fallback, false,settings);
   Need(bool(device), "Vulkan device creation failed");
-  const auto& fn = device->functions();
-  const auto& ifn = instance->functions();
-  const auto vk = device->device();
-  const auto& properties = device->properties();
+  const auto& fn = device->GetFunctions();
+  const auto& ifn = instance->GetFunctions();
+  const auto vk = device->GetDevice();
+  const auto& properties = device->GetProperties();
   std::cout << "GPU=" << properties.deviceName << " depthBiasControl=" << properties.depthBiasControl
             << " forceUnorm=" << properties.leastRepresentableValueForceUnormRepresentation
             << " exact=" << properties.depthBiasExact << " legacy=" << legacy
@@ -85,7 +86,7 @@ void Run(bool legacy, bool fallback) {
   if (!fallback) Need(properties.depthBiasControl &&
       properties.leastRepresentableValueForceUnormRepresentation && properties.depthBiasExact,
       "GPU lacks the exact FORCE_UNORM path required by this regression");
-  else Need(!properties.depthBiasControl && !device->extensions().ext_EXT_depth_bias_control,
+  else Need(!properties.depthBiasControl && !device->GetExtensions().ext_EXT_depth_bias_control,
             "fallback device unexpectedly enabled depth-bias extension");
   Cleanup cleanup{fn, *device};
   VkPhysicalDeviceMemoryProperties memory{};
@@ -125,7 +126,7 @@ void main(){gl_Position=vec4(gl_VertexIndex==1?3:-1,gl_VertexIndex==2?3:-1,value
   Need(fn.vkCreatePipelineLayout(vk, &layout_info, nullptr, &layout) == VK_SUCCESS, "pipeline layout");
   cleanup.actions.emplace_back([&, layout] { fn.vkDestroyPipelineLayout(vk, layout, nullptr); });
   VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-  pool_info.queueFamilyIndex = device->queue_family_graphics_compute();
+  pool_info.queueFamilyIndex = device->GetQueueFamilyGraphicsCompute();
   VkCommandPool pool{};
   Need(fn.vkCreateCommandPool(vk, &pool_info, nullptr, &pool) == VK_SUCCESS, "command pool");
   cleanup.actions.emplace_back([&, pool] { fn.vkDestroyCommandPool(vk, pool, nullptr); });
@@ -217,11 +218,11 @@ void main(){gl_Position=vec4(gl_VertexIndex==1?3:-1,gl_VertexIndex==2?3:-1,value
       for (float offset : {-1.0f / 4096, 1.0f / 4096}) {
         RegisterFile regs{};
         reg::PA_SU_SC_MODE_CNTL mode{}; mode.poly_offset_front_enable = 1;
-        regs[mode.register_index] = mode.value;
+        regs[reg::PA_SU_SC_MODE_CNTL::kRegisterIndex] = mode.value;
         reg::RB_DEPTH_INFO guest_depth{};
         guest_depth.depth_format = float24 ? xenos::DepthRenderTargetFormat::kD24FS8 : xenos::DepthRenderTargetFormat::kD24S8;
-        regs[guest_depth.register_index] = guest_depth.value;
-        regs[XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET] = std::bit_cast<uint32_t>(offset);
+        regs[reg::RB_DEPTH_INFO::kRegisterIndex] = guest_depth.value;
+        regs[Register::PA_SU_POLY_OFFSET_FRONT_OFFSET] = std::bit_cast<uint32_t>(offset);
         const auto bias = GetHostDepthBias(regs, true, 1, 1, properties, !legacy);
         VkCommandBufferAllocateInfo command_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         command_info.commandPool = pool; command_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; command_info.commandBufferCount = 1;
@@ -267,7 +268,7 @@ void main(){gl_Position=vec4(gl_VertexIndex==1?3:-1,gl_VertexIndex==2?3:-1,value
         cleanup.actions.emplace_back([&, fence] { fn.vkDestroyFence(vk, fence, nullptr); });
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO}; submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
         { auto queue = device->AcquireQueue(pool_info.queueFamilyIndex, 0);
-          Need(fn.vkQueueSubmit(queue.queue(), 1, &submit, fence) == VK_SUCCESS, "submit"); }
+          Need(fn.vkQueueSubmit(queue.GetQueue(), 1, &submit, fence) == VK_SUCCESS, "submit"); }
         Need(fn.vkWaitForFences(vk, 1, &fence, VK_TRUE, 5'000'000'000ull) == VK_SUCCESS, "GPU timeout");
         const float expected = (reversed ? 1 - z : z) * host_range + offset * host_range;
         float maximum_error = 0, first_value = 0;

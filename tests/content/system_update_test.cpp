@@ -11,7 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <rex/filesystem/devices/stfs_xbox.h>
+#include <rex/filesystem/stfs.h>
 namespace fs=std::filesystem;
 using namespace x360n;
 using namespace x360n::content;
@@ -54,13 +54,13 @@ struct Scratch {
 };
 std::string Package() {
   using namespace rex::filesystem;
-  StfsHeader header{};header.header.magic=XContentPackageType::kPirs;header.header.header_size=0xA000;
-  header.metadata.content_type=static_cast<XContentType>(0xB0000);
+  XContentPackageHeader header{};header.header.magic=XContentPackageType::kPirs;header.header.header_size=0xA000;
+  header.metadata.content_type=static_cast<rex::kernel::XContentType>(0xB0000);
   header.metadata.execution_info.title_id=0xFFFE07D1;
   auto& d=header.metadata.volume_descriptor.stfs;d.flags.bits.read_only_format=1;
-  d.file_table_block_count=1;d.set_file_table_block_number(0);d.total_block_count=2;
-  StfsDirectoryEntry e{};std::memcpy(e.name,"$flash_dash.xex",15);e.flags.name_length=15;
-  e.directory_index=0xFFFF;e.length=4;e.set_start_block_number(1);e.set_allocated_data_blocks(1);
+  d.file_table_block_count=1;d.SetFileTableBlockNumber(0);d.total_block_count=2;
+  STFSDirectoryEntry e{};std::memcpy(e.name,"$flash_dash.xex",15);e.flags.name_length=15;
+  e.directory_index=0xFFFF;e.length=4;e.SetStartBlockNumber(1);e.SetAllocatedDataBlocks(1);
   std::string b(0xD000,'\0');std::memcpy(b.data(),&header,sizeof(header));
   for (size_t p:{0xA015,0xA016,0xA017,0xA02D,0xA02E,0xA02F}) b[p]=char(0xFF);
   std::memcpy(b.data()+0xB000,&e,sizeof(e));b.replace(0xC000,4,"XEX2");return b;
@@ -131,18 +131,18 @@ TEST_CASE("System Update cancellation and failure allow a fresh isolated retry",
 TEST_CASE("System Update bounds PIRS allocation parents duplicates and block chains before SDK mounting", "[system-update]") {
   Scratch s;auto bytes=Package();std::string expected;
   SECTION("excessive allocation") {
-    rex::filesystem::StfsHeader h{};std::memcpy(&h,bytes.data(),sizeof(h));
+    rex::filesystem::XContentPackageHeader h{};std::memcpy(&h,bytes.data(),sizeof(h));
     h.metadata.volume_descriptor.stfs.total_block_count=0xFFFFFF;
     std::memcpy(bytes.data(),&h,sizeof(h));expected="allocation";
   }
   SECTION("out of range parent") {
-    rex::filesystem::StfsDirectoryEntry e{};std::memcpy(&e,bytes.data()+0xB000,sizeof(e));
+    rex::filesystem::STFSDirectoryEntry e{};std::memcpy(&e,bytes.data()+0xB000,sizeof(e));
     e.directory_index=12;std::memcpy(bytes.data()+0xB000,&e,sizeof(e));expected="parent index";
   }
   SECTION("duplicate entry") {bytes.replace(0xB040,64,bytes.substr(0xB000,64));expected="duplicate";}
   SECTION("cyclic file chain") {bytes[0xA02D]=bytes[0xA02E]=bytes[0xA02F]=0;expected="unterminated";}
   SECTION("unsafe name") {
-    rex::filesystem::StfsDirectoryEntry e{};std::memcpy(&e,bytes.data()+0xB000,sizeof(e));
+    rex::filesystem::STFSDirectoryEntry e{};std::memcpy(&e,bytes.data()+0xB000,sizeof(e));
     std::memcpy(e.name,"../",3);e.flags.name_length=3;
     std::memcpy(bytes.data()+0xB000,&e,sizeof(e));expected="unsafe";
   }

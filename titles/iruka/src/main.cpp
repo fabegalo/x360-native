@@ -4,4 +4,4 @@
 
 #include "iruka_app.h"
 
-REX_DEFINE_APP(iruka, IrukaApp::Create)
+REX_TITLE_APP(IrukaApp)

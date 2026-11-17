@@ -1,16 +1,12 @@
 // Opt-in diagnosis of the image-page contract, using synthetic memory only.
 // Does not execute guest code, map a user-mode address space, or define a PTE ABI.
-#include <rex/kernel/init.h>
-#include <rex/ppc/func.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include "tool_sdk.h"
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <string>
 
-using rex::X_STATUS;
 extern "C" REX_FUNC(__imp__KeGetImagePageTableEntry);
 
 // Observed consumer requirements, not a replacement kernel implementation.
@@ -37,29 +33,29 @@ int main(int argc, char** argv) {
       return 2;
     const auto base = static_cast<uint32_t>(parsed_base);
     std::filesystem::create_directories(argv[1]);
-    rex::Runtime runtime(std::filesystem::absolute(argv[1]));
-    rex::RuntimeConfig config{};
-    config.tool_mode = true;
-    config.kernel_init = rex::kernel::InitializeKernel;
-    if (runtime.Setup(std::move(config)) != X_STATUS_SUCCESS) return 3;
-    auto* heap = runtime.memory()->LookupHeap(base);
+    rex::codegen::ToolApp app("user_mode_page_probe",std::filesystem::absolute(argv[1]));
+    auto tool=app.Open(std::filesystem::absolute(argv[1]));if(!tool)return 3;
+    auto& runtime=tool->GetRuntime();
+    auto* memory=&rex::kernel::GetAddressSpace(runtime);
+    auto* heap = memory->LookupHeap(base);
     const auto size = static_cast<uint32_t>(pages * page_size);
-    const auto flags = rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit;
-    if (!heap->AllocFixed(base, size, page_size, flags, rex::memory::kMemoryProtectRead)) return 4;
+    const auto flags = rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit;
+    if (!heap->AllocFixed(base, size, page_size, flags, rex::kernel::kMemoryProtectRead)) return 4;
     auto ctx = std::make_unique<PPCContext>();
+    unsigned rejected = 0, unchanged = 0;
+    auto caller=runtime.GetThreadRegistry().LaunchHostThread("image page probe",128*1024,[&] {
     auto query = [&](uint32_t address) {
       ctx->r3.u64 = address;
-      __imp__KeGetImagePageTableEntry(*ctx, runtime.memory()->virtual_membase());
+      __imp__KeGetImagePageTableEntry(*ctx, memory->GetVirtualMembase());
       return ctx->r3.u32;
     };
-    unsigned rejected = 0, unchanged = 0;
     std::cout << "diagnostic_only=true guest_execution=false\n"
                  "address\tread_only_entry\tread_write_entry\tpasses_attribute_gate\n";
     for (uint32_t i = 0; i < pages; ++i) {
       const auto address = base + i * page_size;
       const auto ro = query(address);
       if (!heap->Protect(address, page_size,
-                         rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite)) return 5;
+                         rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite)) return 5;
       const auto rw = query(address);
       rejected += !PassesAttributeGate(ro);
       unchanged += ro == rw;
@@ -67,6 +63,12 @@ int main(int argc, char** argv) {
                 << std::setw(8) << ro << '\t' << std::setw(8) << rw << '\t'
                 << PassesAttributeGate(ro) << '\n';
     }
+    return 0;
+    });
+    if(!caller)return 7;
+    uint64_t timeout=uint64_t(-100'000'000ll);
+    if(runtime.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*caller,0,0,0,&timeout))return 8;
+    rex::kernel::CloseOwned(runtime.GetObjectTable(),*caller);
     if (!heap->Release(base)) return 6;
     std::cout << std::dec << "allocated_pages=" << pages << " rejected_attribute_gates=" << rejected
               << " unchanged_after_protect=" << unchanged << '\n';

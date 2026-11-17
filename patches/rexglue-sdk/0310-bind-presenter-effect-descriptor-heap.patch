@@ -1,0 +1,12 @@
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+@@ -732,6 +732,8 @@
+           scissor.bottom = LONG(effect_dest_resource_desc.Height);
+           command_list->RSSetScissorRects(1, &scissor);
+ 
++          // Temporal compute dispatches may replace the descriptor heaps between effects.
++          command_list->SetDescriptorHeaps(1, &view_heap);
+           command_list->SetPipelineState(
+               is_final_effect ? guest_output_paint_final_pipelines_[size_t(effect)].Get()
+                               : guest_output_paint_intermediate_pipelines_[size_t(effect)].Get());

@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
-#include <rex/codegen/codegen_context.h>
+#include "codegen/pipeline.h"
+#include "codegen/codegen_context.h"
 #include "synthetic_xex.h"
 #include <fstream>
 using namespace x360n::test;
@@ -22,15 +22,15 @@ TEST_CASE("GapFill preserves a leaf after a pdata out-of-line return", "[sdk][co
   Workdir work("x360n_gapfill", "pdata_end");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='gapfill'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   const auto run = pipeline->Run(false);
   INFO((run.has_value() ? "ok" : run.error().message));
   REQUIRE(run.has_value());
-  const auto& graph = pipeline->context().graph;
-  const auto* leaf = graph.getFunction(kXexText + 24);
+  const auto& graph = pipeline->GetContext().graph;
+  const auto* leaf = graph.GetFunction(kXexText + 24);
   REQUIRE(leaf);
-  CHECK(leaf->containsAddress(kXexText + 36));
-  CHECK(leaf->containsAddress(kXexText + 40));
-  CHECK_FALSE(graph.isEntryPoint(kXexText + 40));
+  CHECK(leaf->ContainsAddress(kXexText + 36));
+  CHECK(leaf->ContainsAddress(kXexText + 40));
+  CHECK_FALSE(graph.IsEntryPoint(kXexText + 40));
 }

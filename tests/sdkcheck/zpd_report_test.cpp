@@ -1,15 +1,15 @@
 // Differential report conversion, not GPU query execution. The reference
 // header is unmodified Canary 4f04bc7, blob 51aab4909e6239c76247978c8c82c16b1387f693.
-#include <rex/graphics/xenos_zpd_report.h>
+#include "gpu/xenos/zpd_report.h"
 #include <iostream>
 
-namespace xe::gpu { namespace xenos = rex::graphics::xenos; }
+namespace xe::gpu::xenos {using xe_gpu_depth_sample_counts=rex::xenos::DepthSampleCounts;}
 #include "fixtures/canary_zpd_report.h"
 
 int main() {
-  using Report = rex::graphics::XenosZPDReport;
+  using Report = rex::gpu::XenosZPDReport;
   using Reference = xe::gpu::XenosZPDReport;
-  using Guest = rex::graphics::xenos::xe_gpu_depth_sample_counts;
+  using Guest = rex::xenos::DepthSampleCounts;
   unsigned checks = 0, failures = 0;
   auto compare = [&](const Report& actual, const Reference& expected) {
     ++checks;

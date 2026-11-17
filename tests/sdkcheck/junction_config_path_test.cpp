@@ -10,7 +10,7 @@
 #include <fstream>
 #include <string>
 
-#include <rex/codegen/config.h>
+#include "codegen/config.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -80,9 +80,9 @@ TEST_CASE("Config includes are read through a short junction to a deep folder", 
   rex::codegen::RecompilerConfig cfg;
   REQUIRE(cfg.Load(config.string()));
   CHECK(cfg.functions.contains(0x82000010));
-  REQUIRE(cfg.loadedFiles.size() == 2);
-  CHECK(fs::path(cfg.loadedFiles[0]) == config);
-  CHECK(fs::path(cfg.loadedFiles[1]) == alias / "analysis" / "hints.toml");
+  REQUIRE(cfg.loaded_files.size() == 2);
+  CHECK(fs::path(cfg.loaded_files[0]) == config);
+  CHECK(fs::path(cfg.loaded_files[1]) == alias / "analysis" / "hints.toml");
   // A cycle is still found by canonical identity, whatever the spelling.
   std::ofstream(Long(deep / "cycle.toml")) << "file_path = \"default.xex\"\nincludes = [\"cycle.toml\"]\n";
   rex::codegen::RecompilerConfig cycle;

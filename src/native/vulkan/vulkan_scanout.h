@@ -2,7 +2,7 @@
 #include "vulkan_core.h"
 #include "vulkan_fxaa.h"
 #include "../commands/scanout_backend.h"
-#include <rex/ui/vulkan/provider.h>
+#include <gpu/xenos/host/vulkan/vulkan_provider.h>
 
 namespace x360n::native {
 // Presentation component for the Native Vulkan executor. It implements the
@@ -10,11 +10,11 @@ namespace x360n::native {
 // with Native's rendering executor; both own their command and resource state.
 class VulkanScanout {
  public:
-  explicit VulkanScanout(rex::ui::vulkan::VulkanProvider&);
+  explicit VulkanScanout(rex::gpu::vulkan::VulkanProvider&);
   ~VulkanScanout();
   VulkanScanout(const VulkanScanout&) = delete;
   VulkanScanout& operator=(const VulkanScanout&) = delete;
-  void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
+  void Present(rex::gpu::Presenter&, const ScanoutTexture&, const void* pixels,
                const uint32_t* lut, const ScanoutOverlay*, const void* overlay_pixels,
                ScanoutPostEffect = ScanoutPostEffect::kNone,
                uint32_t display_width = 0, uint32_t display_height = 0,
@@ -23,7 +23,7 @@ class VulkanScanout {
  private:
   void Initialize();
   void Destroy();
-  const rex::ui::vulkan::VulkanDevice& device_;
+  const rex::gpu::vulkan::VulkanDevice& device_;
   VulkanSubmissionRing submissions_;
   VkDescriptorSetLayout descriptors_layout_ = VK_NULL_HANDLE;
   VkDescriptorPool descriptors_pool_ = VK_NULL_HANDLE;

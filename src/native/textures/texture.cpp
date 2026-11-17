@@ -3,9 +3,9 @@
 #include <stdexcept>
 #include <sstream>
 namespace x360n::native {
-ScanoutTexture DecodeScanout(const rex::graphics::xenos::xe_gpu_texture_fetch_t& f,
+ScanoutTexture DecodeScanout(const rex::xenos::TextureFetch& f,
                             uint32_t w, uint32_t h) {
-  using namespace rex::graphics::xenos;
+  using namespace rex::xenos;
   const bool rgb10 = f.format == TextureFormat::k_2_10_10_10 ||
                      f.format == TextureFormat::k_2_10_10_10_AS_16_16_16_16;
   if (f.type != FetchConstantType::kTexture || f.dimension != DataDimension::k2DOrStacked ||

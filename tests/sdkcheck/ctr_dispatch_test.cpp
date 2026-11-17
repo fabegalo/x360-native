@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <algorithm>
 #include <fstream>
@@ -46,20 +46,20 @@ TEST_CASE("Guarded byte dispatch leaves the following callback callable",
     work.write("test.xex", bytes);
     std::ofstream(work.dir / "test.toml") <<
         "project_name='bounded_byte'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline);
     REQUIRE(pipeline->RunAnalyze());
-    auto& ctx = pipeline->context();
-    const auto* node = ctx.graph.getFunction(kXexText);
+    auto& ctx = pipeline->GetContext();
+    const auto* node = ctx.graph.GetFunction(kXexText);
     REQUIRE(node);
-    REQUIRE(node->jumpTables().size() == 1);
-    const auto& table = node->jumpTables().front();
-    CHECK(table.dispatchByTarget);
+    REQUIRE(node->GetJumpTables().size() == 1);
+    const auto& table = node->GetJumpTables().front();
+    CHECK(table.dispatch_by_target);
     if (variant < 2) {
       CHECK(table.targets == std::vector<uint32_t>{kXexText + 48, kXexText + 56});
-      CHECK(node->end() == kXexText + 64);
-      REQUIRE(ctx.graph.isEntryPoint(kXexText + 64));
-      CHECK(ctx.graph.getFunction(kXexText + 64)->end() == kXexText + 72);
+      CHECK(node->GetEnd() == kXexText + 64);
+      REQUIRE(ctx.graph.IsEntryPoint(kXexText + 64));
+      CHECK(ctx.graph.GetFunction(kXexText + 64)->GetEnd() == kXexText + 72);
     } else {
       // A nearby compare alone proves nothing. Preserve the existing finite
       // domain and runtime CTR dispatch when data flow/control flow is unknown.
@@ -115,21 +115,20 @@ TEST_CASE("Byte computed dispatch preserves CTR without guessing table length",
                                   : "0x82010080={size=8}\n");
       config.close();
       auto pipeline =
-          rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+          rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
       REQUIRE(pipeline.has_value());
       REQUIRE(pipeline->RunAnalyze().has_value());
-      auto &ctx = pipeline->context();
-      const auto *node = ctx.graph.getFunction(kXexText);
+      auto &ctx = pipeline->GetContext();
+      const auto *node = ctx.graph.GetFunction(kXexText);
       REQUIRE(node);
-      CHECK(node->authority() == rex::codegen::FunctionAuthority::PDATA);
-      CHECK(node->end() == kXexText + 60);
-      for (const auto &block : node->blocks())
-        CHECK(block.end() <= kXexText + 60);
+      CHECK(node->GetAuthority() == rex::codegen::FunctionAuthority::kPData);
+      CHECK(node->GetEnd() == kXexText + 60);
+      for (const auto &block : node->GetBlocks())
+        CHECK(block.GetEnd() <= kXexText + 60);
       const rex::codegen::EmitContext emit{
-          ctx.binary(), ctx.Config(), ctx.graph,
-          static_cast<uint32_t>(ctx.analysisState().entryPoint),
-          ctx.resolver()};
-      const auto source = node->emitCpp(emit);
+          ctx.GetBinary(), ctx.GetConfig(), ctx.graph, ctx.GetLimits(),
+          static_cast<uint32_t>(ctx.GetAnalysisState().entry_point)};
+      const auto source = node->EmitCpp(emit);
       CHECK(source.find("REX_LOAD_U8") != std::string::npos);
       CHECK(source.find("switch (ctx.ctr.u32 & ~3u)") != std::string::npos);
       CHECK(source.find("case 0x8201002C:") != std::string::npos);
@@ -177,15 +176,15 @@ TEST_CASE(
   std::ofstream(work.dir / "test.toml")
       << "project_name='byte_successors'\nfile_path='test.xex'\nout_directory_"
          "path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline);
   REQUIRE(pipeline->RunAnalyze());
-  const auto *node = pipeline->context().graph.getFunction(kXexText);
+  const auto *node = pipeline->GetContext().graph.GetFunction(kXexText);
   REQUIRE(node);
-  CHECK(node->end() == kXexText + 404);
+  CHECK(node->GetEnd() == kXexText + 404);
   bool includesReturn = false;
-  for (const auto &block : node->blocks())
-    includesReturn |= block.contains(kXexText + 400);
+  for (const auto &block : node->GetBlocks())
+    includesReturn |= block.Contains(kXexText + 400);
   CHECK(includesReturn);
   REQUIRE(pipeline->RunWrite());
 }
@@ -220,14 +219,14 @@ TEST_CASE("Byte dispatch follows register definitions and exact PPC masks",
     work.write("test.xex", bytes);
     std::ofstream(work.dir / "test.toml") <<
         "project_name='byte_variants'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline);
     REQUIRE(pipeline->RunAnalyze());
-    const auto* node = pipeline->context().graph.getFunction(kXexText);
+    const auto* node = pipeline->GetContext().graph.GetFunction(kXexText);
     REQUIRE(node);
     bool targetDispatch = false;
-    for (const auto& jt : node->jumpTables()) {
-      if (jt.bctrAddress != kXexText + 40 || !jt.dispatchByTarget) continue;
+    for (const auto& jt : node->GetJumpTables()) {
+      if (jt.bctr_address != kXexText + 40 || !jt.dispatch_by_target) continue;
       targetDispatch = true;
       std::set<uint32_t> expected;
       for (unsigned byte = 0; byte < 256; ++byte) {

@@ -3,7 +3,7 @@
 #include <fstream>
 #include <sstream>
 
-#include <fmt/format.h>
+#include <format>
 #include "fs_io.h"
 
 namespace x360n {
@@ -34,7 +34,7 @@ std::string JsonEscape(std::string_view s) {
       case '\t': o += "\\t"; break;
       default:
         if (c < 0x20) {
-          o += fmt::format("\\u{:04x}", c);
+          o += std::format("\\u{:04x}", c);
         } else {
           o += char(c);  // UTF-8 passes through unchanged
         }

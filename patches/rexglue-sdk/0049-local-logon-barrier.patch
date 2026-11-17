@@ -1,37 +1,81 @@
-diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
-index 9ef7674..fda6c8f 100644
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -65,6 +65,7 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
- // unsupported; all supported modes go through the persistent local store.
- static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
-                            uint32_t stride) {
-+  REXKRNL_INFO("LocalLogon request flags={:08X} stride={} overlap={:08X}", flags, stride, overlapped);
-   if (!users) return uint32_t(X_E_INVALIDARG);
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -65,6 +65,7 @@
+ 
+ // Retail LogonEx expands four XUIDs to 392-byte entries; unsupported modes never partially apply.
+ static u32 LocalLogon(MappedVoid users, u32 flags, u32 overlapped, u32 stride) {
++  REXXAM_INFO("LocalLogon request flags={:08X} stride={} overlap={:08X}", flags, stride, overlapped);
+   if (!users) return static_cast<u32>(kernel::X_E_INVALIDARG);
    const bool append = stride == 392 && flags == 0x120424;
    if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
-@@ -121,6 +122,15 @@ u32 XamUserLogonEx_entry(mapped_void users, u32 flags, u32 overlapped) {
-   return LocalLogon(users, flags, overlapped, 392);
+@@ -107,6 +108,13 @@
  }
- 
-+u32 XamUserFlushLogonQueue_entry(u32 overlapped) {
-+  // 17559 816D91B0 / 816D9178 schedules a barrier and completes XOVERLAPPED.
-+  // LocalLogon commits synchronously, so no accepted local operation remains
-+  // queued when it returns. Publish that completion to the original caller.
-+  if (overlapped)
-+    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped, 0, 0, 0);
-+  return 0;
+ u32 XamUserLogonEx_entry(MappedVoid users, u32 flags, u32 overlapped) {
+   return LocalLogon(users, flags, overlapped, 392);
 +}
 +
++u32 XamUserFlushLogonQueue_entry(u32 overlapped) {
++  // Local logon commits synchronously; publish the original barrier completion.
++  if (overlapped) CurrentTitle().overlapped_dispatcher.Complete(overlapped,
++      {.result = 0, .extended_error = 0, .length = 0});
++  return 0;
+ }
  
  u32 XamUserGetSigninState_entry(u32 user_index) {
-   return user_index == 0 ? REX_KERNEL_STATE()->user_profile()->signin_state() : 0;
-@@ -871,7 +881,7 @@ REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
+@@ -854,3 +862,5 @@
+ REX_XAM_BODY(__imp__XamUserGetIndexFromXUID, rex::xam::XamUserGetIndexFromXUID_entry)
+ 
+ REX_XAM_BODY(__imp__XamUserGetDeviceId, rex::xam::XamUserGetDeviceId_entry)
++
++REX_XAM_BODY(__imp__XamUserFlushLogonQueue, rex::xam::XamUserFlushLogonQueue_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1464,7 +1464,7 @@
+ REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
  REX_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
- REX_EXPORT_STUB(__imp__XamUserCreateStatsEnumerator);
  REX_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
 -REX_EXPORT_STUB(__imp__XamUserFlushLogonQueue);
-+REX_EXPORT(__imp__XamUserFlushLogonQueue, rex::kernel::xam::XamUserFlushLogonQueue_entry)
++
  REX_EXPORT_STUB(__imp__XamUserGetAge);
  REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
  REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -324,3 +324,5 @@
+ REX_XAM_FORWARD(__imp__XamIsNuiAutomationEnabled)
+ 
+ REX_XAM_FORWARD(__imp__XamUserIsPartialProfile)
++
++REX_XAM_FORWARD(__imp__XamUserFlushLogonQueue)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -692,3 +692,25 @@
+     CHECK(caller.XAM("XamGetCurrentDemand", {0, 0}) == 0);
+   });
+ }
++
++
++REX_TEST_CASE("local retail queries and logon barriers preserve the original ABI", "[kernel][xam][local-console]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    for (const char* name : {"XamIsDataCenterMode", "XamIsNuiAutomationEnabled", "XamUserIsPartialProfile"}) {
++      CHECK(caller.XAM(name, {0xDEADBEEF, 0xFFFFFFFF}) == 0);
++      CHECK(caller.XAM(name, {0}) == 0);
++    }
++    const auto request = caller.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    caller.Store32(request, rex::kernel::X_ERROR_IO_PENDING);
++    caller.Store32(request + 4, 0xCDCDCDCD);
++    caller.Store32(request + 24, 0xCDCDCDCD);
++    CHECK(caller.XAM("XamUserFlushLogonQueue", {0}) == 0);
++    CHECK(caller.XAM("XamUserFlushLogonQueue", {request}) == 0);
++    CHECK(caller.Load32(request) == 0);
++    CHECK(caller.Load32(request + 4) == 0);
++    CHECK(caller.Load32(request + 24) == 0);
++    CHECK(caller.XAM("XGetOverlappedResult", {request, 0, 0}) == 0);
++    CHECK(rex::xam::CurrentXAM().GetUserProfile().GetSigninState() == 0);
++  });
++}

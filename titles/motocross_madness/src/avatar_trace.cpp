@@ -4,7 +4,7 @@
 // only: no register or memory is changed and the imports run unchanged.
 #include <cstdint>
 
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
 
 namespace {

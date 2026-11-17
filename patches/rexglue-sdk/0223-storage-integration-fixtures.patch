@@ -1,0 +1,29 @@
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1093,8 +1093,14 @@
+     CHECK(caller.Load32(output + 28) == 0);
+     CHECK(caller.Load32(output + 32) == 15);
+     CHECK(caller.Load32(output + 36) == 0xA5A5A5A5);
+-    for (const auto& [offset, expected] : {std::pair<u32, u64>{4, info->create_time}, {12, info->access_time}, {20, info->write_time}})
++    const auto after = rex::xam::CurrentTitle().file_system_factory.StatHostPath(path);
++    REQUIRE(after);
++    for (const auto& [offset, expected] : {std::pair<u32, u64>{4, info->create_time}, {20, info->write_time}})
+       CHECK(((u64(caller.Load32(output + offset)) << 32) | caller.Load32(output + offset + 4)) == expected);
++    // Native traversal may advance atime during the API. Its snapshot must lie inside these boundaries.
++    const auto access_time = (u64(caller.Load32(output + 12)) << 32) | caller.Load32(output + 16);
++    CHECK(access_time >= std::min(info->access_time, after->access_time));
++    CHECK(access_time <= std::max(info->access_time, after->access_time));
+     REQUIRE(caller.XAM("XamContentGetAttributesInternal", {input, output, overlap}) == rex::kernel::X_ERROR_IO_PENDING);
+     CHECK(caller.Load32(overlap) == 0);
+     data->SetFileName("missing");
+@@ -1720,6 +1726,9 @@
+     put(32 + 12, 0x584108B7); put(20, 0xFFFFFFFF); REQUIRE(rex::platform::WriteHostFile(image, xex));
+     CHECK(c.XAM("XamContentGetMetaDataInternal", {input, output, 0}) == 13);
+     data->content_type = rex::kernel::XContentType::kSavedGame;
++    CHECK(c.XAM("XamContentGetMetaDataInternal", {input, output, 0}) == rex::kernel::X_ERROR_FILE_NOT_FOUND);
++    CHECK(c.Load32(output) == 0xCAFEBABE);
++    data->content_type = rex::kernel::XContentType::kInvalid;
+     CHECK(c.XAM("XamContentGetMetaDataInternal", {input, output, 0}) == rex::kernel::XResultFromWin32(50));
+     CHECK(c.XAM("XamContentGetMetaDataInternal", {input, 0x7F100000, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
+   });

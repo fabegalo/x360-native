@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <fstream>
 #include <iterator>
@@ -41,15 +41,15 @@ TEST_CASE("Data-referenced frameless entries with unmodeled instructions stay ca
     std::ofstream config(work.dir / "test.toml");
     config << "project_name='adjacent_entry'\nfile_path='test.xex'\nout_directory_path='out'\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    const auto& graph = pipeline->context().graph;
-    CHECK(graph.isEntryPoint(second) == (variant == 0));
+    const auto& graph = pipeline->GetContext().graph;
+    CHECK(graph.IsEntryPoint(second) == (variant == 0));
     if (variant == 0) {
-      const auto* adjust = graph.getFunction(first);
+      const auto* adjust = graph.GetFunction(first);
       REQUIRE(adjust);
-      CHECK_FALSE(adjust->containsAddress(second));
+      CHECK_FALSE(adjust->ContainsAddress(second));
     }
     REQUIRE(pipeline->RunWrite().has_value());
     std::ifstream init(work.dir / "out" / "adjacent_entry_init.cpp");

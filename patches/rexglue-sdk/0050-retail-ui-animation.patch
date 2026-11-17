@@ -1,17 +1,40 @@
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 5272679..5692ee3 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -556,7 +556,11 @@ REX_EXPORT_STUB(__imp__XamIsDvrRecording);
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -460,6 +460,9 @@
+ 
+ // Original retail console mode has no data-center flag.
+ u32 XamIsDataCenterMode_entry() { return 0; }
++
++// Original retail 17559 returns false; r3 must never leak from the caller.
++u32 XamIsNuiAutomationEnabled_entry() { return 0; }
+ 
+ }  // namespace xam
+ }  // namespace rex
+@@ -506,3 +509,5 @@
+ REX_XAM_BODY(__imp__XMemFree, rex::xam::XMemFree_entry)
+ 
+ REX_XAM_BODY(__imp__XamIsDataCenterMode, rex::xam::XamIsDataCenterMode_entry)
++
++REX_XAM_BODY(__imp__XamIsNuiAutomationEnabled, rex::xam::XamIsNuiAutomationEnabled_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -506,7 +506,7 @@
  REX_EXPORT_STUB(__imp__XamIsIptvEnabled);
  REX_EXPORT_STUB(__imp__XamIsNatalPlaybackEnabled);
  REX_EXPORT_STUB(__imp__XamIsNetworkCaptivePortal);
 -REX_EXPORT_STUB(__imp__XamIsNuiAutomationEnabled);
-+extern "C" REX_FUNC(__imp__XamIsNuiAutomationEnabled) {
-+  // Retail 17559 81964638 returns false (li r3,0; blr). Leaking r3 makes the dashboard
-+  // skip its normal animation/input updates (92776D70 / 927727F8).
-+  ctx.r3.u64 = 0;
-+}
++
  REX_EXPORT_STUB(__imp__XamIsOnPrivateNetwork);
  REX_EXPORT_STUB(__imp__XamIsOptionalMediaUpdateInstalled);
  REX_EXPORT_STUB(__imp__XamIsScreenSaverActive);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -320,3 +320,5 @@
+ REX_XAM_FORWARD(__imp__XGetOverlappedResult)
+ 
+ REX_XAM_FORWARD(__imp__XamIsDataCenterMode)
++
++REX_XAM_FORWARD(__imp__XamIsNuiAutomationEnabled)

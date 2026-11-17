@@ -47,10 +47,10 @@ ProbeResult RunProbe(const Workdir& w, const std::wstring& extra_args, const fs:
   x360n::ProcessSpec spec;
   spec.exe = probe; spec.working_dir = w.dir;
   spec.stdout_file = w.dir / "stdout.log"; spec.stderr_file = w.dir / "stderr.log";
-  spec.timeout = std::chrono::seconds(60); spec.capture_crash = extra_args.find(L"--parent_window=") != std::wstring::npos;
-  spec.args = {"--game_data_root=" + (game.empty() ? w.dir / "game" : game).string(),
-               "--user_data_root=" + (w.dir / "user").string(),
-               "--log_file=" + log.string(), "--log_level=debug"};
+  spec.timeout = std::chrono::seconds(60); spec.capture_crash = extra_args.find(L"--ui.sdl.parent_window=") != std::wstring::npos;
+  spec.args = {"--title.game_root=" + (game.empty() ? w.dir / "game" : game).string(),
+               "--app.user_root=" + (w.dir / "user").string(),
+               "--app.log_root=" + w.dir.string(), "--log.file_name=" + log.string(), "--log.level=debug", "--ui.fullscreen=false", "--app.config_file="};
   std::wistringstream extras(extra_args);
   for (std::wstring arg; extras >> arg;) spec.args.emplace_back(arg.begin(), arg.end());
   const auto child = x360n::RunProcess(spec);
@@ -87,7 +87,7 @@ TEST_CASE("ReXApp shuts down cleanly when the guest returns after a successful s
   PrepareGameRoot(w);
 
   SECTION("without a GPU plugin (window and input)") {
-    const auto r = RunProbe(w, L"");
+    const auto r = RunProbe(w, L"--gpu.driver=none");
     INFO("exit code 0x" << std::hex << r.exit_code);
     REQUIRE(r.finished);
     CHECK(Contains(r.log, "Execution complete"));  // the guest entry point ran and returned
@@ -96,7 +96,7 @@ TEST_CASE("ReXApp shuts down cleanly when the guest returns after a successful s
   }
 
   SECTION("with the xenos GPU plugin (D3D12 device, presenter, drawers)") {
-    const auto r = RunProbe(w, L"--gpu_plugin=xenos");
+    const auto r = RunProbe(w, L"--gpu.driver=d3d12");
     INFO("exit code 0x" << std::hex << r.exit_code);
     REQUIRE(r.finished);
     CHECK(Contains(r.log, "Execution complete"));
@@ -108,7 +108,7 @@ TEST_CASE("ReXApp shuts down cleanly when the guest returns after a successful s
 TEST_CASE("ReXApp shuts down cleanly after a failed Runtime::Setup", "[sdk][app]") {
   Workdir w("x360n_app_shutdown_test", "setup_failure");
   PrepareGameRoot(w);
-  const auto r = RunProbe(w, L"--gpu_plugin=xenos --x360n_probe_fail_setup=true");
+  const auto r = RunProbe(w, L"--gpu.driver=d3d12 --x360n_probe_fail_setup=true");
   INFO("exit code 0x" << std::hex << r.exit_code);
   REQUIRE(r.finished);
   CHECK(Contains(r.log, "Runtime setup failed"));
@@ -122,7 +122,7 @@ TEST_CASE("title surfaces reuse a persistent host window across guest exits", "[
   for (unsigned i = 0; i < 2; ++i) {
     Workdir w("x360n_parent_window", std::to_string(i).c_str());
     PrepareGameRoot(w);
-    const auto r = RunProbe(w, L"--gpu_plugin=xenos --parent_window=" + std::to_wstring(handle));
+    const auto r = RunProbe(w, L"--gpu.driver=d3d12 --ui.sdl.parent_window=" + std::to_wstring(handle));
     INFO(r.log);
     REQUIRE(r.finished);
     CHECK(r.exit_code == 0);
@@ -138,7 +138,7 @@ TEST_CASE("embedded SDL surface recognizes actual keyboard focus and releases it
   x360n::SessionWindow host;
   Workdir w("x360n_child_focus", "native");
   PrepareGameRoot(w);
-  const auto r = RunProbe(w, L"--x360n_probe_child_focus=true --parent_window=" +
+  const auto r = RunProbe(w, L"--x360n_probe_child_focus=true --ui.sdl.parent_window=" +
                             std::to_wstring(host.handle()));
   INFO(r.log);
   REQUIRE(r.finished);
@@ -165,7 +165,7 @@ TEST_CASE("ReXApp starts a guest whose game root is beyond MAX_PATH", "[sdk][app
   const auto xex = BuildXex({}, &placed, 0, Entry::kReturnZero);
   std::ofstream(host(game / "default.xex"), std::ios::binary)
       .write(reinterpret_cast<const char*>(xex.data()), std::streamsize(xex.size()));
-  const auto r = RunProbe(w, L"", game);
+  const auto r = RunProbe(w, L"--gpu.driver=none", game);
   std::error_code ec;
   fs::remove_all(host(w.dir / std::string(40, 'g')), ec);
   INFO(r.log);

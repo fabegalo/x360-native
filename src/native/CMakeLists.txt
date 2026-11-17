@@ -2,32 +2,42 @@
 # The command processor, guest memory, textures and pipeline workers are
 # common; D3D12 is built on Windows and Vulkan wherever the SDK enables it, so
 # the Vulkan backend can be developed on Linux and macOS too.
-set(_gpu ${X360_REXGLUE_DIR}/src/graphics)
+set(_gpu ${X360_REXGLUE_DIR}/src/gpu/xenos)
 add_library(rexgpu-native SHARED quality/settings.cpp quality/cadence.cpp commands/plugin.cpp commands/command_processor.cpp commands/packet_guard.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp
+    ${_gpu}/command_processor.cpp
     pipeline/pipeline_workers.cpp
     capture/capture_format.cpp capture/capture_backend.cpp
     # EDRAM format semantics shared by both backends (despite its directory).
     d3d12/edram_format.cpp
-    ${_gpu}/graphics_system.cpp ${_gpu}/command_processor.cpp
-    ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${_gpu}/util/draw.cpp
-    ${_gpu}/pipeline/shader/shader.cpp ${_gpu}/format/ucode.cpp
-    ${_gpu}/pipeline/shader/translator.cpp ${_gpu}/pipeline/shader/translator_disasm.cpp)
+)
 if(WIN32)
   target_sources(rexgpu-native PRIVATE d3d12/d3d12_scanout.cpp
       pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp d3d12/d3d12_hybrid.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp d3d12/d3d12_scaled.cpp
       ${_gpu}/pipeline/shader/dxbc.cpp ${_gpu}/pipeline/shader/dxbc_translator.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_alu.cpp ${_gpu}/pipeline/shader/dxbc_translator_fetch.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_memexport.cpp ${_gpu}/pipeline/shader/dxbc_translator_om.cpp
+      ${_gpu}/host/d3d12/d3d12_cpu_descriptor_pool.cpp
+      ${_gpu}/host/d3d12/d3d12_descriptor_heap_pool.cpp
+      ${_gpu}/host/d3d12/d3d12_immediate_drawer.cpp
+      ${_gpu}/host/d3d12/d3d12_presenter.cpp
+      ${_gpu}/host/d3d12/d3d12_provider.cpp
+      ${_gpu}/host/d3d12/d3d12_submission_tracker.cpp
+      ${_gpu}/host/d3d12/d3d12_upload_buffer_pool.cpp
+      ${_gpu}/host/d3d12/d3d12_objects.cpp
       ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
   target_compile_definitions(rexgpu-native PRIVATE X360N_NATIVE_D3D12=1)
-  target_link_libraries(rexgpu-native PRIVATE d3d12 dxgi dxguid d3dcompiler)
+  target_link_libraries(rexgpu-native PRIVATE d3d12 dxgi dxguid d3dcompiler dxc-headers)
   file(READ ${CMAKE_CURRENT_SOURCE_DIR}/shaders/scanout.hlsl NATIVE_SCANOUT_HLSL)
   configure_file(shaders/scanout_source.h.in scanout_source.h @ONLY)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/scanout.hlsl)
 elseif(NOT REXGLUE_USE_VULKAN)
   message(FATAL_ERROR "The Native renderer requires Vulkan outside Windows (REXGLUE_USE_VULKAN)")
 endif()
-target_link_libraries(rexgpu-native PRIVATE rexruntime xxHash::xxhash)
+target_link_libraries(rexgpu-native PRIVATE ${X360N_SDK_LIBRARIES} rexgpu-xenos-base xxHash::xxhash)
+rexglue_link_host_allocator(rexgpu-native)
+target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR}/src)
+target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR}/thirdparty/dxc/include)
+target_compile_definitions(rexgpu-native PRIVATE REX_GPU_XENOS_STATIC)
 target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR})
 set_target_properties(rexgpu-native PROPERTIES DEBUG_POSTFIX d RELWITHDEBINFO_POSTFIX rd)
 target_compile_options(rexgpu-native PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -52,14 +62,29 @@ if(REXGLUE_USE_VULKAN)
       ${_gpu}/pipeline/shader/spirv_translator.cpp ${_gpu}/pipeline/shader/spirv_translator_alu.cpp
       ${_gpu}/pipeline/shader/spirv_translator_fetch.cpp ${_gpu}/pipeline/shader/spirv_translator_memexport.cpp
       ${_gpu}/pipeline/shader/spirv_translator_rb.cpp)
-  target_link_libraries(rexgpu-native PRIVATE ${_native_vulkan_libraries})
+  target_sources(rexgpu-native PRIVATE
+      ${_gpu}/host/vulkan/linked_type_descriptor_set_allocator.cpp
+      ${_gpu}/host/vulkan/vulkan_moltenvk.cpp
+      ${_gpu}/host/vulkan/single_layout_descriptor_set_pool.cpp
+      ${_gpu}/host/vulkan/ui_sampler.cpp
+      ${_gpu}/host/vulkan/vulkan_device.cpp
+      ${_gpu}/host/vulkan/vulkan_immediate_drawer.cpp
+      ${_gpu}/host/vulkan/vulkan_instance.cpp
+      ${_gpu}/host/vulkan/vulkan_mem_alloc.cpp
+      ${_gpu}/host/vulkan/vulkan_presenter.cpp
+      ${_gpu}/host/vulkan/vulkan_provider.cpp
+      ${_gpu}/host/vulkan/vulkan_submission_tracker.cpp
+      ${_gpu}/host/vulkan/vulkan_upload_buffer_pool.cpp
+      ${_gpu}/host/vulkan/vulkan_objects.cpp)
+  target_link_libraries(rexgpu-native PRIVATE ${_native_vulkan_libraries} rex-vma)
 endif()
 # Cold pipelines: N draws with distinct shaders in one submission; verifies
 # every export. Also a benchmark (tests/native/probe_pairs.py --probe pipeline).
 function(x360n_native_pipeline_probe api)
   if(NOT TARGET x360n_native_pipeline_probe)
     add_executable(x360n_native_pipeline_probe ../../tests/native/pipeline_probe.cpp)
-    target_link_libraries(x360n_native_pipeline_probe PRIVATE rexruntime)
+    target_link_libraries(x360n_native_pipeline_probe PRIVATE ${X360N_SDK_LIBRARIES})
+    target_include_directories(x360n_native_pipeline_probe PRIVATE ${X360_REXGLUE_DIR}/src)
     x360n_stage_runtime_dlls(x360n_native_pipeline_probe PLUGIN_TARGETS rexgpu-native)
   endif()
   add_test(NAME native.pipeline-cold-${api} COMMAND x360n_native_pipeline_probe
@@ -81,11 +106,15 @@ target_compile_definitions(x360n_native_replay PRIVATE ${_native_replay_defines}
 target_link_libraries(x360n_native_replay PRIVATE ${_native_replay_libraries})
 x360n_stage_runtime_dlls(x360n_native_replay)
 add_executable(x360n_native_frame_probe ../../tests/native/frame_probe.cpp capture/capture_format.cpp)
-target_link_libraries(x360n_native_frame_probe PRIVATE rexruntime xxHash::xxhash)
+target_link_libraries(x360n_native_frame_probe PRIVATE ${X360N_SDK_LIBRARIES} xxHash::xxhash)
+target_include_directories(x360n_native_frame_probe PRIVATE "${X360_REXGLUE_DIR}/src")
+target_compile_definitions(x360n_native_frame_probe PRIVATE REX_GPU_XENOS_STATIC)
 set(_native_contract_plugins rexgpu-native)
-if(TARGET rexgpu-xenos)
-  list(APPEND _native_contract_plugins rexgpu-xenos)
-endif()
+foreach(api d3d12 vulkan)
+  if(TARGET rexgpu-xenos-${api})
+    list(APPEND _native_contract_plugins rexgpu-xenos-${api})
+  endif()
+endforeach()
 x360n_stage_runtime_dlls(x360n_native_frame_probe PLUGIN_TARGETS ${_native_contract_plugins})
 function(x360n_native_capture_replay api)
   add_test(NAME native.capture-replay-${api} COMMAND ${CMAKE_COMMAND}
@@ -102,7 +131,7 @@ function(x360n_edram_capacity api)
   add_test(NAME native.edram-capacity-${api} COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/edram-capacity
-      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos>
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos-${api}>
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/edram_capacity.cmake)
   set_tests_properties(native.edram-capacity-${api} PROPERTIES LABELS project TIMEOUT 600 RUN_SERIAL TRUE)
   if(api STREQUAL "d3d12")
@@ -112,7 +141,7 @@ function(x360n_edram_capacity api)
 endfunction()
 function(x360n_scalar_precision api)
   set(backends native)
-  if(TARGET rexgpu-xenos)
+  if(TARGET rexgpu-xenos-${api})
     list(APPEND backends xenos)
   endif()
   foreach(backend IN LISTS backends)
@@ -136,13 +165,13 @@ function(x360n_minmax_blend api)
   add_test(NAME ${name} COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/minmax-blend-${api}
-      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos> -DMINMAX_BLEND=ON
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos-${api}> -DMINMAX_BLEND=ON
       -P ${CMAKE_SOURCE_DIR}/tests/native/edram_capacity.cmake)
   set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 240 RUN_SERIAL TRUE
       SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
 endfunction()
 function(x360n_texture_fetch api)
-  if(TARGET rexgpu-xenos)
+  if(TARGET rexgpu-xenos-${api})
     set(name native.scaled-3d-texture-${api})
     add_test(NAME ${name} COMMAND x360n_native_memexport_probe
         ${CMAKE_CURRENT_BINARY_DIR}/texture-fetch ${api} --scaled-3d --xenos)
@@ -153,7 +182,7 @@ function(x360n_texture_fetch api)
     list(APPEND modes legacy-unorm8)
   endif()
   set(backends native)
-  if(TARGET rexgpu-xenos)
+  if(TARGET rexgpu-xenos-${api})
     list(APPEND backends xenos)
   endif()
   foreach(backend IN LISTS backends)
@@ -179,7 +208,7 @@ function(x360n_vertex_aliases api)
   add_test(NAME ${name} COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vertex-aliases-${api}
-      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos> -DVERTEX_ALIASES=ON
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos-${api}> -DVERTEX_ALIASES=ON
       -P ${CMAKE_SOURCE_DIR}/tests/native/edram_capacity.cmake)
   set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 240 RUN_SERIAL TRUE
       SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
@@ -189,12 +218,12 @@ function(x360n_depth_bias api)
   add_test(NAME ${name} COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/depth-bias-${api}
-      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos>
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos-${api}>
       -P ${CMAKE_SOURCE_DIR}/tests/native/depth_bias.cmake)
   set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 900 RUN_SERIAL TRUE)
 endfunction()
 function(x360n_depth_alias api)
-  if(NOT TARGET rexgpu-xenos)
+  if(NOT TARGET rexgpu-xenos-${api})
     return()
   endif()
   if(api STREQUAL "d3d12")
@@ -219,7 +248,7 @@ if(WIN32)
   x360n_vertex_aliases(d3d12)
   x360n_depth_bias(d3d12)
   x360n_depth_alias(d3d12)
-  if(TARGET rexgpu-xenos)
+  if(TARGET rexgpu-xenos-d3d12)
     foreach(capacity standard extended)
       set(cache_test native.pipeline-cache-d3d12)
       if(capacity STREQUAL "extended")
@@ -250,23 +279,31 @@ if(NOT WIN32)
   # Headless Vulkan components; the remaining probes use D3D12/DXGI and Win32.
   if(REXGLUE_USE_VULKAN)
     add_executable(x360n_native_vulkan_probe ../../tests/native/vulkan_probe.cpp
+        quality/settings.cpp pipeline/pipeline_workers.cpp
         vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp)
     target_include_directories(x360n_native_vulkan_probe PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-    target_link_libraries(x360n_native_vulkan_probe PRIVATE rexruntime ${_native_vulkan_libraries})
+    target_link_libraries(x360n_native_vulkan_probe PRIVATE ${X360N_SDK_LIBRARIES} ${_native_vulkan_libraries})
+  target_include_directories(x360n_native_vulkan_probe PRIVATE ${X360_REXGLUE_DIR}/src)
+  get_target_property(_probe_vk_host rexgpu-native SOURCES)
+  list(FILTER _probe_vk_host INCLUDE REGEX "/host/vulkan/")
+  target_sources(x360n_native_vulkan_probe PRIVATE ${_probe_vk_host}
+      ${_gpu}/null/null_xenos_graphics_driver.cpp ${_gpu}/null/null_command_processor.cpp)
+  target_compile_definitions(x360n_native_vulkan_probe PRIVATE REX_GPU_XENOS_STATIC)
+  target_link_libraries(x360n_native_vulkan_probe PRIVATE rexcodegen rexgpu-xenos-base rex-vma)
     x360n_stage_runtime_dlls(x360n_native_vulkan_probe)
     add_test(NAME native.vulkan-components COMMAND x360n_native_vulkan_probe
         ${CMAKE_CURRENT_BINARY_DIR}/vulkan-components)
     set_tests_properties(native.vulkan-components PROPERTIES LABELS project TIMEOUT 60)
     # The same real-plugin contracts the Windows build runs for Vulkan.
     add_executable(x360n_native_memexport_probe ../../tests/native/memexport_probe.cpp memory/guest_memory_mirror.cpp)
-    target_link_libraries(x360n_native_memexport_probe PRIVATE rexruntime)
+    target_link_libraries(x360n_native_memexport_probe PRIVATE ${X360N_SDK_LIBRARIES})
     x360n_stage_runtime_dlls(x360n_native_memexport_probe PLUGIN_TARGETS ${_native_contract_plugins})
     add_test(NAME sdkcheck.Native-MEMEXPORT-vulkan COMMAND x360n_native_memexport_probe
         ${CMAKE_CURRENT_BINARY_DIR}/memexport-vulkan vulkan)
     set_tests_properties(sdkcheck.Native-MEMEXPORT-vulkan PROPERTIES LABELS project TIMEOUT 90)
     add_executable(x360n_native_occlusion_probe ../../tests/native/occlusion_probe.cpp)
-    target_link_libraries(x360n_native_occlusion_probe PRIVATE rexruntime)
+    target_link_libraries(x360n_native_occlusion_probe PRIVATE ${X360N_SDK_LIBRARIES})
     x360n_stage_runtime_dlls(x360n_native_occlusion_probe PLUGIN_TARGETS rexgpu-native)
     add_test(NAME sdkcheck.Native-FSI-sample-counts COMMAND x360n_native_occlusion_probe
         ${CMAKE_CURRENT_BINARY_DIR}/occlusion-probe-vulkan vulkan)
@@ -294,18 +331,24 @@ if(REXGLUE_USE_VULKAN)
   x360n_stage_runtime_dlls(x360n_native_perf_probe)
 endif()
 add_executable(x360n_native_probe ../../tests/native/probe.cpp)
+target_compile_definitions(x360n_native_probe PRIVATE REX_GPU_XENOS_STATIC
+    X360N_PROBE_HAS_VULKAN=$<BOOL:${REXGLUE_USE_VULKAN}>)
+if(REXGLUE_USE_VULKAN)
+  target_link_libraries(x360n_native_probe PRIVATE Vulkan::Headers)
+endif()
 # The probe includes the SDK's Vulkan provider, whose headers include renderdoc_app.h.
-target_include_directories(x360n_native_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-target_link_libraries(x360n_native_probe PRIVATE rexruntime windowscodecs ole32 d3d12)
+target_include_directories(x360n_native_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc ${X360_REXGLUE_DIR}/src)
+target_link_libraries(x360n_native_probe PRIVATE ${X360N_SDK_LIBRARIES} windowscodecs ole32 d3d12 dxc-headers)
+target_include_directories(x360n_native_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/dxc/include)
 x360n_stage_runtime_dlls(x360n_native_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
 add_executable(x360n_native_occlusion_probe ../../tests/native/occlusion_probe.cpp)
-target_link_libraries(x360n_native_occlusion_probe PRIVATE rexruntime d3d12)
+target_link_libraries(x360n_native_occlusion_probe PRIVATE ${X360N_SDK_LIBRARIES} d3d12)
 x360n_stage_runtime_dlls(x360n_native_occlusion_probe PLUGIN_TARGETS rexgpu-native)
 add_test(NAME sdkcheck.Native-ROV-sample-counts COMMAND x360n_native_occlusion_probe
     ${CMAKE_CURRENT_BINARY_DIR}/occlusion-probe)
 set_tests_properties(sdkcheck.Native-ROV-sample-counts PROPERTIES LABELS project TIMEOUT 60)
 add_executable(x360n_native_memexport_probe ../../tests/native/memexport_probe.cpp memory/guest_memory_mirror.cpp)
-target_link_libraries(x360n_native_memexport_probe PRIVATE rexruntime d3d12)
+target_link_libraries(x360n_native_memexport_probe PRIVATE ${X360N_SDK_LIBRARIES} d3d12)
 x360n_stage_runtime_dlls(x360n_native_memexport_probe PLUGIN_TARGETS ${_native_contract_plugins})
 add_test(NAME sdkcheck.Native-MEMEXPORT-d3d12 COMMAND x360n_native_memexport_probe
     ${CMAKE_CURRENT_BINARY_DIR}/memexport-d3d12 d3d12)
@@ -322,19 +365,27 @@ if(REXGLUE_USE_VULKAN)
       ${CMAKE_CURRENT_BINARY_DIR}/occlusion-probe-vulkan vulkan)
   set_tests_properties(sdkcheck.Native-FSI-sample-counts PROPERTIES LABELS project TIMEOUT 60)
   add_executable(x360n_native_vulkan_probe ../../tests/native/vulkan_probe.cpp
+        quality/settings.cpp pipeline/pipeline_workers.cpp
       vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp)
   target_include_directories(x360n_native_vulkan_probe PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_native_vulkan_probe PRIVATE rexruntime ${_native_vulkan_libraries})
+  target_link_libraries(x360n_native_vulkan_probe PRIVATE ${X360N_SDK_LIBRARIES} ${_native_vulkan_libraries})
+  target_include_directories(x360n_native_vulkan_probe PRIVATE ${X360_REXGLUE_DIR}/src)
+  get_target_property(_probe_vk_host rexgpu-native SOURCES)
+  list(FILTER _probe_vk_host INCLUDE REGEX "/host/vulkan/")
+  target_sources(x360n_native_vulkan_probe PRIVATE ${_probe_vk_host}
+      ${_gpu}/null/null_xenos_graphics_driver.cpp ${_gpu}/null/null_command_processor.cpp)
+  target_compile_definitions(x360n_native_vulkan_probe PRIVATE REX_GPU_XENOS_STATIC)
+  target_link_libraries(x360n_native_vulkan_probe PRIVATE rexcodegen rexgpu-xenos-base rex-vma)
   x360n_stage_runtime_dlls(x360n_native_vulkan_probe)
   add_test(NAME native.vulkan-components COMMAND x360n_native_vulkan_probe
       ${CMAKE_CURRENT_BINARY_DIR}/vulkan-components)
   set_tests_properties(native.vulkan-components PROPERTIES LABELS project TIMEOUT 60)
 endif()
 if(TARGET Catch2::Catch2WithMain)
-  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/cadence_test.cpp quality/cadence.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp ../../tests/native/scaled_resolve_test.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/cadence_test.cpp quality/cadence.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp ../../tests/native/scaled_resolve_test.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/draw_state.cpp ${X360_REXGLUE_DIR}/src/xenos/register_file.cpp ${X360_REXGLUE_DIR}/src/xenos/register.cpp ${_gpu}/xenos_settings.h ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
   target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
-  target_link_libraries(x360n_native_tests PRIVATE rexruntime Catch2::Catch2WithMain d3d12 d3dcompiler)
+  target_link_libraries(x360n_native_tests PRIVATE ${X360N_SDK_LIBRARIES} Catch2::Catch2WithMain d3d12 d3dcompiler)
   target_sources(x360n_native_tests PRIVATE ../../tests/native/pipeline_store_test.cpp pipeline/pipeline_store.cpp)
   target_sources(x360n_native_tests PRIVATE ../../tests/native/occlusion_test.cpp)
   target_sources(x360n_native_tests PRIVATE ../../tests/native/physical_write_test.cpp)
@@ -421,3 +472,9 @@ if(TARGET Catch2::Catch2WithMain)
     endif()
   endif()
 endif()
+
+foreach(_probe x360n_native_memexport_probe x360n_native_occlusion_probe)
+  if(TARGET ${_probe})
+    target_include_directories(${_probe} PRIVATE ${X360_REXGLUE_DIR}/src)
+  endif()
+endforeach()

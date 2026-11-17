@@ -1,0 +1,57 @@
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -47,6 +47,7 @@
+ class SystemUIState;
+ class UserProfile;
+ class IAchievementManager;
++class OfflineAchievementStore;
+ class IContentManager;
+ 
+ /** Kernel interfaces and values XAM reads for a title. Each outlives the title. */
+@@ -98,7 +99,7 @@
+   virtual void DetachTitle() = 0;
+ };
+ 
+-REX_DECLARE_INTERFACE(IXAMTitleServices, 10)
++REX_DECLARE_INTERFACE(IXAMTitleServices, 11)
+   virtual ~IXAMTitleServices() = default;
+ 
+   /**
+@@ -115,6 +116,11 @@
+    * @return The manager, valid between AttachTitle and DetachTitle.
+    */
+   [[nodiscard]] virtual IAchievementManager& GetAchievementManager() = 0;
++  /** Original per-account, per-title ledger, shared with guest XAM writes and the original UI.
++   * Valid only between AttachTitle and DetachTitle; this creates no separate store.
++   */
++  [[nodiscard]] virtual OfflineAchievementStore& GetOfflineAchievements() = 0;
++
+   /** Imports only the original executable resource into the per-XUID ledger catalog. */
+   [[nodiscard]] virtual Result<void> ImportOriginalAchievements() = 0;
+ 
+diff --git a/src/xam/xam_title_lifecycle.h b/src/xam/xam_title_lifecycle.h
+--- a/src/xam/xam_title_lifecycle.h
++++ b/src/xam/xam_title_lifecycle.h
+@@ -37,6 +37,7 @@
+   [[nodiscard]] UserProfile& GetUserProfile() override;
+   [[nodiscard]] XAMLoaderState& GetLoaderState() override;
+   [[nodiscard]] IAchievementManager& GetAchievementManager() override;
++  [[nodiscard]] OfflineAchievementStore& GetOfflineAchievements() override;
+   [[nodiscard]] Result<void> ImportOriginalAchievements() override;
+   [[nodiscard]] u32 GetTitleID() const override;
+   [[nodiscard]] std::unique_ptr<filesystem::IXDBFTitleData> GetTitleXDBF() const override;
+diff --git a/src/xam/xam_title_lifecycle.cpp b/src/xam/xam_title_lifecycle.cpp
+--- a/src/xam/xam_title_lifecycle.cpp
++++ b/src/xam/xam_title_lifecycle.cpp
+@@ -55,6 +55,10 @@
+ SystemUIState& XAMTitleLifecycle::GetSystemUI() { return state_->GetSystemUI(); }
+ UserProfile& XAMTitleLifecycle::GetUserProfile() { return state_->GetUserProfile(); }
+ XAMLoaderState& XAMTitleLifecycle::GetLoaderState() { return state_->GetLoaderState(); }
++OfflineAchievementStore& XAMTitleLifecycle::GetOfflineAchievements() {
++  return state_->GetOfflineAchievements();
++}
++
+ 
+ IContentManager& XAMTitleLifecycle::GetContentManager() {
+   return state_->GetContentManager();

@@ -1,8 +1,10 @@
 // Headless contracts for the Native-owned Vulkan components. This does not
 // launch a guest, certify gameplay, or make Native/Vulkan available in the UI.
 #include "vulkan/vulkan_scanout.h"
-#include <rex/graphics/pipeline/texture/util.h>
-#include <rex/logging.h>
+#include <rex/xenos/texture.h>
+#include "codegen/tool_runtime.h"
+#include "gpu/xenos/null/null_xenos_graphics_driver.h"
+#include <rex/gpu/graphics_system.h>
 #include <rex/math.h>
 #include <algorithm>
 #include <array>
@@ -14,12 +16,13 @@
 #include <vector>
 
 using namespace x360n::native;
-using namespace rex::graphics;
+namespace texture_util=rex::xenos;
+namespace xenos = rex::xenos;
 namespace {
 void Require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
-void CheckSubmissionCopies(const rex::ui::vulkan::VulkanDevice& device) {
+void CheckSubmissionCopies(const rex::gpu::vulkan::VulkanDevice& device) {
   VulkanSubmissionRing submissions(device);
   struct Result { std::shared_ptr<VulkanBuffer> bytes; uint64_t serial; uint32_t seed; };
   std::vector<Result> results;
@@ -31,7 +34,7 @@ void CheckSubmissionCopies(const rex::ui::vulkan::VulkanDevice& device) {
     for (uint32_t i = 0; i < 4096; ++i) upload->mapped()[i] = std::byte((i * 17 + seed * 71) & 255);
     upload->Flush(0, 4096);
     auto commands = submissions.Begin();
-    const auto& fn = device.functions();
+    const auto& fn = device.GetFunctions();
     const VkBufferCopy copy{0, 0, 4096};
     fn.vkCmdCopyBuffer(commands, upload->handle(), resident->handle(), 1, &copy);
     VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
@@ -67,7 +70,7 @@ uint32_t ByteOffset(const ScanoutTexture& t, uint32_t x, uint32_t y) {
   return t.tiled ? texture_util::GetTiledOffset2D(x, y, t.pitch, 2) : (y * t.pitch + x) * 4;
 }
 void Store(std::vector<uint8_t>& pixels, const ScanoutTexture& t, uint32_t x, uint32_t y, uint32_t value) {
-  value = xenos::GpuSwap(value, xenos::Endian(t.endian));
+  value = xenos::GPUSwap(value, xenos::Endian(t.endian));
   const auto offset = ByteOffset(t, x, y);
   Require(uint64_t(offset) + 4 <= pixels.size(), "scanout test allocation");
   std::memcpy(pixels.data() + offset, &value, sizeof(value));
@@ -79,8 +82,8 @@ std::array<uint32_t, 4> Color(uint32_t x, uint32_t y, uint32_t frame, bool rgb10
 }
 constexpr unsigned kOverlayColors[4][4]{{255, 255, 255, 0}, {255, 0, 0, 255},
                                       {0, 255, 0, 128}, {0, 0, 255, 255}};
-void CheckScanout(rex::ui::vulkan::VulkanProvider& provider) {
-  auto presenter = provider.CreatePresenter();
+void CheckScanout(rex::gpu::vulkan::VulkanProvider& provider,const rex::gpu::XenosGraphicsDriverBase& driver) {
+  auto presenter = provider.CreatePresenter(driver);
   Require(bool(presenter), "Native Vulkan headless presenter creation");
   VulkanScanout scanout(provider);
   uint64_t checked = 0;
@@ -120,7 +123,7 @@ void CheckScanout(rex::ui::vulkan::VulkanProvider& provider) {
     const bool composed = frame % 3 != 0;
     scanout.Present(*presenter, t, pixels.data(), lut.data(), composed ? &overlay : nullptr,
                     composed ? plane.data() : nullptr);
-    rex::ui::RawImage capture;
+    rex::gpu::RawImage capture;
     Require(presenter->CaptureGuestOutput(capture), "Native Vulkan scanout capture");
     Require(capture.width == t.width && capture.height == t.height, "Native Vulkan scanout resize");
     const uint32_t full = rgb10 ? 1023 : 255;
@@ -138,7 +141,7 @@ void CheckScanout(rex::ui::vulkan::VulkanProvider& provider) {
             const float alpha = float(plane_color[3]) / 255.0f;
             value = value * (1.0f - alpha) + (float(plane_color[c]) / 255.0f) * alpha;
           }
-          value = rex::xenos_half_to_float(rex::float_to_xenos_half(value, true, true), true);
+          value = rex::xenos::HalfToFloat(rex::xenos::FloatToHalf(value, true, true), true);
           index = uint32_t(value * full + 0.5f);
         }
         double normalized;
@@ -168,17 +171,22 @@ int main(int argc, char** argv) {
   try {
     const std::filesystem::path output = argc > 1 ? argv[1] : ".";
     std::filesystem::create_directories(output);
-    rex::InitLogging((output / "native-vulkan-components.log").string().c_str());
-    auto provider = rex::ui::vulkan::VulkanProvider::Create(true, true);
+    rex::codegen::ToolApp app("native_vulkan_probe",output);
+    Require(bool(app.Start()),"diagnostic host initialization");
+    rex::gpu::XenosGraphicsDriverBase::SetGraphicsSettings(&app.GetGraphics().GetSettings());
+    rex::ScopeGuard reset_settings([] {rex::gpu::XenosGraphicsDriverBase::SetGraphicsSettings(nullptr);});
+    // The official null fixture supplies presenter settings; it runs no PM4 or title.
+    rex::gpu::null::NullXenosGraphicsDriver driver;
+    rex::gpu::vulkan::VulkanSettings settings;
+    auto provider = rex::gpu::vulkan::VulkanProvider::Create(true,true,-1,settings);
     Require(bool(provider), "Native Vulkan provider unavailable");
-    const auto& capabilities = provider->vulkan_device()->properties();
+    const auto& capabilities = provider->GetVulkanDevice()->GetProperties();
     std::cout << "Native Vulkan device=" << capabilities.deviceName
               << " sample_interlock=" << capabilities.fragmentShaderSampleInterlock
               << " vertex_storage=" << capabilities.vertexPipelineStoresAndAtomics
               << " fragment_storage=" << capabilities.fragmentStoresAndAtomics << '\n';
-    CheckSubmissionCopies(*provider->vulkan_device());
-    CheckScanout(*provider);
-    rex::FlushLogging();
+    CheckSubmissionCopies(*provider->GetVulkanDevice());
+    CheckScanout(*provider,driver);
     std::cout << "PASS Native Vulkan components: 12 fence-governed buffer roundtrips; no guest execution or FPS claim\n";
     return 0;
   } catch (const std::exception& error) {

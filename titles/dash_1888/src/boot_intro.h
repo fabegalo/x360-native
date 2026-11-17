@@ -1,6 +1,6 @@
 #pragma once
-namespace rex { class Runtime; }
+namespace rex::kernel { class TitleRuntime; }
 namespace dash1888 {
-void InstallBootIntro(rex::Runtime& runtime);
+void InstallBootIntro(rex::kernel::TitleRuntime& runtime);
 bool BootIntroRunning();
 }

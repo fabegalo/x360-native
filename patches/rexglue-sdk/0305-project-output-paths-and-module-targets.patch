@@ -1,0 +1,90 @@
+diff --git a/cmake/rexglue_project.cmake b/cmake/rexglue_project.cmake
+--- a/cmake/rexglue_project.cmake
++++ b/cmake/rexglue_project.cmake
+@@ -1,5 +1,5 @@
+ # rexglue_project.cmake
+-#   rexglue_project(<name> [OUTPUT_DIR <dir>]) - connects a project's build to codegen
++#   rexglue_project(<name> [OUTPUT_DIR <dir>] [MODULE_TARGETS <file>]) - connects a project's build to codegen
+ #   rexglue_setup_host_library(<library>) - SDK settings, includes and codegen dependency
+ #   rexglue_setup_target(<target> [NO_COPY] [EXCLUDE <name>...]) - the project's host executable
+ #   rexglue_apply_recomp_settings(<target> <pch>) - recompiler options for a generated library
+@@ -34,26 +34,36 @@
+   endif ()
+ endfunction ()
+ 
+-# rexglue_project(<name> [OUTPUT_DIR <dir>])
++# rexglue_project(<name> [OUTPUT_DIR <dir>] [MODULE_TARGETS <file>])
+ # Sets up a project: the REXGLUE_HOST_TARGET default, the REXGLUE_RECOMP_MAX_FILE_SIZE setting, the
+ # recompiler options, the generated sources and the <name>_codegen target. <name> is the name of the
+ # project's manifest, <name>_manifest.toml. OUTPUT_DIR is the codegen output folder, relative to the
+-# current source folder, and defaults to generated. A macro, so that the variables below, and the
++# current source folder, and defaults to generated. Absolute output paths are supported.
++# MODULE_TARGETS selects an existing custom module-target inventory; codegen and registration
++# remain SDK-owned. The default is the generated dll_targets.cmake. A macro, so that the variables below, and the
+ # ones sources.cmake and dll_targets.cmake set, stay visible to the caller:
+ # REXGLUE_ENTRYPOINT_GENERATED_SOURCES, REXGLUE_ENTRYPOINT_PREFIX, REXGLUE_ENTRYPOINT_INCLUDE_DIR,
+ # REXGLUE_RECOMP_OPTIONS and REXGLUE_RECOMP_OPTIMIZED.
+ macro (rexglue_project name)
+-  cmake_parse_arguments(_rexglue_project "" "OUTPUT_DIR" "" ${ARGN})
++  cmake_parse_arguments(_rexglue_project "" "OUTPUT_DIR;MODULE_TARGETS" "" ${ARGN})
+   if (_rexglue_project_UNPARSED_ARGUMENTS OR _rexglue_project_KEYWORDS_MISSING_VALUES)
+     message(
+       FATAL_ERROR
+-        "rexglue_project: expected rexglue_project(<name> [OUTPUT_DIR <dir>]), got extra or "
++        "rexglue_project: expected rexglue_project(<name> [OUTPUT_DIR <dir>] [MODULE_TARGETS <file>]), got extra or "
+         "incomplete arguments: ${_rexglue_project_UNPARSED_ARGUMENTS} "
+         "${_rexglue_project_KEYWORDS_MISSING_VALUES}"
+     )
+   endif ()
+   if (NOT _rexglue_project_OUTPUT_DIR)
+     set(_rexglue_project_OUTPUT_DIR generated)
++  endif ()
++  get_filename_component(_rexglue_project_output "${_rexglue_project_OUTPUT_DIR}" ABSOLUTE
++                         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
++  if (_rexglue_project_MODULE_TARGETS)
++    get_filename_component(_rexglue_project_modules "${_rexglue_project_MODULE_TARGETS}" ABSOLUTE
++                           BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
++  else ()
++    set(_rexglue_project_modules "${_rexglue_project_output}/dll_targets.cmake")
+   endif ()
+   set_property(GLOBAL PROPERTY REXGLUE_PROJECT_NAME "${name}")
+ 
+@@ -76,11 +86,11 @@
+   rexglue_recomp_options(REXGLUE_RECOMP_OPTIONS REXGLUE_RECOMP_OPTIMIZED)
+ 
+   # Include entrypoint generated code if codegen has been run.
+-  if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}/sources.cmake")
+-    include("${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}/sources.cmake")
++  if (EXISTS "${_rexglue_project_output}/sources.cmake")
++    include("${_rexglue_project_output}/sources.cmake")
+     set(REXGLUE_ENTRYPOINT_GENERATED_SOURCES ${GENERATED_SOURCES})
+     set(REXGLUE_ENTRYPOINT_PREFIX ${GENERATED_PREFIX})
+-    set(REXGLUE_ENTRYPOINT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}")
++    set(REXGLUE_ENTRYPOINT_INCLUDE_DIR "${_rexglue_project_output}")
+ 
+     # Carried on the sources so they hold for whichever target compiles them.
+     set_source_files_properties(
+@@ -101,17 +111,20 @@
+   rexglue_add_codegen(
+     ${name}_codegen
+     MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/${name}_manifest.toml"
+-    OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}"
++    OUTPUT_DIR "${_rexglue_project_output}"
+     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+     TOOL $<TARGET_FILE:rex::rexglue> ${_rexglue_codegen_max_file_size}
+     SOURCES ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+   )
+ 
+   # Include DLL module shared library targets if codegen has generated them
+-  if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}/dll_targets.cmake")
+-    include("${CMAKE_CURRENT_SOURCE_DIR}/${_rexglue_project_OUTPUT_DIR}/dll_targets.cmake")
++  if (EXISTS "${_rexglue_project_modules}")
++    include("${_rexglue_project_modules}")
+   endif ()
+ 
++  unset(_rexglue_project_output)
++  unset(_rexglue_project_modules)
++  unset(_rexglue_project_MODULE_TARGETS)
+   unset(_rexglue_project_OUTPUT_DIR)
+   unset(_rexglue_project_UNPARSED_ARGUMENTS)
+   unset(_rexglue_project_KEYWORDS_MISSING_VALUES)

@@ -1,28 +1,30 @@
 #pragma once
 #include "vulkan_core.h"
-#include <rex/graphics/pipeline/shader/spirv.h>
+#include <gpu/xenos/pipeline/shader/spirv.h>
 #include <unordered_map>
+#include <gpu/xenos/xenos_settings.h>
 
 namespace x360n::native {
 // Shares guest instruction semantics only. Translation ownership, module
 // lifetime and cache identity belong to Native, independently of Xenos.
 class VulkanShaderCache {
+  const rex::gpu::XenosSettings& settings_;
  public:
-  explicit VulkanShaderCache(const rex::ui::vulkan::VulkanDevice&, bool edram_interlock, uint32_t scale_x = 1, uint32_t scale_y = 1, uint32_t edram_tile_count = rex::graphics::xenos::kEdramTileCount);
+  explicit VulkanShaderCache(const rex::gpu::XenosSettings&, const rex::gpu::vulkan::VulkanDevice&, bool edram_interlock, uint32_t scale_x = 1, uint32_t scale_y = 1, uint32_t edram_tile_count = rex::xenos::kEDRAMTileCount);
   ~VulkanShaderCache();
   VulkanShaderCache(const VulkanShaderCache&) = delete;
   VulkanShaderCache& operator=(const VulkanShaderCache&) = delete;
-  rex::graphics::SpirvShader* Load(rex::graphics::xenos::ShaderType,
+  rex::gpu::SPIRVShader* Load(rex::xenos::ShaderType,
                                   const uint32_t* big_endian_words, uint32_t count);
   struct Translation {
-    rex::graphics::Shader::Translation* guest;
+    rex::gpu::Shader::Translation* guest;
     VkShaderModule module;
   };
-  Translation Translate(rex::graphics::SpirvShader&, rex::graphics::ShaderModificationKey modification);
-  rex::graphics::SpirvShaderTranslator translator;
+  Translation Translate(rex::gpu::SPIRVShader&, rex::gpu::ShaderModificationKey modification);
+  rex::gpu::SPIRVShaderTranslator translator;
  private:
-  const rex::ui::vulkan::VulkanDevice& device_;
-  std::unordered_multimap<uint64_t, std::unique_ptr<rex::graphics::SpirvShader>> shaders_;
-  std::unordered_map<rex::graphics::Shader::Translation*, VkShaderModule> modules_;
+  const rex::gpu::vulkan::VulkanDevice& device_;
+  std::unordered_multimap<uint64_t, std::unique_ptr<rex::gpu::SPIRVShader>> shaders_;
+  std::unordered_map<rex::gpu::Shader::Translation*, VkShaderModule> modules_;
 };
 }

@@ -1434,3 +1434,1623 @@ No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause licen
  *
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
+
+Original file headers from ReXGlue v0.11.0 a3e1d82678ca20d68d4837a8e9ee4652ff073745.
+
+--- cmake/rexglue_host_alloc_stub.cpp ---
+
+
+--- include/rex/assert.h ---
+/**
+ * @file        assert.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/assert.h (Ben Vanik, 2014).
+ */
+
+--- include/rex/bit.h ---
+/**
+ * @file        bit.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/bit_map.h and xenia/base/bit_range.h
+ *              (Ben Vanik, 2015-2019).
+ */
+
+--- include/rex/chrono.h ---
+/**
+ * @file        chrono.h
+ * @brief       Host and guest clocks over NT time
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/chrono.h and xenia/base/chrono_steady_cast.h
+ *              (Ben Vanik, 2022).
+ *
+ * @remarks     Derived from Xenia's xenia/base/clock.h (Ben Vanik, 2022).
+ */
+
+--- include/rex/chrono/frame_layout.h ---
+
+
+--- include/rex/chrono/frame_timing.h ---
+
+
+--- include/rex/cli.h ---
+/**
+ * @file        cli.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/console_command.h ---
+/**
+ * @file        console_command.h
+ * @brief       Console commands an owner registers
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/driver.h ---
+/**
+ * @file        driver.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/driver_context.h ---
+/**
+ * @file        driver_context.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/driver_module.h ---
+/**
+ * @file        driver_module.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/driver_registration.h ---
+/**
+ * @file        driver_registration.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/directory.h ---
+/**
+ * @file        filesystem/directory.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file.h ---
+/**
+ * @file        filesystem/file.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file_open.h ---
+/**
+ * @file        filesystem/file_open.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file_stat.h ---
+/**
+ * @file        filesystem/file_stat.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file_system.h ---
+/**
+ * @file        filesystem/file_system.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file_system_error.h ---
+/**
+ * @file        filesystem/file_system_error.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/file_system_factory.h ---
+/**
+ * @file        filesystem/file_system_factory.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/mount.h ---
+/**
+ * @file        filesystem/mount.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/filesystem/stfs.h ---
+/**
+ * @file        filesystem/stfs.h
+ * @brief       STFS and SVOD package layouts and container reader
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/stfs_xbox.h (Ben Vanik, 2021).
+ */
+
+--- include/rex/filesystem/xdbf.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2016 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @file        filesystem/xdbf.h
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- include/rex/filesystem/xex.h ---
+/**
+ * @file        filesystem/xex.h
+ * @brief       XEX image reader and PE image parsing
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's kernel/util/xex_module.cc (Ben Vanik, 2020).
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ * @remarks     Parts derived from Xenia (Ben Vanik, 2013).
+ */
+
+--- include/rex/hash.h ---
+/**
+ * @file        hash.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/hash.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/init.h ---
+/**
+ * @file        init.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/input_keys.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2021 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @file        input_keys.h
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/kernel/types/content.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @file        kernel/types/content.h
+ * @brief       Content package and language IDs
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- include/rex/kernel/types/status.h ---
+/**
+ * @file        kernel/types/status.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/kernel/types/xex.h ---
+/**
+ * @file        kernel/types/xex.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's kernel/util/xex_module.cc (Ben Vanik, 2020).
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ * @remarks     Parts derived from Xenia (Ben Vanik, 2013).
+ */
+
+--- include/rex/logging/log_category.h ---
+/**
+ * @file        logging/log_category.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/logging/logger.h ---
+/**
+ * @file        logging/logger.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/math.h ---
+/**
+ * @file        math.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/math.h (Ben Vanik, 2019).
+ */
+
+--- include/rex/memory.h ---
+/**
+ * @file        memory.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/memory/endian.h ---
+/**
+ * @file        memory/endian.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/memory.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/memory/host.h ---
+/**
+ * @file        memory/host.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/memory/mapped_ptr.h ---
+/**
+ * @file        memory/mapped_ptr.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     The guest address arithmetic is derived from Xenia's xenia/base/memory.h (Ben
+ *              Vanik, 2020).
+ */
+
+--- include/rex/memory/stream.h ---
+/**
+ * @file        memory/stream.h
+ * @brief       Bit, byte and ring buffer streams over memory
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/bit_stream.h, xenia/base/byte_stream.h and
+ *              xenia/base/ring_buffer.h (Ben Vanik, 2015-2020).
+ */
+
+--- include/rex/memory/virtual_memory.h ---
+/**
+ * @file        memory/virtual_memory.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/memory.h and xenia/base/mapped_memory.h (Ben
+ *              Vanik, 2020).
+ */
+
+--- include/rex/module.h ---
+/**
+ * @file        module.h
+ * @brief       Interfaces, factory and module declaration
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/path_settings.h ---
+/**
+ * @file        path_settings.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/platform.h ---
+/**
+ * @file        platform.h
+ * @brief       Platform flags, packing macros and export markers
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/platform.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/platform/dynlib.h ---
+/**
+ * @file        platform/dynlib.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/platform/exception_handler.h ---
+/**
+ * @file        platform/exception_handler.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/exception_handler.h (Ben Vanik, 2022).
+ */
+
+--- include/rex/platform/file.h ---
+/**
+ * @file        platform/file.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/platform/lock_order.h ---
+/**
+ * @file        platform/lock_order.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/platform/perf.h ---
+/**
+ * @file        platform/perf.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/debugging.h (Ben Vanik, 2014).
+ */
+
+--- include/rex/platform/process.h ---
+/**
+ * @file        platform/process.h
+ * @brief       Process control, console, environment and crash reports
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     The debugger and message box parts are derived from Xenia's
+ *              xenia/base/debugging.h (Ben Vanik, 2014) and xenia/base/system.h (Ben Vanik,
+ *              2020).
+ */
+
+--- include/rex/platform/socket.h ---
+/**
+ * @file        platform/socket.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/platform/sync.h ---
+/**
+ * @file        platform/sync.h
+ * @brief       Wait objects and wait functions
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/threading.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/platform/thread.h ---
+/**
+ * @file        platform/thread.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/threading.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/platform/timer.h ---
+/**
+ * @file        platform/timer.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/threading.h and xenia/base/threading_timer_queue.h
+ *              (Ben Vanik, 2020 and 2022).
+ */
+
+--- include/rex/result.h ---
+/**
+ * @file        result.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/setting.h ---
+/**
+ * @file        setting.h
+ * @brief       Typed settings and the owners that declare them
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/settings_registry.h ---
+/**
+ * @file        settings_registry.h
+ * @brief       The registry of every registered setting
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/string/path.h ---
+/**
+ * @file        string/path.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/utf8.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/string/text.h ---
+/**
+ * @file        string/text.h
+ * @brief       ASCII and UTF-8 text operations, the string builder and the string keys
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/string.h, xenia/base/utf8.h,
+ *              xenia/base/string_buffer.h and xenia/base/string_key.h (Ben Vanik, 2020).
+ */
+
+--- include/rex/types.h ---
+/**
+ * @file        types.h
+ * @brief       Integer types, byte order wrappers and size literals
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/literals.h (Ben Vanik, 2021).
+ */
+
+--- include/rex/ui/image_decode.h ---
+/**
+ * @file        ui/image_decode.h
+ *
+ * @copyright   Copyright (c) 2026 Rien Gupta <rgupta9@scu.edu>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/ui/imgui_config.h ---
+/**
+ * @file        ui/imgui_config.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/ui_thread.h ---
+/**
+ * @file        ui_thread.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- include/rex/utility.h ---
+/**
+ * @file        utility.h
+ * @brief       Move only function, const propagating pointer and scope guard
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/app_state.h ---
+/**
+ * @file        base/app_state.h
+ * @brief       The AppInterfaces factory and timer resolution of the process
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/bit_map.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2015 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/bit_stream.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2021 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/byte_stream.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/byte_swap.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/cli_arg_list.cpp ---
+
+
+--- src/base/clock.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2019 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/clock_win.cpp ---
+
+
+--- src/base/core_settings.h ---
+/**
+ * @file        base/core_settings.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/crash.cpp ---
+
+
+--- src/base/crash_report.h ---
+/**
+ * @file        base/crash_report.h
+ * @brief       Report writer and platform hooks shared by the crash reporter sources
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/crash_win.cpp ---
+
+
+--- src/base/dbg_win.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2014 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/driver_context.cpp ---
+
+
+--- src/base/driver_context.h ---
+/**
+ * @file        base/driver_context.h
+ * @brief       The context an app hands every driver it starts
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/driver_select.cpp ---
+/**
+ * @file        base/driver_select.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/dynlib_win.cpp ---
+
+
+--- src/base/exception_handler.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/exception_handler_win.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2015 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/fiber_win32.cpp ---
+/**
+ * @file        base/fiber_win32.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/hash.cpp ---
+
+
+--- src/base/host_alloc.cpp ---
+/**
+ * @file        base/host_alloc.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/host_thread_registry.cpp ---
+/**
+ * @file        base/host_thread_registry.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/init.cpp ---
+
+
+--- src/base/input_source.cpp ---
+
+
+--- src/base/instance_lock_win.cpp ---
+/**
+ * @file        base/instance_lock_win.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/key_chord.cpp ---
+
+
+--- src/base/library_name.cpp ---
+
+
+--- src/base/library_name.h ---
+/**
+ * @file        base/library_name.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/lock_order.cpp ---
+
+
+--- src/base/log_file.cpp ---
+/**
+ * @file        base/log_file.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/log_sink.cpp ---
+/**
+ * @file        base/log_sink.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/log_sink_win.cpp ---
+/**
+ * @file        base/log_sink_win.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/logger.cpp ---
+
+
+--- src/base/logger.h ---
+/**
+ * @file        base/logger.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/logger_control.h ---
+/**
+ * @file        base/logger_control.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/mapped_memory_win.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/memory_win.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/module_group.cpp ---
+
+
+--- src/base/module_group.h ---
+/**
+ * @file        base/module_group.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/path.cpp ---
+
+
+--- src/base/path_settings.cpp ---
+
+
+--- src/base/perf/counter.cpp ---
+
+
+--- src/base/platform/console_win.cpp ---
+
+
+--- src/base/platform/env_win.cpp ---
+
+
+--- src/base/platform/file.cpp ---
+
+
+--- src/base/platform/file_win.cpp ---
+
+
+--- src/base/platform_win.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2015 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/process_control.cpp ---
+
+
+--- src/base/process_control.h ---
+/**
+ * @file        base/process_control.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/process_lifecycle.cpp ---
+
+
+--- src/base/process_resources_win.cpp ---
+/**
+ * @file        base/process_resources_win.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/relaunch_win.cpp ---
+/**
+ * @file        base/relaunch_win.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/ring_buffer.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2015 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/settings/aliases.cpp ---
+/**
+ * @file        base/settings/aliases.cpp
+ * @brief       Old setting names and the settings they map to
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/parse.cpp ---
+/**
+ * @file        base/settings/parse.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/setting.cpp ---
+/**
+ * @file        base/settings/setting.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/settings_control.h ---
+/**
+ * @file        base/settings/settings_control.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/settings_internal.h ---
+/**
+ * @file        base/settings/settings_internal.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/settings_registry.cpp ---
+/**
+ * @file        base/settings/settings_registry.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/settings/toml.cpp ---
+
+
+--- src/base/socket_win.cpp ---
+
+
+--- src/base/status.cpp ---
+
+
+--- src/base/string_buffer.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/system_win.cpp ---
+
+
+--- src/base/threading.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2015 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/threading_win.cpp ---
+/**
+ * @file        base/threading_win.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/timer_queue.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/timer_queue_state.h ---
+/**
+ * @file        base/timer_queue_state.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/utf8.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/utf8_codec.h ---
+/**
+ * @file        base/utf8_codec.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/utf8_win.cpp ---
+
+
+--- src/base/utility.cpp ---
+
+
+--- src/base/virtual_key.cpp ---
+
+
+--- src/filesystem/container.cpp ---
+
+
+--- src/filesystem/container.h ---
+/**
+ * @file        filesystem/container.h
+ * @brief       The container parser behind IContainerImage
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/filesystem/container_parse.h ---
+/**
+ * @file        filesystem/container_parse.h
+ * @brief       Container parsers behind Container::Open
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/filesystem/container_provider.cpp ---
+
+
+--- src/filesystem/container_provider.h ---
+/**
+ * @file        filesystem/container_provider.h
+ * @brief       Read only provider for STFS, SVOD and GDFX containers
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/stfs_container_device.h and
+ *              disc_image_device.h (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/file_system.cpp ---
+
+
+--- src/filesystem/file_system.h ---
+/**
+ * @file        filesystem/file_system.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/virtual_file_system.h (Ben Vanik, 2013).
+ */
+
+--- src/filesystem/filesystem_module.h ---
+
+
+--- src/filesystem/gdfx.cpp ---
+/**
+ * @file        filesystem/gdfx.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/disc_image_device.cc (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/host_file.h ---
+/**
+ * @file        filesystem/host_file.h
+ * @brief       Positional host file handle and host queries
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/filesystem_win.cc and filesystem_posix.cc
+ *              (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/host_file_win.cpp ---
+
+
+--- src/filesystem/host_provider.cpp ---
+
+
+--- src/filesystem/host_provider.h ---
+/**
+ * @file        filesystem/host_provider.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/host_path_device.h and host_path_entry.h
+ *              (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/lzx.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2013 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/filesystem/lzx.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/filesystem/module_entry.cpp ---
+
+
+--- src/filesystem/node.cpp ---
+
+
+--- src/filesystem/node.h ---
+/**
+ * @file        filesystem/node.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/entry.h and file.h (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/node_file.cpp ---
+
+
+--- src/filesystem/node_file.h ---
+/**
+ * @file        filesystem/node_file.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/file.h (Ben Vanik, 2015).
+ */
+
+--- src/filesystem/null_provider.cpp ---
+
+
+--- src/filesystem/null_provider.h ---
+/**
+ * @file        filesystem/null_provider.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/null_device.h (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/provider.cpp ---
+
+
+--- src/filesystem/provider.h ---
+/**
+ * @file        filesystem/provider.h
+ * @brief       Mount backing and its factory
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/device.h (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/stfs.cpp ---
+/**
+ * @file        filesystem/stfs.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/stfs_container_device.cc (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/svod.cpp ---
+/**
+ * @file        filesystem/svod.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/vfs/devices/stfs_container_device.cc (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/wildcard.cpp ---
+
+
+--- src/filesystem/wildcard.h ---
+/**
+ * @file        filesystem/wildcard.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @remarks     Derived from Xenia's xenia/base/filesystem_wildcard.h (Ben Vanik, 2020).
+ */
+
+--- src/filesystem/xdbf.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2016 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/filesystem/xdbf_title_data.h ---
+/**
+ * @file        filesystem/xdbf_title_data.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/filesystem/xex.cpp ---
+
+
+--- src/filesystem/xex_image.h ---
+/**
+ * @file        filesystem/xex_image.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/ui/overlay/image_decode.cpp ---
+

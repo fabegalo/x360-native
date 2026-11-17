@@ -9,7 +9,7 @@
         {
             "name": "win-amd64",
             "displayName": "Windows AMD64 (pinned LLVM + MSVC STL)",
-            "description": "Mirrors the windows-base preset of ReXGlue v0.10.0, with the compiler pinned to .local/toolchains. Run through scripts/devshell.cmd.",
+            "description": "Mirrors the windows-base preset of ReXGlue v0.11.0, with the compiler pinned to .local/toolchains. Run through scripts/devshell.cmd.",
             "generator": "Ninja Multi-Config",
             "binaryDir": "${sourceDir}/.local/build/${presetName}",
             "cacheVariables": {
@@ -23,7 +23,8 @@
                 "REXGLUE_BUILD_TESTS": "ON",
                 "REXGLUE_USE_D3D12": "ON",
                 "REXGLUE_USE_VULKAN": "ON",
-                "PYTHON_EXECUTABLE": "${sourceDir}/.local/toolchains/python-3.14.8/python.exe"
+                "PYTHON_EXECUTABLE": "${sourceDir}/.local/toolchains/python-3.14.8/python.exe",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/.local/build/${presetName}/install"
             },
             "condition": {
                 "type": "equals",
@@ -41,7 +42,8 @@
                 "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo",
                 "CMAKE_DEFAULT_BUILD_TYPE": "Release",
                 "REXGLUE_BUILD_TESTS": "ON",
-                "REXGLUE_USE_VULKAN": "ON"
+                "REXGLUE_USE_VULKAN": "ON",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/.local/build/${presetName}/install"
             }
         },
         {

@@ -1,7 +1,6 @@
 #pragma once
-#include <rex/runtime.h>
-#include <rex/ui/presenter.h>
-#include <rex/logging.h>
+#include <rex/gpu/graphics_system.h>
+#include <rex/logging/log_category.h>
 #include <fstream>
 #include <thread>
 #include <algorithm>
@@ -12,11 +11,10 @@ namespace x360n {
 // presenter resource; no dependency on desktop visibility or renderer internals.
 class GuestCapture {
  public:
-  void Start(rex::Runtime& runtime, const std::string& directory, unsigned seconds = 30) {
+  void Start(rex::gpu::IGraphicsSystem& graphics, const std::string& directory, unsigned seconds = 30) {
     if (directory.empty()) return;
-    auto* gpu = runtime.graphics_system();
-    if (!gpu || !gpu->presenter()) return;
-    worker_ = std::jthread([presenter = gpu->presenter(), directory, seconds = std::clamp(seconds, 1u, 300u)](std::stop_token stop) {
+    if (!graphics.HasDriver()) return;
+    worker_ = std::jthread([&graphics, directory, seconds = std::clamp(seconds, 1u, 300u)](std::stop_token stop) {
       try {
         // Each title transition has its own capture set, even when all children
         // inherit the same diagnostic directory from the session supervisor.
@@ -26,8 +24,8 @@ class GuestCapture {
         for (unsigned tick = 0; tick < seconds * 10 && !stop.stop_requested(); ++tick) {
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           if (tick % 20 != 19) continue;
-          rex::ui::RawImage image;
-          if (!presenter->CaptureGuestOutput(image)) continue;
+          rex::gpu::RawImage image;
+          if (!graphics.CaptureGuestOutput(image)) continue;
           auto path = capture_directory / ("frame-" + std::to_string((tick + 1) / 10) + ".ppm");
           auto pending = path; pending += ".tmp";
           x360n::io::ofstream output(pending, std::ios::binary);

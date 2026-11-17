@@ -1,54 +1,63 @@
 #pragma once
-#include <memory>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/logging.h>
-#include <rex/rex_app.h>
-#include <rex/runtime.h>
-#include <rex/cvar.h>
+#include <rex/filesystem/file_system.h>
 #include "boot_intro.h"
 #include "../../common/dashboard_paths.h"
-#include "../../common/launch_handoff.h"
-#include "../../common/guest_capture.h"
+#include "../../common/session_title_app.h"
 #include "original_assets.h"
 #include "system_ui.h"
+#include "guide_diagnostic.h"
+#include <rex/hid/input_system.h>
 
-REXCVAR_DECLARE(bool, dash1888_boot_intro);
-REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (opt-in)");
-REXCVAR_DEFINE_UINT32(x360n_guest_capture_seconds, 30, "Diagnostics", "GPU capture duration, limited to 300 seconds");
-
-class Dash1888App : public rex::ReXApp {
+class Dash1888App : public x360n::SessionTitleApp {
  public:
-  using rex::ReXApp::ReXApp;
-  static std::unique_ptr<rex::ui::WindowedApp> Create(rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<Dash1888App>(new Dash1888App(ctx, "dash_1888", PPCImageConfig));
+  Dash1888App() : SessionTitleApp("dash_1888", kPPCImageConfig) {}
+  ~Dash1888App() override { Shutdown(); }
+ protected:
+  void OnRegisterModules(std::vector<rex::IModule*>& modules) override {
+    SessionTitleApp::OnRegisterModules(modules);
+    modules.push_back(&guide_diagnostic_);
   }
-  bool ConstructRuntime(const rex::PathConfig& defaults) override {
-    auto paths = defaults;
-    return x360n::PrepareDashboardPaths(paths, "1888", dash1888::kOriginalAssets) &&
-           rex::ReXApp::ConstructRuntime(paths);
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(SessionTitleApp::OnConfigure(settings));
+    REX_TRY_VOID(settings.Register(dash1888::GetSystemUiSettings()));
+    ui_settings_ = rex::ScopeGuard([&settings] { settings.Unregister(dash1888::GetSystemUiSettings()); });
+    return GetTitleRuntime().GetTitlePaths().entry.SetText(rex::SettingLayer::kDefault, "dash.xex");
   }
-  void OnLoadXexImage(std::string& path) override { path = "game:\\dash.xex"; }
-  void OnPreLaunchModule() override {
-    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture), REXCVAR_GET(x360n_guest_capture_seconds));
-    x360n::ImportLaunchData(*runtime());
-    if (REXCVAR_GET(dash1888_boot_intro) && !x360n::IsDashboardReturn())
-      dash1888::InstallBootIntro(*runtime());
-    dash1888::InstallSystemUi(*runtime());
-  }
-  void OnGuestThreadExit(rex::system::XThread*) override {
-    dash1888::ReleaseSystemUi();
-    x360n::ExportLaunchRequest(*runtime());
-  }
-  bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
-  void OnShutdown() override { guest_capture_.Stop(); }
-  void OnPostSetup() override {
-    auto device = std::make_unique<rex::filesystem::HostPathDevice>(
-        "\\SystemRoot", game_data_root(), true);
-    if (!device->Initialize() || !runtime()->file_system()->RegisterDevice(std::move(device))) {
-      REX_FATAL("dash_1888: could not mount its verified original package at \\SystemRoot");
+  rex::Result<void> OnSettingsLoaded(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(SessionTitleApp::OnSettingsLoaded(settings));
+    REX_TRY_VOID(x360n::PrepareDashboardPaths(GetTitleRuntime().GetTitlePaths(), "1888", dash1888::kOriginalAssets));
+    const auto probe = dash1888::GetSystemUiSettings().input_probe.Get();
+    if (probe == 1 || probe == 2) {
+      auto& drivers = GetInput().GetSettings().drivers;
+      REX_TRY_VOID(drivers.SetText(rex::SettingLayer::kRuntime, "dash1888-probe," + drivers.Get()));
     }
+    return rex::Ok();
+  }
+  rex::Result<void> OnSessionLaunch(rex::kernel::TitleRuntime& runtime) override {
+    rex::filesystem::MountEntry mount;
+    mount.path = "\\SystemRoot";
+    mount.source = runtime.GetTitlePaths().game_root.Get();
+    REX_TRY_VOID(runtime.GetFileSystem().Mount(mount));
+    ui_installed_ = true;
+    dash1888::InstallSystemUi(runtime);
+    return rex::Ok();
+  }
+  rex::Result<void> OnTitleLaunch(rex::kernel::TitleRuntime& runtime) override {
+    REX_TRY_VOID(SessionTitleApp::OnTitleLaunch(runtime));
+    if (dash1888::GetSystemUiSettings().boot_intro.Get() && !x360n::IsDashboardReturn())
+      dash1888::InstallBootIntro(runtime);
+    return rex::Ok();
+  }
+  void OnSessionUnload(rex::kernel::TitleRuntime& runtime) override {
+    if (std::exchange(ui_installed_, false)) dash1888::ReleaseSystemUi(runtime);
+    SessionTitleApp::OnSessionUnload(runtime);
+  }
+  void OnRelease() override {
+    SessionTitleApp::OnRelease();
+    ui_settings_.Reset();
   }
  private:
-  x360n::GuestCapture guest_capture_;
+  dash1888::GuideDiagnosticProvider guide_diagnostic_;
+  rex::ScopeGuard ui_settings_;
+  bool ui_installed_ = false;
 };

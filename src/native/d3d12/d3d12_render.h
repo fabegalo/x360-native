@@ -1,5 +1,5 @@
 #pragma once
-#include <rex/graphics/flags.h>
+#include <gpu/xenos/xenos_settings.h>
 #include "../quality/settings.h"
 #include "../memory/scaled_resolve.h"
 #include "../pipeline/shader_cache.h"
@@ -12,9 +12,9 @@
 #include "../textures/texture_load.h"
 #include "../memory/guest_writeback.h"
 #include "../commands/scanout_backend.h"
-#include <rex/graphics/command_processor.h>
-#include <rex/graphics/util/draw.h>
-#include <rex/ui/d3d12/d3d12_provider.h>
+#include <gpu/xenos/command_processor.h>
+#include <gpu/xenos/draw_state.h>
+#include <gpu/xenos/host/d3d12/d3d12_provider.h>
 #include <wrl/client.h>
 #include <xxhash.h>
 #include <map>
@@ -29,24 +29,26 @@ namespace x360n::native {
 class D3D12HybridColor;
 class D3D12Render {
   friend class D3D12HybridColor;
+  const rex::gpu::XenosSettings& settings_;
+  rex::IPhysicalWriteWatch& watch_;
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
   const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
-  const uint32_t edram_tile_count_ = rex::graphics::GetConfiguredEdramTileCount();
-  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::graphics::xenos::kEdramTileSizeBytes * scale_x_ * scale_y_;
+  const uint32_t edram_tile_count_ = settings_.GetEDRAMTileCount();
+  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::xenos::kEDRAMTileSizeBytes * scale_x_ * scale_y_;
  public:
-  explicit D3D12Render(rex::ui::d3d12::D3D12Provider&);
+  explicit D3D12Render(rex::gpu::d3d12::D3D12Provider&, const rex::gpu::XenosSettings&, rex::IPhysicalWriteWatch&);
   ~D3D12Render();
-  ShaderCache shaders{scale_x_, scale_y_, edram_tile_count_};
+  ShaderCache shaders;
   void SetPipelineDirectory(const std::filesystem::path& path) { pipeline_store_.SetDirectory(path); }
-  void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&,
-      rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,
+  void Draw(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&,
+      rex::gpu::Shader*, rex::gpu::Shader*, rex::xenos::PrimitiveType,
       uint32_t count, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
   // With resolution scale, a front buffer holding scaled resolve data is
   // recorded as a linear scaled surface (output describes it) and its GPU
   // address is returned; otherwise 0 and the 1x guest bytes are presented.
   // Call before the presenting submission (Flush).
   D3D12_GPU_VIRTUAL_ADDRESS PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output);
-  void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
+  void Resolve(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&);
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
   // Diagnostic accounting only (native_stats): why a submission waited.
@@ -122,7 +124,7 @@ class D3D12Render {
   void PublishCompleted();
   bool GuestWritesOverlap(uint32_t address, uint32_t length) const;
   // Resident guest memory mirror (memory_), created with the guest memory.
-  GuestMemoryMirror& Mirror(rex::memory::Memory&);
+  GuestMemoryMirror& Mirror(rex::IPhysicalMemory&);
   std::unique_ptr<GuestMemoryMirror> mirror_;
   ScaledResolveCache scaled_{scale_x_, scale_y_};
   uint32_t textures_resolution_scaled_ = 0;
@@ -132,13 +134,13 @@ class D3D12Render {
   void ReserveReadback(uint64_t bytes);
   // Record a GPU-written range in already reserved readback storage.
   void QueueGuestWrite(uint32_t address, uint32_t length, const std::vector<uint64_t>* snapshot_epochs = nullptr);
-  std::unordered_map<const rex::graphics::Shader*, bool> memexport_addresses_known_;
+  std::unordered_map<const rex::gpu::Shader*, bool> memexport_addresses_known_;
   // Before Native reads guest memory that a pending GPU write will change.
   enum ReadSite : unsigned { kReadIndices, kReadCpuTexture, kReadResolveRect, kReadPacket, kReadSites };
   void SyncGuestRead(uint32_t address, uint64_t length, ReadSite);
   uint64_t overlap_sites_[kReadSites]{};
   GuestWriteback writeback_;
-  rex::memory::Memory* guest_memory_ = nullptr;
+  rex::IPhysicalMemory* guest_memory_ = nullptr;
   uint64_t readback_used_ = 0, overlap_flushes_ = 0;
   D3D12_CPU_DESCRIPTOR_HANDLE Cpu(uint32_t, bool sampler = false);
   D3D12_GPU_DESCRIPTOR_HANDLE Gpu(uint32_t, bool sampler = false);
@@ -151,7 +153,7 @@ class D3D12Render {
   // Loads or reuses the textures of a shader and writes its view and sampler
   // tables before the draw state is recorded; Tables binds them afterwards.
   struct TextureTables { D3D12_GPU_VIRTUAL_ADDRESS indices = 0; };
-  TextureTables BindTextures(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::DxbcShader&);
+  TextureTables BindTextures(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&, rex::gpu::DXBCShader&);
   void SetTextureTables(const TextureTables&, unsigned root);
   // Records a GPU load of guest bytes from memory_ into texture (COPY_DEST).
   // scaled: guest base/mip ranges read from GPU-resident scaled memory.
@@ -182,7 +184,7 @@ class D3D12Render {
   static void TextureWatch(void* context, void* data, uint64_t argument, bool by_gpu);
   Ptr<ID3D12RootSignature> ComputeRoot(unsigned constants, bool source);
   PendingPipeline ComputePSO(ID3D12RootSignature*, const void*, size_t);
-  rex::ui::d3d12::D3D12Provider& provider_;
+  rex::gpu::d3d12::D3D12Provider& provider_;
   ID3D12Device* device_;
   Ptr<ID3D12InfoQueue> debug_;
   Ptr<ID3D12CommandAllocator> allocator_;
@@ -268,13 +270,13 @@ class D3D12Render {
   PipelineKey last_pipeline_key_{};
   std::shared_future<Ptr<ID3D12PipelineState>>* last_pipeline_ = nullptr;
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
-      rex::graphics::ShaderModificationKey vm, rex::graphics::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
+      rex::gpu::ShaderModificationKey vm, rex::gpu::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();
   // Early submission: work recorded since the last submission and the
   // threshold (draws; a resolve counts as the whole threshold).
   // Hardware default measured with scene replay; Microsoft software adapters stay off.
   const uint32_t eager_threshold_ = NativeEagerSubmitWork(
-      provider_.GetAdapterVendorID() == rex::ui::GraphicsProvider::GpuVendorID::kMicrosoft ? 0 : 128);
+      provider_.GetAdapterVendorID() == rex::gpu::GraphicsProvider::GPUVendorID::kMicrosoft ? 0 : 128);
   const uint32_t eager_depth_ = NativeEagerSubmitDepth();
   uint32_t recorded_work_ = 0;
   void SubmitEarly();

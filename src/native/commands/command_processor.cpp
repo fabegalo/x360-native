@@ -1,33 +1,32 @@
 #include "command_processor.h"
-#include <rex/graphics/graphics_system.h>
-#include <rex/graphics/flags.h>
-#include <rex/graphics/pipeline/shader/shader.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
+#include <gpu/xenos/xenos_settings.h>
+#include <gpu/xenos/pipeline/shader/shader.h>
 #include <rex/chrono/frame_timing.h>
-#include <rex/chrono/clock.h>
-#include <rex/graphics/display_overlay.h>
-#include <rex/kernel/xboxkrnl/video.h>
-#include <rex/logging.h>
+#include <rex/chrono.h>
+#include <rex/xenos/display_overlay.h>
+#include <gpu/xenos/xenos_graphics_driver_base.h>
+#include <gpu/xenos/physical_memory.h>
+#include <rex/logging/log_category.h>
+#include <rex/logging/logger.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <rex/cvar.h>
-#include <rex/memory/ring_buffer.h>
-#include <rex/thread/mutex.h>
+
+#include <rex/memory/stream.h>
+#include <rex/platform/sync.h>
 #include "../memory/physical_write.h"
 #include "../capture/capture_backend.h"
 #include "../quality/settings.h"
 #include <cstring>
 #include "../../supervisor/fs_io.h"
-REXCVAR_DEFINE_STRING(native_trace, "", "GPU/Native", "Optional Native diagnostic directory");
-REXCVAR_DEFINE_STRING(native_frame_profile, "", "GPU/Native",
-    "Per-frame renderer profile CSV (draws, resolves, syncs, time inside/outside the renderer, submissions, fences, GPU); empty disables it");
-REXCVAR_DEFINE_STRING(native_capture, "", "GPU/Native",
-    "Record renderer frames for x360n_native_replay to this file (contains title data: keep it under .local); empty disables it");
-REXCVAR_DEFINE_UINT32(native_capture_skip, 300, "GPU/Native", "Presents to skip before native_capture starts recording");
-REXCVAR_DEFINE_UINT32(native_capture_frames, 1, "GPU/Native", "Frames native_capture records");
-REXCVAR_DEFINE_STRING(native_capture_trigger, "", "GPU/Native",
-    "Start native_capture at the first present after this file exists (instead of native_capture_skip)");
+
+
+
+
+
+
 namespace x360n::native {
 [[noreturn]] void Unsupported(const char* message) {
   // The interface has no asynchronous failure return. Terminate this experimental
@@ -36,7 +35,7 @@ namespace x360n::native {
   REXLOG_ERROR("Native unsupported/failure: {} (exit 78, no fallback)", message);
   std::fprintf(stderr, "Native unsupported/failure: %s (exit 78, no fallback)\n", message);
   std::fflush(stderr);
-  rex::FlushLogging();
+  REX_LOGGER().Flush();
   std::_Exit(78);
 }
 namespace { CommandProcessor* active_processor = nullptr; }
@@ -65,20 +64,19 @@ bool CommandProcessor::SetupContext() {
     // the console. Host-texel offsets (the SDK default) give GPU-side texture
     // encoders a fraction of their footprint: Motocross Madness's GPU DXT1
     // terrain became 4x4 flat blocks. Read by both translators (patch 0267).
-    REXCVAR_SET(draw_resolution_scaled_texture_offsets, false);
-    scanout_ = CaptureBackend::Wrap(factory_(*graphics_system_->provider()), *memory_, {
-        std::filesystem::path(REXCVAR_GET(native_capture)), std::filesystem::path(REXCVAR_GET(native_frame_profile)),
-        std::filesystem::path(REXCVAR_GET(native_capture_trigger)), REXCVAR_GET(native_capture_skip), REXCVAR_GET(native_capture_frames), quality.scale_x, quality.scale_y,
-        graphics_system_->name().find("Vulkan") != std::string::npos ? "vulkan" : "d3d12"});
-    REXLOG_INFO("{}: independent scanout and guest renderer ready", graphics_system_->name());
+    scanout_ = CaptureBackend::Wrap(factory_(*GetGraphicsDriver().GetProvider(), GetXenosSettings(), write_watch_), physical_memory_, GetXenosSettings(), {
+        std::filesystem::path(GetNativeSettings().capture.Get()), std::filesystem::path(GetNativeSettings().frame_profile.Get()),
+        std::filesystem::path(GetNativeSettings().capture_trigger.Get()), GetNativeSettings().capture_skip.Get(), GetNativeSettings().capture_frames.Get(), quality.scale_x, quality.scale_y,
+        GetGraphicsDriver().GetName().find("vulkan") != std::string::npos ? "vulkan" : "d3d12", GetXenosSettings().GetEDRAMTileCount()});
+    REXLOG_INFO("{}: independent scanout and guest renderer ready", GetGraphicsDriver().GetName());
     // Without a title timing profile (which selects its own cadence before
     // the GPU starts), Native Enhanced above 30 FPS measures how many vblanks
     // the title waits per present and runs guest vblank at target * that.
     using Timing = rex::chrono::FrameTiming;
-    generic_cadence_ = Timing::Enhanced() && REXCVAR_GET(native_framerate) > 30 && !Timing::GuestVblankRate();
+    generic_cadence_ = Timing::Enhanced() && rex::chrono::GetNativeFrameSettings().framerate.Get() > 30 && !Timing::GuestVblankRate();
     if (generic_cadence_)
       REXLOG_INFO("Native Enhanced: generic target {} FPS; guest vblank follows the title's measured present interval; system/audio time unchanged",
-                  REXCVAR_GET(native_framerate));
+                  rex::chrono::GetNativeFrameSettings().framerate.Get());
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
@@ -92,58 +90,59 @@ void CommandProcessor::InitializeShaderStorage(const std::filesystem::path& path
   if (scanout_) scanout_->InitializeShaderStorage(path, title_id);
 }
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
-  if (index >= rex::graphics::RegisterFile::kRegisterCount)
+  if (index >= rex::xenos::RegisterFile::kRegisterCount)
     Unsupported("GPU register outside Native state");
-  using namespace rex::graphics;
-  if (index >= XE_GPU_REG_SCRATCH_REG0 && index <= XE_GPU_REG_SCRATCH_REG7 &&
-      (register_file_->values[XE_GPU_REG_SCRATCH_UMSK] & (1u << (index - XE_GPU_REG_SCRATCH_REG0)))) {
-    const uint64_t address = uint64_t(register_file_->values[XE_GPU_REG_SCRATCH_ADDR]) + (index - XE_GPU_REG_SCRATCH_REG0) * 4;
+  using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+  if (index >= static_cast<uint32_t>(rex::xenos::Register::SCRATCH_REG0) && index <= static_cast<uint32_t>(rex::xenos::Register::SCRATCH_REG7) &&
+      (register_file_->values[static_cast<uint32_t>(rex::xenos::Register::SCRATCH_UMSK)] & (1u << (index - static_cast<uint32_t>(rex::xenos::Register::SCRATCH_REG0))))) {
+    const uint64_t address = uint64_t(register_file_->values[static_cast<uint32_t>(rex::xenos::Register::SCRATCH_ADDR)]) + (index - static_cast<uint32_t>(rex::xenos::Register::SCRATCH_REG0)) * 4;
     if (address + 4 > 0x20000000) Unsupported("scratch writeback outside guest physical memory");
     CompleteGuestWrites(kGuestSyncPacket);
   }
-  rex::graphics::CommandProcessor::WriteRegister(index, value);
-}
-void CommandProcessor::OnGuestMemoryWrite(uint32_t address, uint32_t length) {
-  if (!length) return;
-  if (uint64_t(address) + length > 0x20000000) Unsupported("GPU packet write outside guest physical memory");
-  // Shared packet handlers write through the unprotected physical view.
-  // Notify every alias, including Native's mirror and texture watches.
-  NotifyPhysicalWrite(*memory_, address, length);
+  rex::gpu::CommandProcessor::WriteRegister(index, value);
 }
 void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
   last_swap_succeeded_ = false;
   try {
-    if (!scanout_ || !graphics_system_->presenter()) throw std::runtime_error("scanout/presenter unavailable");
-    const auto post_effect = GetActualSwapPostEffect() == SwapPostEffect::kFxaaExtreme
-        ? ScanoutPostEffect::kFxaaExtreme : GetActualSwapPostEffect() == SwapPostEffect::kFxaa
+    if (!scanout_ || !GetGraphicsDriver().GetHostPresenter()) throw std::runtime_error("scanout/presenter unavailable");
+    const auto post_effect = GetActualSwapPostEffect() == SwapPostEffect::kFXAAExtreme
+        ? ScanoutPostEffect::kFxaaExtreme : GetActualSwapPostEffect() == SwapPostEffect::kFXAA
         ? ScanoutPostEffect::kFxaa : ScanoutPostEffect::kNone;
     const auto texture = DecodeScanout(register_file_->GetTextureFetch(0), width, height);
     uint32_t lut[128 * 3];
     // Original D3D presentation uses PWL for both RGB10A2 fetch formats.
     if (texture.rgb10) {
       for (unsigned i = 0; i < 128 * 3; ++i) {
-        const auto& c = gamma_ramp_pwl_rgb()[i];
+        const auto& c = GetGammaRampPWLRGB()[i];
         lut[i] = c.base | (c.delta << 16);
       }
     } else for (unsigned i = 0; i < 256; ++i) {
-      const auto& c = gamma_ramp_256_entry_table()[i];
+      const auto& c = GetGammaRamp256EntryTable()[i];
       lut[i] = c.color_10_red | (c.color_10_green << 10) | (c.color_10_blue << 20);
     }
     // Same D1OVL decoding and display coordinates as the pinned Xenos swap.
     ScanoutOverlay overlay{};
-    const auto plane = rex::graphics::DecodeDisplayOverlay(*register_file_);
+    const auto plane = rex::gpu::DecodeDisplayOverlay(*register_file_);
     if (plane.valid) {
-      rex::system::X_VIDEO_MODE mode;
-      rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+      const auto& mode = title_info_.video_mode;
       overlay = {DecodeScanout(plane.fetch, 0, 0), plane.x, plane.y, plane.right, plane.bottom,
-                 plane.offset_x, plane.offset_y, std::max(1u, uint32_t(mode.display_width)),
-                 std::max(1u, uint32_t(mode.display_height))};
+                 plane.offset_x, plane.offset_y, std::max(1u, uint32_t(mode.width)),
+                 std::max(1u, uint32_t(mode.height))};
     }
     rex::chrono::FrameTiming::PacePresentation();
-    scanout_->Present(*graphics_system_->presenter(), texture,
-                      memory_->TranslatePhysical(texture.address), lut,
-                      plane.valid ? &overlay : nullptr,
-                      plane.valid ? memory_->TranslatePhysical(overlay.surface.address) : nullptr, post_effect);
+    auto pixels = physical_memory_.GetReadOnlyPhysicalSpan({texture.address, texture.bytes});
+    if (!pixels) throw std::runtime_error(pixels.error().GetDescription());
+    std::span<const std::byte> overlay_pixels;
+    if (plane.valid) {
+      auto bytes = physical_memory_.GetReadOnlyPhysicalSpan({overlay.surface.address, overlay.surface.bytes});
+      if (!bytes) throw std::runtime_error(bytes.error().GetDescription());
+      overlay_pixels = *bytes;
+    }
+    scanout_->Present(*GetGraphicsDriver().GetHostPresenter(), texture, pixels->data(), lut,
+                      plane.valid ? &overlay : nullptr, overlay_pixels.data(), post_effect);
     last_swap_succeeded_ = true;
     rex::chrono::FrameTiming::NotifySourceFrame();
     UpdateGenericCadence();
@@ -151,7 +150,7 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
 }
 void CommandProcessor::UpdateGenericCadence() {
   using Timing = rex::chrono::FrameTiming;
-  using Clock = rex::chrono::Clock;
+  using Clock = rex::Clock;
   if (!generic_cadence_) return;
   const uint32_t current = Timing::GuestVblankRate();
   if (current != cadence_rate_) {  // A title profile selected its own cadence.
@@ -161,58 +160,63 @@ void CommandProcessor::UpdateGenericCadence() {
   }
   uint32_t hz = current;
   if (!hz) {
-    rex::system::X_VIDEO_MODE mode;
-    rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+    const auto& mode = title_info_.video_mode;
     hz = std::max(1u, uint32_t(std::lround(float(mode.refresh_rate))));
   }
   const uint64_t now = Clock::QueryGuestTickCount();
   const uint64_t interval = last_present_tick_ && now > last_present_tick_ ? now - last_present_tick_ : 0;
   last_present_tick_ = now;
-  const uint32_t fps = REXCVAR_GET(native_framerate);
-  const uint32_t next = cadence_.OnPresent(interval, Clock::guest_tick_frequency(), hz, fps);
+  const uint32_t fps = rex::chrono::GetNativeFrameSettings().framerate.Get();
+  const uint32_t next = cadence_.OnPresent(interval, Clock::GetGuestTickFrequency(), hz, fps);
   if (next == cadence_rate_) return;
   Timing::SetGuestVblankRate(next);
   cadence_rate_ = next;
   REXLOG_INFO("Native Enhanced: title presents every {} vblank(s); guest vblank {} Hz for {} FPS",
               cadence_.interval(), next, fps);
 }
-rex::graphics::Shader* CommandProcessor::LoadShader(rex::graphics::xenos::ShaderType type,
+rex::gpu::Shader* CommandProcessor::LoadShader(rex::xenos::ShaderType type,
     uint32_t address, const uint32_t* data, uint32_t count) {
   try { return scanout_->LoadShader(type, data, count); }
   catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::ShouldIssueDraw(uint32_t condition) const {
-  using namespace rex::graphics;
-  draw_visibility_failed_ = !VisibilityDrawEnabled(condition, register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0],
-                                                   register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1]);
+  using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+  draw_visibility_failed_ = !VisibilityDrawEnabled(condition, register_file_->values[static_cast<uint32_t>(rex::xenos::Register::PA_SC_VIZ_QUERY_STATUS_0)],
+                                                   register_file_->values[static_cast<uint32_t>(rex::xenos::Register::PA_SC_VIZ_QUERY_STATUS_1)]);
   // Visibility rejects rasterization after vertex processing. Keep guest VS
   // memory exports even for invisible geometry, as for ordinary face culling.
   return !draw_visibility_failed_ ||
-      (register_file_->Get<reg::RB_MODECONTROL>().edram_mode != xenos::EdramMode::kCopy &&
-       active_vertex_shader() && active_vertex_shader()->memexport_eM_written());
+      (register_file_->Get<reg::RB_MODECONTROL>().edram_mode != xenos::EDRAMMode::kCopy &&
+       GetActiveVertexShader() && GetActiveVertexShader()->GetMemExportEMWritten());
 }
-bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, uint32_t count, IndexBufferInfo* indices, bool) {
+bool CommandProcessor::IssueDraw(rex::xenos::PrimitiveType primitive, uint32_t count, IndexBuffer* indices, bool) {
   try {
-    if (!REXCVAR_GET(native_trace).empty()) {
-      x360n::io::create_directories(REXCVAR_GET(native_trace));
-      x360n::io::ofstream out(std::filesystem::path(REXCVAR_GET(native_trace)) / "last-draw-registers.bin", std::ios::binary);
+    if (!GetNativeSettings().trace.Get().empty()) {
+      x360n::io::create_directories(GetNativeSettings().trace.Get());
+      x360n::io::ofstream out(std::filesystem::path(GetNativeSettings().trace.Get()) / "last-draw-registers.bin", std::ios::binary);
       out.write(reinterpret_cast<const char*>(register_file_->values), sizeof(register_file_->values));
       REXLOG_INFO("Native draw primitive={} count={} indexed={} mode={}", uint32_t(primitive), count, indices != nullptr,
-          uint32_t(register_file_->Get<rex::graphics::reg::RB_MODECONTROL>().edram_mode));
+          uint32_t(register_file_->Get<rex::xenos::reg::RB_MODECONTROL>().edram_mode));
     }
-    if (register_file_->Get<rex::graphics::reg::RB_MODECONTROL>().edram_mode == rex::graphics::xenos::EdramMode::kCopy) return IssueCopy();
+    if (register_file_->Get<rex::xenos::reg::RB_MODECONTROL>().edram_mode == rex::xenos::EDRAMMode::kCopy) return IssueCopy();
     DrawIndices native_indices{};
     if (indices) {
       if (indices->length > 0x20000000) Unsupported("index buffer exceeds guest physical memory");
       native_indices = {indices->format, indices->endianness, indices->count, indices->guest_base, uint32_t(indices->length)};
     }
-    using namespace rex::graphics;
+    using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
     if (draw_visibility_failed_) {
       auto vertex_regs = std::make_unique<RegisterFile>(*register_file_);
       auto mode = vertex_regs->Get<reg::RB_MODECONTROL>();
-      mode.edram_mode = xenos::EdramMode::kNoOperation;
-      vertex_regs->values[XE_GPU_REG_RB_MODECONTROL] = mode.value;
-      scanout_->Draw(*vertex_regs, *memory_, active_vertex_shader(), nullptr,
+      mode.edram_mode = xenos::EDRAMMode::kNoOperation;
+      vertex_regs->values[static_cast<uint32_t>(rex::xenos::Register::RB_MODECONTROL)] = mode.value;
+      scanout_->Draw(*vertex_regs, physical_memory_, GetActiveVertexShader(), nullptr,
           primitive, count, indices ? &native_indices : nullptr);
       draw_visibility_failed_ = false;
       return true;
@@ -225,19 +229,19 @@ bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, 
       // Ordinary rendering then executes once, with its original side effects.
       auto query_regs = std::make_unique<RegisterFile>(*register_file_);
       auto mode = query_regs->Get<reg::RB_MODECONTROL>();
-      mode.edram_mode = xenos::EdramMode::kDepthOnly;
-      query_regs->values[XE_GPU_REG_RB_MODECONTROL] = mode.value;
+      mode.edram_mode = xenos::EDRAMMode::kDepthOnly;
+      query_regs->values[static_cast<uint32_t>(rex::xenos::Register::RB_MODECONTROL)] = mode.value;
       auto depth = query_regs->Get<reg::RB_DEPTHCONTROL>();
       depth.z_write_enable = depth.stencil_enable = depth.backface_enable = 0;
-      query_regs->values[XE_GPU_REG_RB_DEPTHCONTROL] = depth.value;
-      query_regs->values[XE_GPU_REG_RB_COLOR_MASK] = 0;
+      query_regs->values[static_cast<uint32_t>(rex::xenos::Register::RB_DEPTHCONTROL)] = depth.value;
+      query_regs->values[static_cast<uint32_t>(rex::xenos::Register::RB_COLOR_MASK)] = 0;
       auto color = query_regs->Get<reg::RB_COLORCONTROL>();
       color.alpha_test_enable = color.alpha_to_mask_enable = 0;
-      query_regs->values[XE_GPU_REG_RB_COLORCONTROL] = color.value;
+      query_regs->values[static_cast<uint32_t>(rex::xenos::Register::RB_COLORCONTROL)] = color.value;
       const bool query_only = viz.kill_pix_post_hi_z || viz.kill_pix_post_detail_mask;
       const auto saved = scanout_->ReadSampleCounts(true);
       scanout_->SetSampleCounts({}, true);
-      scanout_->Draw(*query_regs, *memory_, active_vertex_shader(), nullptr, primitive, count,
+      scanout_->Draw(*query_regs, physical_memory_, GetActiveVertexShader(), nullptr, primitive, count,
           indices ? &native_indices : nullptr,
           query_only ? DrawPurpose::kVisibilityWithVertexExports : DrawPurpose::kVisibility);
       const auto visible = scanout_->ReadSampleCounts(occlusion_queries_.active() != 0);
@@ -245,57 +249,62 @@ bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, 
       visibility_queries_.Accumulate(viz.viz_query_id, (visible[4] | visible[5]) != 0);
       if (query_only) return true;
     }
-    scanout_->Draw(*register_file_, *memory_, active_vertex_shader(), active_pixel_shader(), primitive, count, indices ? &native_indices : nullptr);
+    scanout_->Draw(*register_file_, physical_memory_, GetActiveVertexShader(), GetActivePixelShader(), primitive, count, indices ? &native_indices : nullptr);
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::IssueCopy() {
-  try { scanout_->Resolve(*register_file_, *memory_); return true; }
+  try { scanout_->Resolve(*register_file_, physical_memory_); return true; }
   catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::ExecutePacketType3_VIZ_QUERY(rex::memory::RingBuffer* reader, uint32_t, uint32_t count) {
   try {
-    using namespace rex::graphics;
+    using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
     if (count != 1) throw std::runtime_error("Native visibility query: invalid payload size");
     const auto control = reader->ReadAndSwap<uint32_t>();
     const unsigned id = control & 63;
     if (!(control & 0x100)) {
       visibility_queries_.Begin(id);
-      WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, xenos::VIZQUERY_START);
+      WriteRegister(static_cast<uint32_t>(rex::xenos::Register::VGT_EVENT_INITIATOR), xenos::VIZQUERY_START);
     } else {
       const bool visible = visibility_queries_.End(id);
-      const auto status = id < 32 ? XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0 : XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1;
+      const auto status = id < 32 ? static_cast<uint32_t>(rex::xenos::Register::PA_SC_VIZ_QUERY_STATUS_0) : static_cast<uint32_t>(rex::xenos::Register::PA_SC_VIZ_QUERY_STATUS_1);
       const uint32_t bit = uint32_t(1) << (id & 31);
       WriteRegister(status, (register_file_->values[status] & ~bit) | (visible ? bit : 0));
-      WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, xenos::VIZQUERY_END);
+      WriteRegister(static_cast<uint32_t>(rex::xenos::Register::VGT_EVENT_INITIATOR), xenos::VIZQUERY_END);
     }
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer* reader, uint32_t, uint32_t count) {
   try {
-    using namespace rex::graphics;
+    using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
     if (count != 1) throw std::runtime_error("Native ZPD: invalid payload size");
     const uint32_t initiator = reader->ReadAndSwap<uint32_t>();
     if ((initiator & 0x3F) != xenos::ZPASS_DONE)
       throw std::runtime_error("Native ZPD: unsupported event initiator");
-    WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, initiator & 0x3F);
-    const auto address = register_file_->values[XE_GPU_REG_RB_SAMPLE_COUNT_ADDR];
+    WriteRegister(static_cast<uint32_t>(rex::xenos::Register::VGT_EVENT_INITIATOR), initiator & 0x3F);
+    const auto address = register_file_->values[static_cast<uint32_t>(rex::xenos::Register::RB_SAMPLE_COUNT_ADDR)];
     if ((address & 3) || uint64_t(address) + sizeof(SampleCounts) > 0x20000000)
       throw std::runtime_error("Native ZPD: report outside aligned guest physical memory");
     // Earlier resolves may alias the report. Publish those first, then observe
     // the driver's pending token and retire real GPU counters before writing.
     CompleteGuestWrites(kGuestSyncEvent, xenos::PM4_EVENT_WRITE_ZPD);
     SampleCounts report;
-    auto* destination = memory_->TranslatePhysical(address);
-    std::memcpy(report.data(), destination, sizeof(report));
+    auto read = physical_memory_.CopyFromPhysical(address, std::as_writable_bytes(std::span(report)));
+    if (!read) throw std::runtime_error(read.error().GetDescription());
     const bool end = OcclusionQueries::IsEnd(report);
     const bool counting_after = occlusion_queries_.CountingAfter(end);
     report = scanout_->ReadSampleCounts(counting_after);
-    // TranslatePhysical bypasses the watched guest aliases. Retire their
-    // cached copies before publishing these new bytes, as a guest write does.
-    OnGuestMemoryWrite(address, sizeof(report));
-    std::memcpy(destination, report.data(), sizeof(report));
+    // The canonical physical writer publishes the report to every watched alias.
+    auto written = physical_memory_.CopyToPhysical(address, std::as_bytes(std::span(report)));
+    if (!written) throw std::runtime_error(written.error().GetDescription());
     occlusion_queries_.Commit(end);
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }

@@ -1,16 +1,11 @@
+#include "tool_sdk.h"
 // CPU contract probe of the verified original 17559 PNG encoder. No UI,
 // entrypoint, GPU, user storage or achievements; all buffers are disposable.
 #include "../supervisor/scratch.h"
 #include "../../titles/common/system_ui_context.h"
 #include "../../titles/common/guest_fault_context.h"
 #include "../../titles/dash_17559/src/original_assets.h"
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/kernel/xam/task_context.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/xam/user_profile.h>
+#include <rex/xam/task_context.h>
 #include <rex/ui/image_decode.h>
 #include <array>
 #include <cstring>
@@ -41,24 +36,23 @@ int main(int argc, char** argv) {
           resolved.filename().string().starts_with("x360n_png17559_")) std::filesystem::remove_all(resolved, ec);
     }
   } cleanup{work};
-  rex::Runtime rt(std::filesystem::absolute(argv[1]), work, {}, work / "cache", work / "metadata");
-  rex::RuntimeConfig config{}; config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  if (rt.Setup(std::move(config))) return 3;
-  const auto dll = std::filesystem::absolute(argv[2]).string();
-  rt.kernel_state()->RegisterRecompiledModule("xam_ui.xex", "game:\\system\\xam_ui.xex", dll.c_str());
-  auto module = rt.kernel_state()->LoadUserModule("game:\\system\\xam_ui.xex", false);
+  x360n::DiagnosticToolApp app("png_17559_probe",work);
+  if(!app.Start())return 5;
+  auto tool=app.Open(std::filesystem::absolute(argv[1]));if(!tool)return 5;
+  auto& rt=tool->GetRuntime();
+  const auto dll = std::filesystem::absolute(argv[2]).replace_extension().string();
+  rt.GetModuleRegistry().RegisterRecompiledModule("xam_ui.xex", "game:\\system\\xam_ui.xex", dll.c_str());
+  auto module = rt.GetModuleRegistry().LoadUserModule("game:\\system\\xam_ui.xex", false);
   if (!module) return 4;
   x360n::GuestFaultContext fault;
-  if (!fault.Start(*rt.memory(), work / "fault.ppc.txt")) return 10;
+  if (!fault.Start(rt, work / "fault.ppc.txt")) return 10;
   std::cout << "diagnostic=" << work.string() << std::endl;
   bool passed = true;
-  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-      rt.kernel_state(), 512 * 1024, 0, [&] {
-    x360n::SystemUiContext context(*rt.memory());
-    const auto block = rt.memory()->SystemHeapAlloc(65536);
+  auto caller = rt.GetThreadRegistry().LaunchHostThread("png_17559 probe",512*1024,[&] {
+    x360n::SystemUiContext context(*(&rex::kernel::GetAddressSpace(rt)));
+    const auto block = (&rex::kernel::GetAddressSpace(rt))->SystemHeapAlloc(65536);
     if (!block) { passed = false; return 0; }
-    auto* base = rt.memory()->virtual_membase();
+    auto* base = (&rex::kernel::GetAddressSpace(rt))->GetVirtualMembase();
     auto put = [&](uint32_t offset, uint32_t value) {
       rex::memory::store_and_swap<uint32_t>(base + block + offset, value);
     };
@@ -77,15 +71,15 @@ int main(int argc, char** argv) {
       uint64_t args[]{block, block + 68};
       uint32_t result;
       if (public_api) {
-        auto* ctx = context.thread_state()->context();
+        auto* ctx = context.thread_state()->GetContext();
         ctx->r3.u64 = block + 256; ctx->r4.u64 = 8; ctx->r5.u64 = 8; ctx->r6.u64 = 48;
         ctx->r7.u64 = block + 4096; ctx->r8.u64 = block + 64; ctx->r9.u64 = flags; ctx->r10.u64 = 0;
         if (flags) __imp__XamPngEncodeEx(*ctx, base); else __imp__XamPngEncode(*ctx, base);
         result = ctx->r3.u32;
         put(68, get(64)); // Public API exposes its byte count through size*.
       } else {
-        result = rex::kernel::xam::RunSystemTask([&] {
-          return uint32_t(rt.function_dispatcher()->ExecuteTrap(context.thread_state(), 0x816B0BA8, args, 2));
+        result = rex::xam::RunSystemTask([&] {
+          return uint32_t((&rex::kernel::GetFunctionDispatcher(rt))->ExecuteTrap(context.thread_state(), 0x816B0BA8, args, 2));
         });
       }
       int width = 0, height = 0;
@@ -108,17 +102,17 @@ int main(int argc, char** argv) {
                                      << ',' << unsigned(pixels[2]) << ',' << unsigned(pixels[3]);
       std::cout << " valid=" << valid << std::endl;
     }
-    rt.memory()->SystemHeapFree(block);
+    (&rex::kernel::GetAddressSpace(rt))->SystemHeapFree(block);
     if (public_api) {
       // Exercise the actual original encoder -> native profile-write boundary
       // with both sizes supplied by the original capture path. Private runtime
       // profile only; no dashboard entrypoint or achievement award is invoked.
-      auto* profiles = rt.kernel_state()->user_profile();
+      auto* profiles = (&REX_INTERFACE(rex::xam::IXAMTitleServices)->GetUserProfile());
       uint64_t xuid = 0;
       if (profiles->CreateLocal("PngProbe", &xuid) || profiles->SetLocalSession(xuid)) {
         passed = false; return 0;
       }
-      const auto image = rt.memory()->SystemHeapAlloc(131072);
+      const auto image = (&rex::kernel::GetAddressSpace(rt))->SystemHeapAlloc(131072);
       if (!image) { passed = false; return 0; }
       std::array<std::vector<uint8_t>, 2> pngs;
       for (unsigned i = 0; i < 2; ++i) {
@@ -126,7 +120,7 @@ int main(int argc, char** argv) {
         for (uint32_t y = 0; y < side; ++y) for (uint32_t x = 0; x < side; ++x)
           rex::memory::store_and_swap<uint32_t>(base + image + 256 + y * pitch + x * 4, 0x11223344);
         rex::memory::store_and_swap<uint32_t>(base + image + 64, 32768);
-        auto* ctx = context.thread_state()->context();
+        auto* ctx = context.thread_state()->GetContext();
         ctx->r3.u64 = image + 256; ctx->r4.u64 = side; ctx->r5.u64 = side; ctx->r6.u64 = pitch;
         ctx->r7.u64 = image + 32768; ctx->r8.u64 = image + 64; ctx->r9.u64 = 1; ctx->r10.u64 = 0;
         __imp__XamPngEncodeEx(*ctx, base);
@@ -159,12 +153,13 @@ int main(int argc, char** argv) {
         passed &= valid;
         std::cout << "original_encode_profile_write_64_32 result=" << writer.r3.u32 << " valid=" << valid << std::endl;
       }
-      rt.memory()->SystemHeapFree(image);
+      (&rex::kernel::GetAddressSpace(rt))->SystemHeapFree(image);
     }
     return 0;
-  }));
-  if (caller->Create()) return 5;
+  });
+  if (!caller) return 5;
   uint64_t timeout = uint64_t(-100'000'000ll);
-  if (caller->Wait(0, 0, 0, &timeout)) ExitProcess(6);
+  if (rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*caller, 0, 0, 0, &timeout)) ExitProcess(6);
+    rex::kernel::CloseOwned(rt.GetObjectTable(),*caller);
   return passed ? 0 : 7;
 }

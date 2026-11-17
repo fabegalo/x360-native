@@ -23,9 +23,9 @@
 // should not be reached; if one is, the run says so.
 #include <cstdint>
 
-#include <rex/logging/assert.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
-#include <rex/ppc/func.h>
+#include <rex/ppc/hook.h>
 
 namespace {
 
@@ -37,10 +37,10 @@ namespace {
 
 }  // namespace
 
-extern "C" REX_FUNC(__imp__XUsbcamDestroy) { Trap(ctx, "xboxkrnl 0x223 XUsbcamDestroy"); }
-extern "C" REX_FUNC(__imp__XUsbcamSetConfig) { Trap(ctx, "xboxkrnl 0x21C XUsbcamSetConfig"); }
-extern "C" REX_FUNC(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView"); }
-extern "C" REX_FUNC(__imp__XUsbcamSetCaptureMode) {
+REX_HOOK_RAW(__imp__XUsbcamDestroy) { Trap(ctx, "xboxkrnl 0x223 XUsbcamDestroy"); }
+REX_HOOK_RAW(__imp__XUsbcamSetConfig) { Trap(ctx, "xboxkrnl 0x21C XUsbcamSetConfig"); }
+REX_HOOK_RAW(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView"); }
+REX_HOOK_RAW(__imp__XUsbcamSetCaptureMode) {
   Trap(ctx, "xboxkrnl 0x21A XUsbcamSetCaptureMode");
 }
-extern "C" REX_FUNC(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame"); }
+REX_HOOK_RAW(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame"); }

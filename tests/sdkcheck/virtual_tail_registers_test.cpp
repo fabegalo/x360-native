@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
 #include "synthetic_xex.h"
 #include <fstream>
 
@@ -27,18 +27,18 @@ TEST_CASE("Virtual tail boundaries preserve distinct volatile load registers",
       work.write("test.xex", bytes);
       std::ofstream(work.dir / "test.toml")
           << "project_name='tails'\nfile_path='test.xex'\nout_directory_path='out'\n";
-      auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+      auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
       REQUIRE(pipeline.has_value());
       REQUIRE(pipeline->RunAnalyze().has_value());
-      const auto& graph = pipeline->context().graph;
-      const auto* thunk = graph.getFunction(kXexText + 8);
+      const auto& graph = pipeline->GetContext().graph;
+      const auto* thunk = graph.GetFunction(kXexText + 8);
       REQUIRE(thunk);
-      REQUIRE(thunk->blocks().size() == 1);
-      CHECK(thunk->blocks().front().size == 16);
-      const auto* leaf = graph.getFunction(kXexText + 24);
+      REQUIRE(thunk->GetBlocks().size() == 1);
+      CHECK(thunk->GetBlocks().front().size == 16);
+      const auto* leaf = graph.GetFunction(kXexText + 24);
       REQUIRE(leaf);
-      CHECK(leaf->blocks().front().size == 8);
-      CHECK(thunk->jumpTables().empty());
+      CHECK(leaf->GetBlocks().front().size == 8);
+      CHECK(thunk->GetJumpTables().empty());
       REQUIRE(pipeline->RunWrite().has_value());
     }
   }

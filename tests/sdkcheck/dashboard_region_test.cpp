@@ -2,15 +2,15 @@
 #include <algorithm>
 #include "../../titles/dash_17559/src/experimental_region.h"
 
-TEST_CASE("dashboard experimental region is opt-out zeroed once and rejects overlaps", "[sdk][memory]") {
-  using namespace rex::memory;
+TEST_CASE("dashboard experimental region is opt-out zeroed once and rejects overlaps", "[sdk][memory][dashboard-region]") {
+  using namespace rex::kernel;
   using Region = dash17559::ExperimentalRegion;
-  Memory memory;
+  GuestAddressSpace memory;
   REQUIRE(memory.Initialize());
   auto* heap = memory.LookupHeap(Region::kBase);
   REQUIRE(heap);
   Region region;
-  HeapAllocationInfo info{};
+  HeapAllocation info{};
   CHECK(region.Map(memory, false) == Region::Result::Disabled);
   REQUIRE(heap->QueryRegionInfo(Region::kBase, &info));
   CHECK(info.state == 0);

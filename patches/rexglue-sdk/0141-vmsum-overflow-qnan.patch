@@ -1,11 +1,21 @@
-diff --git a/include/rex/ppc/intrinsics.h b/include/rex/ppc/intrinsics.h
-index 3c2fe09..b4acc87 100644
---- a/include/rex/ppc/intrinsics.h
-+++ b/include/rex/ppc/intrinsics.h
-@@ -393,6 +393,60 @@ inline simde__m128i simde_mm_sllv_epi8(simde__m128i a, simde__m128i count) {
-   return simde_mm_packus_epi16(r_lo, r_hi);
+diff --git a/include/rex/ppc/fpu.h b/include/rex/ppc/fpu.h
+--- a/include/rex/ppc/fpu.h
++++ b/include/rex/ppc/fpu.h
+@@ -14,6 +14,7 @@
+ #include <array>
+ #include <bit>
+ #include <cmath>
++#include <cstring>
+ #include <simde/x86/sse4.1.h>
+ #include <simde/x86/fma.h>
+ #if defined(__AVX2__)
+@@ -1386,3 +1387,61 @@
  }
  
+ }  // namespace rex::ppc::simd
++
++namespace rex::ppc {
++
 +// vmsum3fp128 / vmsum4fp128 dot products. Host lane 3 holds guest x (element
 +// reversal), so 0xEF sums x, y and z and 0xFF all four elements.
 +// When the dot product of finite inputs overflows float32, Xenon returns QNaN
@@ -60,40 +70,29 @@ index 3c2fe09..b4acc87 100644
 +  return dp;
 +}
 +
- }  // namespace rex::ppc
- 
- //=============================================================================
-diff --git a/src/codegen/builders/vector.cpp b/src/codegen/builders/vector.cpp
-index 2f16f77..94fbb54 100644
---- a/src/codegen/builders/vector.cpp
-+++ b/src/codegen/builders/vector.cpp
-@@ -185,21 +185,23 @@ bool build_vlogefp(BuilderContext& ctx) {
- 
- bool build_vmsum3fp128(BuilderContext& ctx) {
-   // 3-element dot product accounting for guest->host vector element reversal
--  // 0xEF = dot(yzw) with result broadcast to all elements (see constants doc)
-+  // 0xEF = dot(yzw) with result broadcast to all elements (see constants doc).
-+  // The helper returns QNaN when finite inputs overflow float32, as Xenon does.
-   ctx.emit_set_flush_mode(true);
-   ctx.println(
--      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
--      "simde_mm_load_ps({}.f32), 0xEF));",
-+      "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum3fp128(simde_mm_load_ps({}.f32), "
-+      "simde_mm_load_ps({}.f32)));",
-       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
-   return true;
- }
- 
- bool build_vmsum4fp128(BuilderContext& ctx) {
--  // 4-element dot product: 0xFF = all 4 elements, result to all (see constants doc)
-+  // 4-element dot product: 0xFF = all 4 elements, result to all (see constants doc).
-+  // The helper returns QNaN when finite inputs overflow float32, as Xenon does.
-   ctx.emit_set_flush_mode(true);
-   ctx.println(
--      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
--      "simde_mm_load_ps({}.f32), 0xFF));",
-+      "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum4fp128(simde_mm_load_ps({}.f32), "
-+      "simde_mm_load_ps({}.f32)));",
-       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
-   return true;
- }
++}  // namespace rex::ppc
+diff --git a/src/codegen/builder/vector.cpp b/src/codegen/builder/vector.cpp
+--- a/src/codegen/builder/vector.cpp
++++ b/src/codegen/builder/vector.cpp
+@@ -187,8 +187,8 @@
+   ctx.EmitSetFlushMode(true);
+   if (ctx.GetConfig().vector_math.vmsum3fp128 == VectorMath::kFast) {
+     ctx.Println(
+-        "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-        "simde_mm_load_ps({}.f32), 0xEF));",
++        "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum3fp128(simde_mm_load_ps({}.f32), "
++        "simde_mm_load_ps({}.f32)));",
+         ctx.V(ctx.insn.operands[0]), ctx.V(ctx.insn.operands[1]), ctx.V(ctx.insn.operands[2]));
+     return true;
+   }
+@@ -205,8 +205,8 @@
+   ctx.EmitSetFlushMode(true);
+   if (ctx.GetConfig().vector_math.vmsum4fp128 == VectorMath::kFast) {
+     ctx.Println(
+-        "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-        "simde_mm_load_ps({}.f32), 0xFF));",
++        "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum4fp128(simde_mm_load_ps({}.f32), "
++        "simde_mm_load_ps({}.f32)));",
+         ctx.V(ctx.insn.operands[0]), ctx.V(ctx.insn.operands[1]), ctx.V(ctx.insn.operands[2]));
+     return true;
+   }

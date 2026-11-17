@@ -1,8 +1,9 @@
 // Headless synthetic GPU clear/transition smoke. No guest, window or game.
 // This does not certify rasterized coverage, alpha-to-coverage or gameplay.
-#include <rex/graphics/util/draw.h>
-#include <rex/ui/vulkan/device.h>
-#include <rex/ui/vulkan/instance.h>
+#include <gpu/xenos/draw_state.h>
+#include <gpu/xenos/host/vulkan/vulkan_device.h>
+#include <gpu/xenos/host/vulkan/vulkan_settings.h>
+#include <gpu/xenos/host/vulkan/vulkan_instance.h>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -12,26 +13,27 @@
 #include <windows.h>
 #endif
 
-using rex::graphics::xenos::MsaaSamples;
+using rex::xenos::MSAASamples;
 void Need(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 
 void Vulkan(bool xenos_features) {
-  using namespace rex::ui::vulkan;
-  auto instance = VulkanInstance::Create(false, true);
+  using namespace rex::gpu::vulkan;
+  auto instance = VulkanInstance::Create(false, true, false);
   if (!instance) { std::cout << "Vulkan unavailable\n"; return; }
   std::vector<VkPhysicalDevice> physical;
   instance->EnumeratePhysicalDevices(physical);
   Need(!physical.empty(), "no Vulkan physical device");
-  auto device = VulkanDevice::CreateIfSupported(instance.get(), physical[0], xenos_features, false);
+  VulkanSettings settings;
+  auto device = VulkanDevice::CreateIfSupported(instance.get(), physical[0], xenos_features, false, settings);
   Need(bool(device), "Vulkan device creation");
-  const auto& fn = device->functions(); const auto& ifn = instance->functions();
-  const auto vk = device->device();
+  const auto& fn = device->GetFunctions(); const auto& ifn = instance->GetFunctions();
+  const auto vk = device->GetDevice();
   auto image_format_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties>(
-      ifn.vkGetInstanceProcAddr(instance->instance(), "vkGetPhysicalDeviceImageFormatProperties"));
+      ifn.vkGetInstanceProcAddr(instance->GetInstance(), "vkGetPhysicalDeviceImageFormatProperties"));
   Need(image_format_properties != nullptr, "image format query");
-  std::cout << "Vulkan GPU=" << device->properties().deviceName << '\n';
-  std::cout << "Vulkan Xenos features=" << xenos_features << " sample locations extension=" << device->extensions().ext_EXT_sample_locations
-            << " variable=" << device->properties().variableSampleLocations << '\n';
+  std::cout << "Vulkan GPU=" << device->GetProperties().deviceName << '\n';
+  std::cout << "Vulkan Xenos features=" << xenos_features << " sample locations extension=" << device->GetExtensions().ext_EXT_sample_locations
+            << " variable=" << device->GetProperties().variableSampleLocations << '\n';
   VkPhysicalDeviceMemoryProperties memory;
   ifn.vkGetPhysicalDeviceMemoryProperties(physical[0], &memory);
   for (unsigned samples : {1u, 2u, 4u}) {
@@ -42,12 +44,12 @@ void Vulkan(bool xenos_features) {
         != VK_SUCCESS || !(format.sampleCounts & samples)) {
       std::cout << "Vulkan depth " << samples << "x unavailable\n"; continue;
     }
-    const bool programmed = samples > 1 && device->extensions().ext_EXT_sample_locations &&
-        (device->properties().sampleLocationSampleCounts & samples);
+    const bool programmed = samples > 1 && device->GetExtensions().ext_EXT_sample_locations &&
+        (device->GetProperties().sampleLocationSampleCounts & samples);
     VkSampleLocationEXT locations[4]{};
     int8_t positions[4][2]{};
-    if (samples > 1) rex::graphics::draw_util::GetHostSampleXenosPositions(
-        samples == 2 ? MsaaSamples::k2X : MsaaSamples::k4X, true, false, positions);
+    if (samples > 1) rex::gpu::draw_state::GetHostSampleXenosPositions(
+        samples == 2 ? MSAASamples::k2X : MSAASamples::k4X, true, false, positions);
     for (unsigned i = 0; i < samples; ++i)
       locations[i] = {0.5f + positions[i][0] / 16.f, 0.5f + positions[i][1] / 16.f};
     VkSampleLocationsInfoEXT sample_info{VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT};
@@ -89,7 +91,7 @@ void Vulkan(bool xenos_features) {
     fb_info.pAttachments = &view; fb_info.width = fb_info.height = 32;
     VkFramebuffer fb; Need(fn.vkCreateFramebuffer(vk, &fb_info, nullptr, &fb) == VK_SUCCESS, "depth framebuffer");
     VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    pool_info.queueFamilyIndex = device->queue_family_graphics_compute();
+    pool_info.queueFamilyIndex = device->GetQueueFamilyGraphicsCompute();
     VkCommandPool pool; Need(fn.vkCreateCommandPool(vk, &pool_info, nullptr, &pool) == VK_SUCCESS, "command pool");
     VkCommandBufferAllocateInfo command_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     command_info.commandPool = pool; command_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -125,7 +127,7 @@ void Vulkan(bool xenos_features) {
     Need(fn.vkCreateFence(vk, &fence_info, nullptr, &fence) == VK_SUCCESS, "fence");
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO}; submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
     { auto queue = device->AcquireQueue(pool_info.queueFamilyIndex, 0);
-      Need(fn.vkQueueSubmit(queue.queue(), 1, &submit, fence) == VK_SUCCESS, "submit"); }
+      Need(fn.vkQueueSubmit(queue.GetQueue(), 1, &submit, fence) == VK_SUCCESS, "submit"); }
     Need(fn.vkWaitForFences(vk, 1, &fence, VK_TRUE, 5'000'000'000ull) == VK_SUCCESS, "GPU completion within 5 seconds");
     std::cout << "Vulkan depth clear/transition " << samples << "x programmed=" << programmed << " passed\n";
     fn.vkDestroyFence(vk, fence, nullptr); fn.vkDestroyCommandPool(vk, pool, nullptr);
@@ -158,7 +160,7 @@ void D3D12() {
     const bool programmed = samples > 1 && list1 && options.ProgrammableSamplePositionsTier != D3D12_PROGRAMMABLE_SAMPLE_POSITIONS_TIER_NOT_SUPPORTED;
     D3D12_SAMPLE_POSITION positions[4]{}; int8_t offsets[4][2]{};
     if (programmed) {
-      rex::graphics::draw_util::GetHostSampleXenosPositions(samples == 2 ? MsaaSamples::k2X : MsaaSamples::k4X, true, false, offsets);
+      rex::gpu::draw_state::GetHostSampleXenosPositions(samples == 2 ? MSAASamples::k2X : MSAASamples::k4X, true, false, offsets);
       for (unsigned i = 0; i < samples; ++i) positions[i] = {offsets[i][0], offsets[i][1]};
       list1->SetSamplePositions(samples, 1, positions);
     }

@@ -1,0 +1,45 @@
+diff --git a/include/rex/app/app.h b/include/rex/app/app.h
+--- a/include/rex/app/app.h
++++ b/include/rex/app/app.h
+@@ -170,6 +170,14 @@
+    * Returns the command line actions this program accepts, such as --version. The default has none.
+    */
+   virtual std::span<const CLIAction> GetActions() const;
++
++  /**
++   * Runs after config, environment and CLI values settle, before driver selection and startup
++   * settings freeze. Validate inputs or derive paths here. Skipped for an early shutdown action.
++   * Returns an error to stop initialization before any driver starts.
++   */
++  [[nodiscard]] virtual Result<void> OnSettingsLoaded(SettingsRegistry& settings);
++
+ 
+   /**
+    * Init, after the command line is read, once for each action given. A shutdown or restart
+diff --git a/src/app/app.cpp b/src/app/app.cpp
+--- a/src/app/app.cpp
++++ b/src/app/app.cpp
+@@ -252,6 +252,10 @@
+ void App::OnModules(std::vector<std::string>&) {}
+ 
+ void App::OnRegisterModules(std::vector<IModule*>&) {}
++
++Result<void> App::OnSettingsLoaded(SettingsRegistry&) {
++  return Ok();
++}
+ 
+ Result<void> App::OnInit() {
+   return Ok();
+@@ -403,6 +407,12 @@
+     }
+     settings_control.ApplyEnvironment();
+ 
++    if (!IsShutdownRequested()) {
++      if (auto settled = OnSettingsLoaded(settings); !settled) {
++        return failed("OnSettingsLoaded", settled.error());
++      }
++    }
++
+     logger_control.ApplySettled();
+     if (auto opened = logger_control.OpenFile(log_root.Get(), state.name); !opened) {
+       REXLOG_WARN("{}", opened.error().GetDescription());

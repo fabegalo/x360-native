@@ -1,0 +1,73 @@
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 7)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 8)
+ /**
+  * Creates an empty mount table.
+  *
+@@ -76,6 +76,12 @@
+   [[nodiscard]] virtual int DecompressLZX(std::span<const u8> input, std::span<u8> output,
+                                         u32 window_size, std::span<const u8> window_data) = 0;
+ 
++  /** Applies bounded XEX delta entries through the same LZX implementation as the loader.
++   * Returns 0 on success, 1 for a range outside either span, or a libmspack error.
++   */
++  [[nodiscard]] virtual int ApplyLZXDelta(std::span<const u8> patch, u32 window_size,
++                                         std::span<u8> image) = 0;
++
+   /**
+    * Finds an optional header entry in a raw XEX header.
+    *
+diff --git a/src/filesystem/filesystem_module.h b/src/filesystem/filesystem_module.h
+--- a/src/filesystem/filesystem_module.h
++++ b/src/filesystem/filesystem_module.h
+@@ -93,6 +93,10 @@
+     return detail::LZXDecompress(input, output, window_size, window_data);
+   }
+ 
++  int ApplyLZXDelta(std::span<const u8> patch, u32 window_size, std::span<u8> image) override {
++    return detail::LZXApplyDelta(patch, window_size, image);
++  }
++
+   std::optional<XEXOptHeaderEntry> FindXEXOptHeader(std::span<const u8> header,
+                                                     kernel::XEXHeaderKey key) override {
+     return FindOptHeaderEntry(header, key);
+diff --git a/tests/unit/filesystem/filesystem_module_test.cpp b/tests/unit/filesystem/filesystem_module_test.cpp
+--- a/tests/unit/filesystem/filesystem_module_test.cpp
++++ b/tests/unit/filesystem/filesystem_module_test.cpp
+@@ -52,3 +52,30 @@
+       files->FindXEXOptHeader(std::span<const rex::u8>{}, rex::kernel::kXEXHeaderEntryPoint));
+   CHECK_FALSE(files->OpenXDBF(nullptr, 0)->IsValid());
+ }
++
++REX_TEST_CASE("The content factory exposes bounded delta copy and zero operations", "[sdk][filesystem][module][content-delta]") {
++  rex::ModuleGroup group;
++  REQUIRE(group.Load("rexfilesystem")); REQUIRE(group.Connect());
++  auto* files = group.Get<rex::filesystem::IFileSystemFactory>(); REQUIRE(files);
++  std::array<rex::u8, 8> image{1, 2, 3, 4, 5, 6, 7, 8};
++  std::array<rex::u8, 12> patch{};
++  auto entry = [&](rex::u32 source, rex::u32 destination, rex::u16 length, rex::u16 compressed) {
++    rex::memory::store_and_swap<rex::u32>(patch.data(), source);
++    rex::memory::store_and_swap<rex::u32>(patch.data() + 4, destination);
++    rex::memory::store_and_swap<rex::u16>(patch.data() + 8, length);
++    rex::memory::store_and_swap<rex::u16>(patch.data() + 10, compressed);
++  };
++  entry(0, 4, 4, 1);
++  REQUIRE(files->ApplyLZXDelta(patch, 32768, image) == 0);
++  CHECK(image == std::array<rex::u8, 8>{1, 2, 3, 4, 1, 2, 3, 4});
++  entry(0, 0, 2, 0);
++  REQUIRE(files->ApplyLZXDelta(patch, 32768, image) == 0);
++  CHECK(image == std::array<rex::u8, 8>{0, 0, 3, 4, 1, 2, 3, 4});
++  const auto previous = image;
++  for (auto [source, destination, compressed] : std::array<std::array<rex::u32, 3>, 3>{
++           std::array<rex::u32, 3>{0, 7, 1}, {7, 0, 1}, {0, 0, 2}}) {
++    entry(source, destination, 4, rex::u16(compressed));
++    CHECK(files->ApplyLZXDelta(patch, 32768, image) == 1);
++    CHECK(image == previous);
++  }
++}

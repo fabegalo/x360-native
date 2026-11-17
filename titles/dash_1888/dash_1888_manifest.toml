@@ -1,7 +1,7 @@
 # Retail 2.0.1888.0 only. Originals stay in the ignored, verified local snapshot.
 [project]
 name = "dash_1888"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../.local/inputs/dashboards/1888/runtime"
 
 [entrypoint]

@@ -1,0 +1,125 @@
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -244,6 +244,22 @@
+     }
+   }
+ 
++  // Tools read original inputs; only an executable gets a writable utility drive.
++  if (!tool_mode_) {
++    auto cache_root = REX_PATHS().cache_root.Get();
++    if (cache_root.empty()) cache_root = user_data_root_ / "cache";
++    const auto utility = cache_root / "utility";
++    std::error_code error;
++    std::filesystem::create_directories(utility, error);
++    if (error) return fail(X_STATUS_UNSUCCESSFUL, std::format("cannot create utility drive: {}", error.message()));
++    if (auto mounted = file_system_->Mount(filesystem::MountEntry{
++            .path = "\\CACHE", .type = filesystem::ProviderType::kHostDirectory,
++            .source = utility, .flags = filesystem::MountFlags::kWritable, .null_paths = {}}); !mounted)
++      return fail(X_STATUS_UNSUCCESSFUL, mounted.error().message);
++    if (auto linked = file_system_->Link("cache:", "\\CACHE"); !linked)
++      return fail(X_STATUS_UNSUCCESSFUL, linked.error().message);
++  }
++
+   setup_complete_ = true;
+   g_active.store(&owner_, std::memory_order_release);
+   if (tool_mode_) {
+diff --git a/tests/unit/kernel/title_runtime_test.cpp b/tests/unit/kernel/title_runtime_test.cpp
+--- a/tests/unit/kernel/title_runtime_test.cpp
++++ b/tests/unit/kernel/title_runtime_test.cpp
+@@ -32,6 +32,7 @@
+ #include <chrono>
+ #include <memory>
+ #include <rex/settings_registry.h>
++#include <rex/path_settings.h>
+ #include <filesystem>
+ #include "kernel/apu.h"
+ #include <algorithm>
+@@ -72,7 +73,10 @@
+ 
+   void WriteImage() const { rex::test::WriteTitle(folder.path / "game"); }
+ 
+-  void Start() const { REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(folder.path / "game")); }
++  void Start() const {
++    REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(folder.path / "game"));
++    REQUIRE(rex::kernel::GetTitlePaths().entry.Set("default.xex"));
++  }
+ };
+ 
+ rex::ppc::PPCImage MakeImage() {
+@@ -629,3 +633,75 @@
+ }
+ 
+ }  // namespace tool_runtime_tests
++
++namespace {
++class UtilityCacheApp final : public rex::test::ObjectApp<rex::codegen::ToolApp> {
++ public:
++  UtilityCacheApp(const std::filesystem::path& app_root, const std::filesystem::path& cache)
++      : ObjectApp("utility_cache_test", app_root), cache_(cache) {}
++ protected:
++  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
++    REX_TRY_VOID(ToolApp::OnConfigure(settings));
++    return REX_PATHS().cache_root.Set(cache_);
++  }
++ private:
++  std::filesystem::path cache_;
++};
++}
++
++REX_TEST_CASE("the canonical runtime utility drive persists outside original inputs", "[kernel][title][utility-cache]") {
++  const rex::test::TempFolder folder("rex_runtime_utility_");
++  rex::test::ReleaseTestMemory();
++  const auto cache = folder.path / "cache";
++  UtilityCacheApp app(folder.path, cache);
++  REQUIRE(app.Start());
++  rex::test::WriteTitle(folder.path / "game");
++  REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(folder.path / "game"));
++  REQUIRE(rex::kernel::GetTitlePaths().entry.Set("default.xex"));
++  rex::kernel::TitleRuntime runtime(MakeImage());
++  REQUIRE(runtime.Load());
++  {
++    auto file = runtime.GetFileSystem().Open("cache:\\generic.bin",
++        rex::filesystem::OpenOptions{.disposition = rex::filesystem::Disposition::kCreate,
++                                    .access = rex::filesystem::Access::kWriteData});
++    REQUIRE(file);
++    const std::array<rex::u8, 3> bytes{1, 2, 3};
++    REQUIRE(file->file->Write(bytes, 0));
++  }
++  runtime.Unload();
++  REQUIRE(runtime.Load());
++  auto stat = runtime.GetFileSystem().Stat("cache:\\generic.bin");
++  REQUIRE(stat);
++  CHECK(std::filesystem::file_size(cache / "utility/generic.bin") == 3);
++  CHECK_FALSE(std::filesystem::exists(folder.path / "game/cache"));
++  CHECK_FALSE(std::filesystem::exists(folder.path / "game/utility"));
++  runtime.Unload();
++}
++
++REX_TEST_CASE("a failed utility directory cannot produce a loaded runtime", "[kernel][title][utility-cache]") {
++  const rex::test::TempFolder folder("rex_runtime_utility_failure_");
++  rex::test::ReleaseTestMemory();
++  const auto cache = folder.path / "blocked";
++  std::ofstream(cache, std::ios::binary).write("preserve", 8);
++  UtilityCacheApp app(folder.path, cache);
++  REQUIRE(app.Start());
++  rex::test::WriteTitle(folder.path / "game");
++  REQUIRE(rex::kernel::GetTitlePaths().game_root.Set(folder.path / "game"));
++  REQUIRE(rex::kernel::GetTitlePaths().entry.Set("default.xex"));
++  rex::kernel::TitleRuntime runtime(MakeImage());
++  CHECK_FALSE(runtime.Load());
++  CHECK_FALSE(runtime.IsLoaded());
++  CHECK(std::filesystem::file_size(cache) == 8);
++  CHECK_FALSE(std::filesystem::exists(folder.path / "game/utility"));
++}
++
++REX_TEST_CASE("tool analysis never mounts or creates a utility drive beside originals", "[kernel][codegen][utility-cache]") {
++  const rex::test::TempFolder original("rex_tool_utility_original_");
++  const rex::test::TempFolder host("rex_tool_utility_host_");
++  rex::test::ReleaseTestMemory();
++  rex::test::ObjectApp<rex::codegen::ToolApp> app("tool_utility_test", host.path);
++  auto tool = app.Open(original.path);
++  REQUIRE(tool);
++  CHECK_FALSE(tool->GetRuntime().GetFileSystem().FindLink("cache:"));
++  CHECK(std::filesystem::is_empty(original.path));
++}

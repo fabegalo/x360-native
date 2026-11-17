@@ -4,7 +4,7 @@
 # 2334c6772fd54201e60792c70a54e4714aaf74d45f657013ebe5da3737e06c0c.
 [project]
 name = "dash_17559"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "../../../.local/inputs/dashboards/17559/runtime"
 
 [entrypoint]

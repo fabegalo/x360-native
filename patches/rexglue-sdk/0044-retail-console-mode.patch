@@ -1,15 +1,40 @@
-diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 1e45b49..9627e32 100644
---- a/src/kernel/xam/xam_misc.cpp
-+++ b/src/kernel/xam/xam_misc.cpp
-@@ -527,7 +527,9 @@ REX_EXPORT_STUB(__imp__XamIsCurrentTitleDash);
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -457,6 +457,9 @@
+   REX_XAM_STUB("XamSwapDisc({})", static_cast<u32>(disc_number));
+   return kernel::X_STATUS_SUCCESS;
+ }
++
++// Original retail console mode has no data-center flag.
++u32 XamIsDataCenterMode_entry() { return 0; }
+ 
+ }  // namespace xam
+ }  // namespace rex
+@@ -501,3 +504,5 @@
+ REX_XAM_BODY(__imp__XMemAlloc, rex::xam::XMemAlloc_entry)
+ 
+ REX_XAM_BODY(__imp__XMemFree, rex::xam::XMemFree_entry)
++
++REX_XAM_BODY(__imp__XamIsDataCenterMode, rex::xam::XamIsDataCenterMode_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -501,7 +501,7 @@
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterClient);
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterDash);
  REX_EXPORT_STUB(__imp__XamIsCurrentTitleIptv);
 -REX_EXPORT_STUB(__imp__XamIsDataCenterMode);
-+// This runtime hosts a local retail console, not the data-center console mode.
-+// 17559 export 8168AF28 queries bit 2 of the console-mode flags; absent here.
-+extern "C" REX_FUNC(__imp__XamIsDataCenterMode) { ctx.r3.u64 = 0; }
++
  REX_EXPORT_STUB(__imp__XamIsDvrRecording);
  REX_EXPORT_STUB(__imp__XamIsIptvEnabled);
  REX_EXPORT_STUB(__imp__XamIsNatalPlaybackEnabled);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -318,3 +318,5 @@
+ REX_XAM_FORWARD(__imp__XGetOverlappedExtendedError)
+ 
+ REX_XAM_FORWARD(__imp__XGetOverlappedResult)
++
++REX_XAM_FORWARD(__imp__XamIsDataCenterMode)

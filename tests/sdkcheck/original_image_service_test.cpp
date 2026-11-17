@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/runtime.h>
-#include <rex/kernel/init.h>
-#include <rex/ppc/func.h>
-#include <rex/system/kernel_state.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/test_access.h"
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/ppc/recompiled_code.h>
 #include <array>
 #include "synthetic_xex.h"
 
@@ -25,21 +25,21 @@ void ImageProbe(PPCContext& ctx, uint8_t*) {
 TEST_CASE("Retail 17559 image services preserve original cache ABI and full tile key",
           "[sdk][original-image-service]") {
   x360n::test::Workdir dir("x360n-original-images", "routing");
-  rex::Runtime rt(dir.dir, dir.dir); rex::RuntimeConfig config{};
-  config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
-  REQUIRE(rt.Setup(std::move(config)) == 0);
-  auto* dispatcher = rt.function_dispatcher();
-  REQUIRE(dispatcher->InitializeFunctionTable(0x81690000,0x10000,0x81690000,0x10000,true,true));
+  rex::test::KernelFixture fixture;
+  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+  auto* dispatcher = &rex::kernel::GetFunctionDispatcher(caller.GetRuntime());
+  REQUIRE(dispatcher->InitializeFunctionTable(0x81690000,0x10000,0x81690000,0x10000,false,true));
   const std::array<PPCFunc*,4> functions{__imp__XamReadImage,
       __imp__XamInitializeGameTileCache,__imp__XamDestroyGameTileCache,__imp__XamReadGameTileImage};
   const std::array<uint32_t,4> addresses{0x81691EE8,0x81691DD0,0x81691E90,0x81691EC8};
   for (size_t i=0;i<functions.size();++i) {
     PPCContext ctx{}; ctx.r3.u64=10;ctx.r4.u64=0;ctx.r5.u64=0xFE;
     ctx.r6.u64=0xE000001122334455ull;ctx.r7.u64=0x12345678;ctx.r8.u64=0x87654321;
-    calls=0; functions[i](ctx,rt.memory()->virtual_membase());
+    calls=0; functions[i](ctx,caller.GetBase());
     CHECK(ctx.r3.u32==0x80004001); CHECK(calls==0);
     REQUIRE(dispatcher->SetFunction(addresses[i],ImageProbe));
-    ctx.r3.u64=10;functions[i](ctx,rt.memory()->virtual_membase());
+    ctx.r3.u64=10;functions[i](ctx,caller.GetBase());
     CHECK(ctx.r3.u32==1);CHECK(calls==1);
   }
+  });
 }

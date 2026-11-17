@@ -1,70 +1,75 @@
 #pragma once
-#include <rex/input/input_driver.h>
-#include <rex/input/flags.h>
-#include <rex/logging.h>
+#include <rex/hid/input_driver.h>
+#include <rex/driver_module.h>
+#include <rex/driver_registration.h>
 #include <chrono>
-#include <deque>
-#include <mutex>
+#include <array>
+#include "system_ui.h"
 
 namespace dash1888 {
-// Explicit integrated input fixture. It opens no host device and is installed
-// only by the opt-in diagnostic cvar. Normal sessions have no driver or timer.
-class GuideDiagnostic final : public rex::input::InputDriver {
+// Explicit diagnostic source; the SDK generates keystrokes from these pad transitions.
+// It opens no host device and is selected only by input_probe.
+class GuideDiagnostic final : public rex::hid::IInputDriver {
  public:
-  explicit GuideDiagnostic(bool close_with_b) : InputDriver(nullptr, 0), close_with_b_(close_with_b) {}
-  rex::X_STATUS Setup() override { return 0; }
-  void EnumerateDevices(std::vector<rex::input::DeviceInfo>& out) override {
-    out.push_back({rex::input::DeviceId(0x1888000047554944ull), 0, "1888 diagnostic only", "", true});
+  explicit GuideDiagnostic(bool close_with_b) : close_with_b_(close_with_b) {}
+  std::string_view GetName() const override { return "dash1888-probe"; }
+  rex::Result<void> Initialize(rex::IDriverContext&) override {
+    start_ = std::chrono::steady_clock::now();
+    return rex::Ok();
   }
-  rex::X_RESULT GetDeviceState(rex::input::DeviceId, rex::input::X_INPUT_STATE* out) override {
-    std::lock_guard lock(mutex_);
-    const auto elapsed = Millis(); Pump(elapsed);
-    *out = {}; out->packet_number = uint32_t(elapsed + 1);
+  void Shutdown() override {}
+  rex::u64 GetDeviceRevision() const override { return 1; }
+  void EnumerateDevices(std::vector<rex::hid::PadDevice>& out) override {
+    rex::hid::PadDevice device;
+    device.id = {0x1888000047554944ull};
+    device.name = "1888 diagnostic only";
+    device.identity.xinput_slot = 0;
+    out = {device};
+  }
+  rex::Result<rex::hid::PadState> GetDeviceState(rex::hid::PadDeviceID) override {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_).count() - 3000;
+    return StateAt(elapsed, close_with_b_);
+  }
+  static rex::hid::PadState StateAt(int64_t elapsed, bool close_with_b) {
+    rex::hid::PadState state;
     if (elapsed >= 0 && elapsed < 18000) {
       const auto phase = elapsed % 6000;
-      if (phase < 222 || (!close_with_b_ && phase >= 3000 && phase < 3222))
-        out->gamepad.buttons = rex::input::X_INPUT_GAMEPAD_GUIDE |
-            rex::input::X_INPUT_GAMEPAD_BACK | rex::input::X_INPUT_GAMEPAD_START;
-      else if (close_with_b_ && phase >= 3000 && phase < 3222)
-        out->gamepad.buttons = rex::input::X_INPUT_GAMEPAD_B;
+      if (phase < 222 || (!close_with_b && phase >= 3000 && phase < 3222))
+        state.buttons = rex::hid::kPadGuide | rex::hid::kPadBack | rex::hid::kPadStart;
+      else if (close_with_b && phase >= 3000 && phase < 3222)
+        state.buttons = rex::hid::kPadB;
     }
-    return 0;
+    return state;
   }
-  rex::X_RESULT GetDeviceCapabilities(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_CAPABILITIES* out) override {
-    if (!out) return 87;
-    *out = {}; out->type = 1; out->sub_type = 1; out->gamepad.buttons = 0xFFFF;
-    return 0;
+  rex::Result<rex::hid::PadCapabilities> GetDeviceCapabilities(rex::hid::PadDeviceID) override {
+    rex::hid::PadCapabilities caps;
+    caps.supported.buttons = 0xFFFF;
+    return caps;
   }
-  rex::X_RESULT SetDeviceVibration(rex::input::DeviceId, rex::input::X_INPUT_VIBRATION*) override { return 0; }
-  rex::X_RESULT GetDeviceKeystroke(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_KEYSTROKE* out) override {
-    std::lock_guard lock(mutex_);
-    Pump(Millis());
-    if (keys_.empty()) return 4306;
-    *out = keys_.front(); keys_.pop_front();
-    REXLOG_INFO("1888 diagnostic input: vk={:04X} flags={:04X}",
-                uint16_t(out->virtual_key), uint16_t(out->flags));
-    return 0;
+  rex::Result<void> SetDeviceVibration(rex::hid::PadDeviceID, const rex::hid::PadVibration&) override {
+    return rex::Ok();
   }
  private:
-  int64_t Millis() const {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_).count() - 3000;
-  }
-  void Pump(int64_t elapsed) {
-    constexpr int times[] = {0, 12, 210, 222, 3000, 3012, 3210, 3222};
-    while (next_ < 24 && elapsed >= int64_t(next_ / 8 * 6000 + times[next_ % 8])) {
-      const auto event = next_++ % 8;
-      if (close_with_b_ && (event == 5 || event == 7)) continue;
-      rex::input::X_INPUT_KEYSTROKE stroke{};
-      stroke.virtual_key = close_with_b_ && event >= 4 ? 0x5801 : (event % 2 ? 0x5814 : 0x5815);
-      stroke.flags = event % 4 < 2 ? rex::input::X_INPUT_KEYSTROKE_KEYDOWN : rex::input::X_INPUT_KEYSTROKE_KEYUP;
-      keys_.push_back(stroke);
-    }
-  }
   bool close_with_b_;
-  std::mutex mutex_;
-  unsigned next_ = 0;
-  std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
-  std::deque<rex::input::X_INPUT_KEYSTROKE> keys_;
+  std::chrono::steady_clock::time_point start_;
+};
+class GuideDiagnosticProvider final : public rex::IModule, public rex::IDriverModule {
+ public:
+  std::string_view GetName() const override { return "dash1888-diagnostic"; }
+  rex::Result<void> Connect(rex::IInterfaceFactory&) override { return rex::Ok(); }
+  void Disconnect() override {}
+  rex::Result<void> Init() override { return rex::Ok(); }
+  void Shutdown() override {}
+  rex::IInterface* QueryInterface(std::string_view name, rex::u32 version) override {
+    return rex::FindModuleInterface<rex::IDriverModule>(*this, name, version);
+  }
+  std::span<const rex::DriverRegistration> GetDrivers() const override { return drivers_; }
+ private:
+  static std::unique_ptr<rex::IDriver> Create() {
+    return std::make_unique<GuideDiagnostic>(GetSystemUiSettings().input_probe.Get() == 2);
+  }
+  static constexpr std::array drivers_{
+      rex::DriverRegistration{rex::DriverType::kInput, "dash1888-probe", {}, &Create}};
 };
 }

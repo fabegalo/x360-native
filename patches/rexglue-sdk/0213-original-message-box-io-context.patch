@@ -1,0 +1,465 @@
+diff --git a/src/xam/xam_ui.cpp b/src/xam/xam_ui.cpp
+--- a/src/xam/xam_ui.cpp
++++ b/src/xam/xam_ui.cpp
+@@ -201,73 +201,104 @@
+ 
+ namespace {
+ 
+-u32 ShowMessageBox(MappedWString title_ptr, MappedWString text_ptr, u32 button_count,
+-                   MappedU32 button_ptrs, u32 active_button, MappedU32 result_ptr,
+-                   MappedVoid overlapped) {
+-  std::string title;
+-  if (title_ptr) {
+-    title = rex::string::ToUTF8(rex::memory::load_and_swap<std::u16string>(
+-        CurrentTitle().membase.TranslateVirtual(title_ptr.GetGuestAddress())));
+-  }
+-  std::string text_str =
+-      text_ptr ? rex::string::ToUTF8(rex::memory::load_and_swap<std::u16string>(
+-                     CurrentTitle().membase.TranslateVirtual(text_ptr.GetGuestAddress())))
+-               : "";
+-
+-  std::vector<std::string> buttons;
+-  for (u32 i = 0; i < button_count; ++i) {
+-    u32 button_ptr = button_ptrs[i];
+-    auto button = rex::memory::load_and_swap<std::u16string>(
+-        CurrentTitle().membase.TranslateVirtual(button_ptr));
+-    buttons.push_back(rex::string::ToUTF8(button));
+-  }
+-
+-  kernel::X_RESULT result;
+-  if (GetXAMSettings().headless->Get() || !HasWindow()) {
+-    auto run = [result_ptr, active_button]() -> kernel::X_RESULT {
+-      *result_ptr = static_cast<u32>(active_button);
+-      return kernel::X_ERROR_SUCCESS;
+-    };
+-    result = XAMDispatchHeadless(run, overlapped.GetGuestAddress());
+-  } else {
+-    ui::PromptConfig config{
+-        .title = title.empty() ? "Message Box" : title, .body = text_str, .buttons = buttons};
+-    auto close = [result_ptr, active_button](const ui::PromptResult& prompt) -> kernel::X_RESULT {
+-      *result_ptr = prompt.canceled ? static_cast<u32>(active_button) : prompt.button;
+-      return kernel::X_ERROR_SUCCESS;
+-    };
+-    result = XAMDispatchPrompt(std::move(config), close, overlapped.GetGuestAddress());
+-  }
+-  return result;
++static bool MessageBoxSpan(u32 address, u64 size, u32 access) {
++  return size && size <= UINT32_MAX && CurrentTitle().heap.IsGuestRangeAccessible(address, static_cast<u32>(size), access);
++}
++
++static u32 SystemUICallerContext() {
++  auto* caller = CurrentTitle().threads.GetCallingThread();
++  return caller ? caller->GetHandle() : 0;
++}
++
++static bool CopyMessageBoxText(uint32_t source,
++                               uint8_t* output, uint32_t capacity) {
++  if (!source) return true; // Optional title/body; destination is already zeroed.
++  for (uint32_t i = 0; i + 1 < capacity; ++i) {
++    const uint64_t at = uint64_t(source) + uint64_t(i) * 2;
++    if (at > UINT32_MAX || !MessageBoxSpan(uint32_t(at), 2, kernel::kMemoryProtectRead))
++      return false;
++    const auto value = memory::load_and_swap<uint16_t>(CurrentTitle().membase.TranslateVirtual<u8*>(uint32_t(at)));
++    if (!value) break;
++    memory::store_and_swap<uint16_t>(output + i * 2, value);
++  }
++  return true;
+ }
+ 
+ }  // namespace
+ 
+ u32 XamShowMessageBoxUI_entry(u32 user_index, MappedWString title_ptr, MappedWString text_ptr,
+-                              u32 button_count, MappedU32 button_ptrs, u32 active_button, u32 flags,
+-                              MappedU32 result_ptr, MappedVoid overlapped) {
++                              u32 button_count, MappedU32 button_ptrs, u32 active_button,
++                              u32 flags, MappedU32 result_ptr, MappedVoid overlapped) {
+   REXXAM_DEBUG(
+       "XamShowMessageBoxUI({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X})",
+-      static_cast<u32>(user_index), title_ptr.GetGuestAddress(), text_ptr.GetGuestAddress(),
+-      static_cast<u32>(button_count), button_ptrs.GetGuestAddress(),
+-      static_cast<u32>(active_button), static_cast<u32>(flags), result_ptr.GetGuestAddress(),
+-      overlapped.GetGuestAddress());
+-  return ShowMessageBox(title_ptr, text_ptr, button_count, button_ptrs, active_button, result_ptr,
+-                        overlapped);
++      uint32_t(user_index), title_ptr.GetGuestAddress(), text_ptr.GetGuestAddress(),
++      uint32_t(button_count), button_ptrs.GetGuestAddress(), uint32_t(active_button), uint32_t(flags),
++      result_ptr.GetGuestAddress(), overlapped.GetGuestAddress());
++  const auto io_address = overlapped.GetGuestAddress();
++  constexpr auto rw = kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite;
++  if (io_address && !MessageBoxSpan(io_address, sizeof(kernel::XOVERLAPPED), rw))
++    return X_ERROR_INVALID_PARAMETER;
++  auto* io = io_address ? CurrentTitle().membase.TranslateVirtual<kernel::XOVERLAPPED*>(io_address) : nullptr;
++  const auto invalid = [io]() -> X_RESULT {
++    // Original 17559 816C55E0: invalid requests only set the extended status.
++    if (io) io->extended_error = X_ERROR_INVALID_PARAMETER;
++    return X_ERROR_INVALID_PARAMETER;
++  };
++  // Original 17559 816C5508-816C55FC, including built-in button combinations.
++  if ((user_index >= 4 && user_index != 0xFF) || (flags & 0xFFC00EF8u) ||
++      (!((button_count >= 1 && button_count <= 3) && active_button < button_count) &&
++       !(button_count == 0 && (flags & 0x370000u))) ||
++      ((flags & 0x100000u) && (flags & 0x200000u)) ||
++      ((flags & 0x100000u) && (button_count > 1 || active_button != 0)) ||
++      ((flags & 0x200000u) && (button_count > 2 || active_button > 1)) ||
++      (io_address ? !result_ptr : bool(result_ptr))) return invalid();
++  if ((result_ptr && !MessageBoxSpan(result_ptr.GetGuestAddress(), 8, kernel::kMemoryProtectWrite)) ||
++      (button_count && !MessageBoxSpan(button_ptrs.GetGuestAddress(), uint64_t(button_count) * 4,
++                                      kernel::kMemoryProtectRead))) return invalid();
++  // FE/2100D loads this dashboard's original hud.xex. Copy every string into
++  // the original inline request before dispatch: no caller-string lifetime,
++  // ImGui fallback, default selection, title identity or graphics hot-path work.
++  const auto request = CurrentTitle().heap.SystemHeapAlloc(1148);
++  if (!request) return X_RESULT(14);
++  auto* bytes = CurrentTitle().membase.TranslateVirtual<uint8_t*>(request);
++  std::memset(bytes, 0, 1148);
++  auto* words = reinterpret_cast<be_u32*>(bytes);
++  words[1] = user_index; words[2] = 1;
++  bool valid = CopyMessageBoxText(title_ptr.GetGuestAddress(), bytes + 12, 43) &&
++               CopyMessageBoxText(text_ptr.GetGuestAddress(), bytes + 98, 384);
++  for (uint32_t i = 0; valid && i < button_count; ++i) {
++    const auto label = uint32_t(button_ptrs[i]);
++    valid = label && CopyMessageBoxText(label, bytes + 872 + i * 86, 43);
++  }
++  if (!valid) { CurrentTitle().heap.SystemHeapFree(request); return invalid(); }
++  words[217] = button_count; words[283] = active_button; words[284] = flags;
++  words[285] = result_ptr.GetGuestAddress(); words[286] = io_address;
++  if (result_ptr && !(flags & 0x70000u)) {
++    result_ptr[0] = 0; result_ptr[1] = 0;
++  }
++  if (io) {
++    io->result = X_ERROR_IO_PENDING;
++    io->context = SystemUICallerContext();
++  }
++  const auto status = CurrentXAM().GetAppManager().DispatchMessageSync(0xFE, 0x2100D, request, 1148);
++  CurrentTitle().heap.SystemHeapFree(request);
++  if (XFAILED(status)) {
++    // Original 816C16C8 exposes the service HRESULT in last-error and maps
++    // only E_OUTOFMEMORY specially. Never silently approve an unavailable UI.
++    if (auto* caller = CurrentTitle().threads.GetCallingThread()) caller->SetLastError(status);
++    const uint32_t error = uint32_t(status) == 0x8007000Eu ? 14 : X_ERROR_FUNCTION_FAILED;
++    if (io) CurrentTitle().overlapped_dispatcher.Complete(io_address, {.result = error, .extended_error = static_cast<u32>(status), .length = 0, .preserve_context = true});
++    REXXAM_WARN("Original system message-box service failed: {:08X}", uint32_t(status));
++    return error;
++  }
++  return io ? X_ERROR_IO_PENDING : X_ERROR_SUCCESS;
+ }
+ 
+ u32 XamShowMessageBoxUIEx_entry(u32 user_index, MappedWString title_ptr, MappedWString text_ptr,
+                                 u32 button_count, MappedU32 button_ptrs, u32 active_button,
+-                                u32 flags, u32 extra, MappedU32 result_ptr, MappedVoid overlapped) {
+-  REXXAM_DEBUG(
+-      "XamShowMessageBoxUIEx({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}, "
+-      "{:08X}, {:08X}, {:08X})",
+-      static_cast<u32>(user_index), title_ptr.GetGuestAddress(), text_ptr.GetGuestAddress(),
+-      static_cast<u32>(button_count), button_ptrs.GetGuestAddress(),
+-      static_cast<u32>(active_button), static_cast<u32>(flags), static_cast<u32>(extra),
+-      result_ptr.GetGuestAddress(), overlapped.GetGuestAddress());
+-  return ShowMessageBox(title_ptr, text_ptr, button_count, button_ptrs, active_button, result_ptr,
+-                        overlapped);
++                                u32 flags, [[maybe_unused]] u32 extra, MappedU32 result_ptr, MappedVoid overlapped) {
++  return XamShowMessageBoxUI_entry(user_index, title_ptr, text_ptr, button_count, button_ptrs,
++                                   active_button, flags, result_ptr, overlapped);
+ }
+ 
+ u32 XamShowKeyboardUI_entry(u32 user_index, u32 flags, MappedWString default_text,
+@@ -353,6 +384,12 @@
+                static_cast<u32>(content_flags), static_cast<u64>(total_requested),
+                device_id_ptr.GetGuestAddress(), overlapped.GetGuestAddress());
+   if (!device_id_ptr) return kernel::X_ERROR_INVALID_PARAMETER;
++  if (overlapped) {
++    if (!MessageBoxSpan(overlapped.GetGuestAddress(), sizeof(kernel::XOVERLAPPED),
++                        kMemoryProtectRead | kMemoryProtectWrite)) return kernel::X_ERROR_INVALID_PARAMETER;
++    overlapped.As<kernel::XOVERLAPPED*>()->context =
++        SystemUICallerContext();
++  }
+   auto& ui = CurrentXAM().GetSystemUI();
+   const auto session = ui.GetSystemUiSession();
+   if (session.module && content_type == 0x10000 && content_flags == 0x40200) {
+diff --git a/src/xam/app/xam_app.cpp b/src/xam/app/xam_app.cpp
+--- a/src/xam/app/xam_app.cpp
++++ b/src/xam/app/xam_app.cpp
+@@ -39,6 +39,7 @@
+ kernel::X_HRESULT XAMApp::DispatchMessageSync(u32 message, u32 buffer_ptr, u32 buffer_length) {
+   auto buffer = membase_.TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x0002100D:
+     case 0x0002100E:
+     case 0x00021015:
+     case 0x00021001:
+diff --git a/include/rex/kernel/thread_registry.h b/include/rex/kernel/thread_registry.h
+--- a/include/rex/kernel/thread_registry.h
++++ b/include/rex/kernel/thread_registry.h
+@@ -132,7 +132,7 @@
+   rex::MoveOnlyFunction<void(X_HANDLE)> publish;
+ };
+ 
+-REX_DECLARE_INTERFACE(IThreadRegistry, 3)
++REX_DECLARE_INTERFACE(IThreadRegistry, 4)
+   virtual ~IThreadRegistry() = default;
+ 
+   /**
+@@ -240,10 +240,11 @@
+   std::optional<u32> extended_error =
+       std::nullopt;                         /**< The extended error, empty for the result. */
+   std::optional<u32> length = std::nullopt; /**< The length, empty for the default of the result. */
++  bool preserve_context = false; /**< Complete on the requester recorded at submission. */
+ };
+ 
+ /** Completes overlapped operations. */
+-REX_DECLARE_INTERFACE(IOverlappedDispatcher, 1)
++REX_DECLARE_INTERFACE(IOverlappedDispatcher, 2)
+   virtual ~IOverlappedDispatcher() = default;
+ 
+   /**
+diff --git a/include/rex/kernel/object/kernel_thread.h b/include/rex/kernel/object/kernel_thread.h
+--- a/include/rex/kernel/object/kernel_thread.h
++++ b/include/rex/kernel/object/kernel_thread.h
+@@ -61,6 +61,7 @@
+   virtual ~ICallingThread() = default;
+ 
+   virtual u32 GetLastError() = 0;
++  virtual X_HANDLE GetHandle() const = 0;
+ 
+   virtual void SetLastError(u32 error_code) = 0;
+ 
+@@ -155,7 +156,7 @@
+   /**
+    * @return The handle, 0 before launch.
+    */
+-  X_HANDLE GetHandle() const { return handle_; }
++  X_HANDLE GetHandle() const override { return handle_; }
+ 
+   u32 GetGuestObject() const { return guest_object_ptr_; }
+ 
+diff --git a/src/kernel/dispatcher.cpp b/src/kernel/dispatcher.cpp
+--- a/src/kernel/dispatcher.cpp
++++ b/src/kernel/dispatcher.cpp
+@@ -121,7 +121,7 @@
+ 
+ void Dispatcher::Complete(u32 overlapped, const CompletionOptions& options) {
+   auto ptr = StateOf(runtime_).GetAddressSpace()->TranslateVirtual(overlapped);
+-  XOverlappedSetContext(ptr, KernelThread::GetCurrentThreadHandle());
++  if (!options.preserve_context) XOverlappedSetContext(ptr, KernelThread::GetCurrentThreadHandle());
+   CompleteOverlappedEx(overlapped, options.result, ExtendedError(options), Length(options));
+ }
+ 
+diff --git a/src/xam/xam_msg.cpp b/src/xam/xam_msg.cpp
+--- a/src/xam/xam_msg.cpp
++++ b/src/xam/xam_msg.cpp
+@@ -99,9 +99,12 @@
+ 
+ u32 XMsgCompleteIORequest_entry(GuestPtrT<kernel::XOVERLAPPED> overlapped_ptr, u32 result,
+                                 u32 extended_error, u32 length) {
++  if (!overlapped_ptr || !CurrentTitle().heap.IsGuestRangeAccessible(overlapped_ptr.GetGuestAddress(),
++      sizeof(kernel::XOVERLAPPED), kernel::kMemoryProtectRead | kernel::kMemoryProtectWrite))
++    return kernel::X_ERROR_INVALID_PARAMETER;
+   CurrentTitle().overlapped_dispatcher.Complete(
+       overlapped_ptr.GetGuestAddress(),
+-      {.result = result, .extended_error = extended_error, .length = length});
++      {.result = result, .extended_error = extended_error, .length = length, .preserve_context = true});
+   return kernel::X_ERROR_SUCCESS;
+ }
+ 
+diff --git a/tests/unit/ui/xam_prompt_test.cpp b/tests/unit/ui/xam_prompt_test.cpp
+--- a/tests/unit/ui/xam_prompt_test.cpp
++++ b/tests/unit/ui/xam_prompt_test.cpp
+@@ -18,6 +18,7 @@
+ #include <vector>
+ 
+ #include <rex/kernel/thread_registry.h>
++#include "xam/xam_state.h"
+ #include <rex/kernel/types/io.h>
+ #include <rex/kernel/heap.h>
+ #include <rex/kernel/object/kernel_thread.h>
+@@ -65,7 +66,7 @@
+   *status =
+       caller.XAM("XamShowMessageBoxUI",
+                  {0, title.empty() ? 0 : PutWide(caller, runtime, title),
+-                  PutWide(caller, runtime, text), 2, buttons, active_button, 0, result_ptr, 0});
++                  PutWide(caller, runtime, text), 2, buttons, active_button, 0, result_ptr, caller.Alloc(sizeof(rex::kernel::XOVERLAPPED))});
+   return caller.Load32(result_ptr);
+ }
+ 
+@@ -78,7 +79,7 @@
+   caller.Store32(buttons, no);
+   caller.Store32(buttons + 4, yes);
+   *status = caller.XAM("XamShowMessageBoxUIEx", {0xFF, 0, PutWide(caller, runtime, text), 2,
+-                                                 buttons, active_button, 1, 0x55, result_ptr, 0});
++                                                 buttons, active_button, 1, 0x55, result_ptr, caller.Alloc(sizeof(rex::kernel::XOVERLAPPED))});
+   return caller.Load32(result_ptr);
+ }
+ 
+@@ -132,24 +133,6 @@
+   Frames(fixture, 2);
+ }
+ 
+-void Click(rex::test::KernelFixture& fixture, rex::i32 x, rex::i32 y) {
+-  using rex::InputEvent;
+-  auto send = [&](InputEvent::Type type) {
+-    rex::test_ui::Deliver([=](rex::ui::IUIEventListener& listener) {
+-      InputEvent event{.type = type,
+-                       .button = rex::MouseButton::kLeft,
+-                       .x = static_cast<rex::f32>(x),
+-                       .y = static_cast<rex::f32>(y)};
+-      listener.OnInputEvent(event);
+-    });
+-    fixture.Pump();
+-    Frames(fixture, 2);
+-  };
+-  send(InputEvent::Type::kMotion);
+-  send(InputEvent::Type::kButtonDown);
+-  send(InputEvent::Type::kButtonUp);
+-  Frames(fixture, 2);
+-}
+ 
+ void AttachUI(rex::test::KernelFixture& fixture) {
+   rex::ui::IUISystem& ui = fixture.GetUI();
+@@ -179,25 +162,24 @@
+ 
+ }  // namespace
+ 
+-REX_TEST_CASE("XamShowMessageBoxUI without a UI returns the focused button", "[ui][xam]") {
+-  rex::test::KernelFixture fixture;
+-  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+-    const rex::u32 result_ptr = caller.Alloc(4);
++REX_TEST_CASE("XamShowMessageBoxUI never chooses a focused button without the original service", "[ui][xam]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
++    const rex::u32 result_ptr = caller.Alloc(8);
+     rex::u32 status = 0xFFFFFFFF;
+-    CHECK(CallMessageBox(caller, fixture.GetRuntime(), u"Pick", u"Body", 1, result_ptr, &status) ==
+-          1);
+-    CHECK(status == 0);
+-  });
+-}
+-
+-REX_TEST_CASE("XamShowMessageBoxUIEx without a UI returns the focused button", "[ui][xam]") {
+-  rex::test::KernelFixture fixture;
+-  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+-    const rex::u32 result_ptr = caller.Alloc(4);
++    CHECK(CallMessageBox(caller, fixture.GetRuntime(), u"Pick", u"Body", 1, result_ptr, &status) == 0);
++    CHECK(status == rex::kernel::X_ERROR_FUNCTION_FAILED);
++  });
++}
++
++REX_TEST_CASE("XamShowMessageBoxUIEx preserves original-service errors", "[ui][xam]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
++    const rex::u32 result_ptr = caller.Alloc(8);
+     caller.Store32(result_ptr, 0xDEADBEEF);
+     rex::u32 status = 0xFFFFFFFF;
+-    CHECK(CallMessageBoxEx(caller, fixture.GetRuntime(), u"Body", 1, result_ptr, &status) == 1);
+-    CHECK(status == 0);
++    CHECK(CallMessageBoxEx(caller, fixture.GetRuntime(), u"Body", 1, result_ptr, &status) == 0);
++    CHECK(status == rex::kernel::X_ERROR_FUNCTION_FAILED);
+   });
+ }
+ 
+@@ -213,33 +195,43 @@
+   });
+ }
+ 
+-REX_TEST_CASE("xam message box returns the pressed button", "[ui][xam]") {
+-  static_cast<rex::test_ui::FakeUIData&>(rex::test_ui::g_ui) = rex::test_ui::FakeUIData{};
+-  rex::test_ui::FakeUIProvider provider;
+-  rex::test::KernelFixture fixture({}, {&provider}, {}, "fake");
+-  AttachUI(fixture);
+-  std::atomic<bool> finished{false};
+-  std::atomic<rex::u32> status{0xFFFFFFFF};
+-  std::atomic<rex::u32> picked{0xFFFFFFFF};
+-  std::thread guest([&] {
+-    fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
+-      const rex::u32 result_ptr = caller.Alloc(4);
+-      rex::u32 code = 0xFFFFFFFF;
+-      picked = CallMessageBox(caller, fixture.GetRuntime(), u"Pick", u"Body", 0, result_ptr, &code);
+-      status = code;
+-    });
+-    finished = true;
+-  });
+-  WaitForDialog(fixture);
+-  const rex::ui::WindowSize size{rex::test_ui::g_ui.width, rex::test_ui::g_ui.height};
+-  for (rex::i32 y = static_cast<rex::i32>(size.height_px / 2) - 40;
+-       y < static_cast<rex::i32>(size.height_px / 2) + 60 && fixture.GetUI().HasDialogs(); y += 3) {
+-    Click(fixture, static_cast<rex::i32>(size.width_px / 2) + 18, y);
+-  }
+-  WaitForGuest(fixture, finished);
+-  guest.join();
+-  CHECK(status == 0);
+-  CHECK(picked == 1);
++REX_TEST_CASE("the original message-box service owns selection and public IO completion keeps the requester", "[ui][xam][message-box-request]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& caller) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    unsigned requests = 0;
++    ui.system_ui_request = [&](rex::u32 message, rex::u32 request, rex::u32 size) -> rex::kernel::X_HRESULT {
++      ++requests;
++      CHECK(message == 0x2100D); CHECK(size == 1148);
++      CHECK(caller.Load32(request + 4) == 0);
++      CHECK(caller.Load32(request + 8) == 1);
++      CHECK(ReadWide(fixture.GetRuntime(), request + 12) == u"Pick");
++      CHECK(ReadWide(fixture.GetRuntime(), request + 98) == u"Body");
++      CHECK(ReadWide(fixture.GetRuntime(), request + 872) == u"No");
++      CHECK(ReadWide(fixture.GetRuntime(), request + 958) == u"Yes");
++      CHECK(caller.Load32(request + 868) == 2);
++      const auto result = caller.Load32(request + 1140), io = caller.Load32(request + 1144);
++      REQUIRE(rex::xam::CurrentTitle().threads.GetCallingThread());
++      CHECK(caller.Load32(io + 8) == rex::xam::CurrentTitle().threads.GetCallingThread()->GetHandle());
++      caller.Store32(result, 1);
++      CHECK(caller.XAM("XMsgCompleteIORequest", {io, 0, 0, 0}) == 0);
++      return 0;
++    };
++    const auto result = caller.Alloc(8);
++    rex::u32 status = 0;
++    CHECK(CallMessageBox(caller, fixture.GetRuntime(), u"Pick", u"Body", 0, result, &status) == 1);
++    CHECK(status == rex::kernel::X_ERROR_IO_PENDING);
++    CHECK(requests == 1);
++    const auto io = caller.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    caller.Store32(io + 8, 0x12345678);
++    CHECK(caller.XAM("XMsgCompleteIORequest", {io, 5, 0x80070005, 3}) == 0);
++    CHECK(caller.Load32(io + 8) == 0x12345678);
++    CHECK(caller.Load32(io) == 5); CHECK(caller.Load32(io + 4) == 3);
++    CHECK(caller.Load32(io + 24) == 0x80070005);
++    CHECK(caller.XAM("XMsgCompleteIORequest", {0x7F100000, 0, 0, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(caller.XAM("XMsgCompleteIORequest", {0, 0, 0, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    ui.system_ui_request = {};
++  });
+ }
+ 
+ REX_TEST_CASE("xam keyboard prompt returns typed text", "[ui][xam]") {
+@@ -270,3 +262,36 @@
+   CHECK(completion == 0);
+   CHECK(text == u"hi");
+ }
++
++REX_TEST_CASE("original message-box validation preserves results and never dispatches malformed requests", "[ui][xam][message-box-request]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    unsigned requests = 0;
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    ui.system_ui_request = [&](rex::u32 message, rex::u32 request, rex::u32 size) -> rex::kernel::X_HRESULT {
++      ++requests; CHECK(message == 0x2100D); CHECK(size == 1148);
++      CHECK(c.Load32(request + 868) == 0);
++      return 0;
++    };
++    const auto result = c.Alloc(8), io = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    c.Store32(result, 0xCAFEBABE);
++    auto invalid = [&](rex::u32 user, rex::u32 title, rex::u32 count, rex::u32 buttons, rex::u32 flags) {
++      c.Store32(io, 0xA5A5A5A5); c.Store32(io + 24, 0xDEADBEEF);
++      CHECK(c.XAM("XamShowMessageBoxUI", {user, title, 0, count, buttons, 0, flags, result, io}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++      CHECK(c.Load32(io) == 0xA5A5A5A5);
++      CHECK(c.Load32(io + 24) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++      CHECK(c.Load32(result) == 0xCAFEBABE); CHECK(requests == 0);
++    };
++    invalid(4, 0, 0, 0, 0x100000);
++    invalid(0, 0, 4, 0, 0);
++    invalid(0, 0, 0, 0, 0x80000000);
++    invalid(0, 0x7F100000, 0, 0, 0x100000);
++    invalid(0, 0, 1, 0x7F100000, 0);
++    CHECK(c.XAM("XamShowMessageBoxUI", {0, 0, 0, 0, 0, 0, 0x100000, result, 0}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(c.XAM("XamShowMessageBoxUI", {0, 0, 0, 0, 0, 0, 0x100000, result, 0x7F100000}) == rex::kernel::X_ERROR_INVALID_PARAMETER);
++    CHECK(requests == 0);
++    CHECK(c.XAM("XamShowMessageBoxUI", {0, 0, 0, 0, 0, 0, 0x100000, 0, 0}) == 0);
++    CHECK(requests == 1);
++    ui.system_ui_request = {};
++  });
++}

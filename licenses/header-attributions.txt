@@ -164,3 +164,990 @@ thirdparty/tomlplusplus/include/toml++/toml.hpp //# Copyright (c) Mark Gillard <
  *
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
+
+Compiler-observed desktop headers with ReXGlue v0.11.0 (Windows x64 Release).
+thirdparty/catch2/src/catch2/benchmark/catch_chronometer.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_chronometer.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/catch_clock.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_clock.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/catch_estimate.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_estimate.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/catch_optimizer.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_optimizer.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/catch_outlier_classification.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_outlier_classification.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/catch_sample_analysis.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/catch_sample_analysis.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_analyse.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_analyse.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_function.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_function.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_stats.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_stats.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_stats_fwd.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_benchmark_stats_fwd.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_complete_invoke.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_complete_invoke.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_measure.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_measure.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_run_for_at_least.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_run_for_at_least.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_stats.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_stats.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/benchmark/detail/catch_timing.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/benchmark/detail/catch_timing.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_approx.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_approx.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_assertion_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_assertion_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_assertion_result.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_assertion_result.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_case_sensitive.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_case_sensitive.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_config.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_config.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_get_random_seed.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_get_random_seed.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_message.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_message.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_section_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_section_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_session.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_session.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_tag_alias.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_tag_alias.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_tag_alias_autoregistrar.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_tag_alias_autoregistrar.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_test_case_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_test_case_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_test_macros.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_test_macros.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_test_run_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_test_run_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_test_spec.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_test_spec.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_timer.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_timer.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_tostring.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_tostring.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_totals.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_totals.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_translate_exception.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_translate_exception.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/catch_version.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/catch_version.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/generators/catch_generator_exception.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/generators/catch_generator_exception.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/generators/catch_generators.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/generators/catch_generators.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/generators/catch_generators_random.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/generators/catch_generators_random.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_capture.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_capture.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_config.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_config.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_enum_values_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_enum_values_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_exception.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_exception.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_generatortracker.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_generatortracker.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_registry_hub.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_registry_hub.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_reporter.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_reporter.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_reporter_factory.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_reporter_factory.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_tag_alias_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_tag_alias_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_test_invoker.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_test_invoker.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_testcase.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/interfaces/catch_interfaces_testcase.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_assertion_handler.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_assertion_handler.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_case_insensitive_comparisons.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_case_insensitive_comparisons.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_clara.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_clara.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_commandline.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_commandline.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_compare_traits.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_compare_traits.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_compiler_capabilities.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_compiler_capabilities.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_android_logwrite.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_android_logwrite.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_counter.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_counter.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_prefix_messages.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_prefix_messages.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_static_analysis_support.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_static_analysis_support.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_uncaught_exceptions.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_uncaught_exceptions.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_config_wchar.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_config_wchar.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_console_colour.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_console_colour.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_console_width.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_console_width.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_container_nonmembers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_container_nonmembers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_context.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_context.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_debug_console.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_debug_console.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_debugger.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_debugger.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_decomposer.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_decomposer.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_deprecation_macro.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_deprecation_macro.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_enforce.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_enforce.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_enum_values_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_enum_values_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_errno_guard.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_errno_guard.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_exception_translator_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_exception_translator_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_fatal_condition_handler.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_fatal_condition_handler.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_floating_point_helpers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_floating_point_helpers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_getenv.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_getenv.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_istream.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_istream.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_jsonwriter.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_jsonwriter.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_lazy_expr.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_lazy_expr.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_leak_detector.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_leak_detector.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_lifetimebound.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_lifetimebound.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_list.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_list.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_logical_traits.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_logical_traits.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_message_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_message_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_meta.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_meta.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_move_and_forward.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_move_and_forward.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_noncopyable.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_noncopyable.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_optional.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_optional.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_output_redirect.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_output_redirect.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_parse_numbers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_parse_numbers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_platform.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_platform.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_polyfills.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_polyfills.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_preprocessor_internal_stringify.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_preprocessor_internal_stringify.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_preprocessor_remove_parens.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_preprocessor_remove_parens.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_random_floating_point_helpers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_random_floating_point_helpers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_random_integer_helpers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_random_integer_helpers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_random_number_generator.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_random_number_generator.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_random_seed_generation.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_random_seed_generation.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_reporter_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_reporter_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_reporter_spec_parser.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_reporter_spec_parser.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_result_type.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_result_type.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_reusable_string_stream.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_reusable_string_stream.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_run_context.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_run_context.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_section.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_section.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_sharding.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_sharding.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_singletons.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_singletons.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_source_line_info.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_source_line_info.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_startup_exception_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_startup_exception_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_stdstreams.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_stdstreams.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_stream_end_stop.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_stream_end_stop.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_string_manip.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_string_manip.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_stringref.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_stringref.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_tag_alias_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_tag_alias_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_case_info_hasher.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_case_info_hasher.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_case_registry_impl.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_case_registry_impl.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_case_tracker.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_case_tracker.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_failure_exception.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_failure_exception.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_macro_impl.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_macro_impl.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_registry.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_registry.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_test_spec_parser.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_test_spec_parser.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_textflow.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_textflow.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_thread_local.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_thread_local.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_thread_support.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_thread_support.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_to_string.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_to_string.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_uncaught_exceptions.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_uncaught_exceptions.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_uniform_floating_point_distribution.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_uniform_floating_point_distribution.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_uniform_integer_distribution.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_uniform_integer_distribution.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_unique_name.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_unique_name.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_unique_ptr.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_unique_ptr.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_unreachable.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_unreachable.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_void_type.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_void_type.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_wildcard_pattern.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_wildcard_pattern.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_windows_h_proxy.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_windows_h_proxy.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/internal/catch_xmlwriter.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/internal/catch_xmlwriter.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_container_properties.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_container_properties.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_exception.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_exception.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_floating_point.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_floating_point.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_predicate.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_predicate.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_quantifiers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_quantifiers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_string.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_string.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/catch_matchers_templated.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/catch_matchers_templated.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/matchers/internal/catch_matchers_impl.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/matchers/internal/catch_matchers_impl.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_automake.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_automake.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_common_base.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_common_base.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_compact.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_compact.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_console.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_console.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_cumulative_base.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_cumulative_base.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_event_listener.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_event_listener.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_helpers.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_helpers.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_json.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_json.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_junit.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_junit.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_multi.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_multi.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_registrars.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_registrars.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_sonarqube.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_sonarqube.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_streaming_base.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_streaming_base.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_tap.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_tap.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_teamcity.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_teamcity.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/catch2/src/catch2/reporters/catch_reporter_xml.hpp //              Copyright Catch2 Authors
+thirdparty/catch2/src/catch2/reporters/catch_reporter_xml.hpp // SPDX-License-Identifier: BSL-1.0
+thirdparty/cli11/include/CLI/App.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/App.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Argv.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Argv.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/CLI.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/CLI.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Config.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Config.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/ConfigFwd.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/ConfigFwd.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Encoding.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Encoding.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Error.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Error.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/ExtraValidators.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/ExtraValidators.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Formatter.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Formatter.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/FormatterFwd.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/FormatterFwd.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Macros.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Macros.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Option.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Option.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Split.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Split.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/StringTools.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/StringTools.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/TypeTools.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/TypeTools.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Validators.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Validators.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/Version.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Version.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/App_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/App_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Argv_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Argv_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Config_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Config_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Encoding_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Encoding_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/ExtraValidators_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/ExtraValidators_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Formatter_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Formatter_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Option_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Option_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Split_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Split_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/StringTools_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/StringTools_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/cli11/include/CLI/impl/Validators_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Validators_inl.hpp // SPDX-License-Identifier: BSD-3-Clause
+thirdparty/excrypt/src/excrypt_sha2.h Copyright (c) 1998-2010, Brian Gladman, Worcester, UK. All rights reserved.
+thirdparty/excrypt/src/excrypt_sha2.h source code distributions include the above copyright notice, this
+thirdparty/excrypt/src/excrypt_sha2.h binary distributions include the above copyright notice, this list
+thirdparty/imgui/imstb_rectpack.h Copyright (c) 2017 Sean Barrett
+thirdparty/imgui/imstb_rectpack.h The above copyright notice and this permission notice shall be included in all
+thirdparty/imgui/imstb_rectpack.h AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+thirdparty/imgui/imstb_rectpack.h In jurisdictions that recognize copyright laws, the author or authors of this
+thirdparty/imgui/imstb_rectpack.h software dedicate any and all copyright interest in the software to the public
+thirdparty/imgui/imstb_rectpack.h this software under copyright law.
+thirdparty/imgui/imstb_textedit.h Copyright (c) 2017 Sean Barrett
+thirdparty/imgui/imstb_textedit.h The above copyright notice and this permission notice shall be included in all
+thirdparty/imgui/imstb_textedit.h AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+thirdparty/imgui/imstb_textedit.h In jurisdictions that recognize copyright laws, the author or authors of this
+thirdparty/imgui/imstb_textedit.h software dedicate any and all copyright interest in the software to the public
+thirdparty/imgui/imstb_textedit.h this software under copyright law.
+thirdparty/imgui/imstb_truetype.h Copyright (c) 2017 Sean Barrett
+thirdparty/imgui/imstb_truetype.h The above copyright notice and this permission notice shall be included in all
+thirdparty/imgui/imstb_truetype.h AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+thirdparty/imgui/imstb_truetype.h In jurisdictions that recognize copyright laws, the author or authors of this
+thirdparty/imgui/imstb_truetype.h software dedicate any and all copyright interest in the software to the public
+thirdparty/imgui/imstb_truetype.h this software under copyright law.
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2016-2021 Evan Nemerson <evan@nemerson.com>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2018 The Abseil Authors
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2008-2009 Björn Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2009 Florian Loitsch <https://florian.loitsch.com/>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp The code is distributed under the MIT license, Copyright (c) 2009 Florian Loitsch.
+thirdparty/inja/third_party/include/nlohmann/json.hpp @copyright Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp result["copyright"] = "(C) 2013-2023 Niels Lohmann";
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-License-Identifier: MIT
+thirdparty/pe/pe_image.h /* Copyright (c) Microsoft Corporation. All rights reserved. */
+thirdparty/pe/pe_image.h #define IMAGE_DIRECTORY_ENTRY_COPYRIGHT      7   /* Description String */
+thirdparty/sdl3/include/SDL3/SDL.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_assert.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_asyncio.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_atomic.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_audio.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_begin_code.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_bits.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_blendmode.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_camera.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_clipboard.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_close_code.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_cpuinfo.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_dialog.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_dlopennote.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_endian.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_error.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_events.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_filesystem.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_gamepad.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_gpu.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_guid.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_haptic.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_hidapi.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_hidapi.h * Copyright 2009, Alan Ott, Signal 11 Software.
+thirdparty/sdl3/include/SDL3/SDL_hidapi.h * long as the copyright notice in the source files
+thirdparty/sdl3/include/SDL3/SDL_hints.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_init.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_init.h * - `SDL_PROP_APP_METADATA_COPYRIGHT_STRING`: The human-readable copyright
+thirdparty/sdl3/include/SDL3/SDL_init.h *   notice, like "Copyright (c) 2024 MojoWorkshop, LLC" or whatnot. Keep this
+thirdparty/sdl3/include/SDL3/SDL_init.h #define SDL_PROP_APP_METADATA_COPYRIGHT_STRING    "SDL.app.metadata.copyright"
+thirdparty/sdl3/include/SDL3/SDL_intrin.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_iostream.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_joystick.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_keyboard.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_keycode.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_loadso.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_locale.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_log.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_main.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_main_impl.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_messagebox.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_metal.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_misc.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_mouse.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_mutex.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_oldnames.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_pen.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_pixels.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_platform.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_platform_defines.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_power.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_process.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_properties.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_rect.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_render.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_scancode.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_sensor.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_stdinc.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_storage.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_surface.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_system.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_thread.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_time.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_timer.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_touch.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_tray.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_version.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_video.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/include/SDL3/SDL_vulkan.h Copyright (C) 2017, Mark Callow
+thirdparty/sdl3/src/SDL_assert_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_error_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_hashtable.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_hints_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_internal.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_list.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_log_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_properties_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/SDL_utils_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_audio_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_audio_channel_converters.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_audioqueue.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_audioresample.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_sysaudio.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/SDL_wave.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/directsound/SDL_directsound.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/audio/wasapi/SDL_wasapi.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/camera/SDL_camera_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/camera/SDL_syscamera.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/SDL_core_unsupported.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/linux/SDL_dbus.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/linux/SDL_udev.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_directx.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_gameinput.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_hid.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_immdevice.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_windows.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/core/windows/SDL_xinput.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/cpuinfo/SDL_cpuinfo_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dialog/SDL_dialog.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dialog/SDL_dialog_utils.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dynapi/SDL_dynapi.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dynapi/SDL_dynapi_overrides.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dynapi/SDL_dynapi_procs.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/dynapi/SDL_dynapi_unsupported.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_categories_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_clipboardevents_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_displayevents_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_dropevents_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_events_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_eventwatch_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_keyboard_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_keymap_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_mouse_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_pen_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_touch_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/SDL_windowevents_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/events/scancodes_windows.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/filesystem/SDL_filesystem_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/filesystem/SDL_sysfilesystem.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/gpu/SDL_sysgpu.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/haptic/SDL_haptic_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/haptic/SDL_syshaptic.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/haptic/hidapi/SDL_hidapihaptic.h Copyright (C) 2025 Katharine Chui <katharine.chui@gmail.com>
+thirdparty/sdl3/src/haptic/hidapi/SDL_hidapihaptic_c.h Copyright (C) 2025 Katharine Chui <katharine.chui@gmail.com>
+thirdparty/sdl3/src/haptic/windows/SDL_dinputhaptic_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/haptic/windows/SDL_windowshaptic_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/hidapi/SDL_hidapi_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/hidapi/SDL_hidapi_windows.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/hidapi/hidapi/hidapi.h Copyright 2023, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_cfgmgr32.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_descriptor_reconstruct.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_hidclass.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_hidpi.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_hidsdi.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/hidapi/windows/hidapi_winapi.h Copyright 2022, All Rights Reserved.
+thirdparty/sdl3/src/io/SDL_asyncio_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/io/SDL_iostream_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/io/SDL_sysasyncio.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/SDL_gamepad_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/SDL_gamepad_db.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/SDL_joystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/SDL_steam_virtual_gamepad.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/SDL_sysjoystick.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/controller_list.h Copyright (C) Valve Corporation
+thirdparty/sdl3/src/joystick/controller_type.h Copyright (C) Valve Corporation
+thirdparty/sdl3/src/joystick/hidapi/SDL_hidapi_flydigi.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/hidapi/SDL_hidapi_nintendo.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/hidapi/SDL_hidapi_rumble.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/hidapi/SDL_hidapi_sinput.h Copyright (C) 2025 Mitchell Cairns <mitch.cairns@handheldlegend.com>
+thirdparty/sdl3/src/joystick/hidapi/SDL_hidapijoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/hidapi/SDL_report_descriptor.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/hidapi/steam/controller_constants.h Copyright (C) 2021 Valve Corporation
+thirdparty/sdl3/src/joystick/hidapi/steam/controller_structs.h Copyright (C) 2020 Valve Corporation
+thirdparty/sdl3/src/joystick/usb_ids.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/virtual/SDL_virtualjoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/windows/SDL_dinputjoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/windows/SDL_rawinputjoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/windows/SDL_windowsjoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/joystick/windows/SDL_xinputjoystick_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/libm/math_libm.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/libm/math_private.h * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+thirdparty/sdl3/src/locale/SDL_syslocale.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/main/SDL_main_callbacks.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/misc/SDL_libusb.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/misc/SDL_sysurl.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/power/SDL_syspower.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/process/SDL_sysprocess.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/render/SDL_render_debug_font.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/render/SDL_sysrender.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/render/SDL_yuv_sw_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/render/software/SDL_render_sw_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/sensor/SDL_sensor_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/sensor/SDL_syssensor.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/sensor/dummy/SDL_dummysensor.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/stdlib/SDL_casefolding.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/stdlib/SDL_getenv_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/stdlib/SDL_sysstdlib.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/stdlib/SDL_vacopy.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/storage/SDL_sysstorage.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/SDL_systhread.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/SDL_thread_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/generic/SDL_syscond_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/generic/SDL_sysrwlock_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/generic/SDL_systhread_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/windows/SDL_sysmutex_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/thread/windows/SDL_systhread_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/time/SDL_time_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/timer/SDL_timer_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/tray/SDL_tray_utils.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_RLEaccel_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_blit.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_blit_auto.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_blit_copy.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_blit_slow.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_clipboard_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_egl_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_pixels_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_rect_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_rect_impl.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_rotate.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_stb_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_surface_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_sysvideo.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_video_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_video_unsupported.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_vulkan_internal.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/SDL_yuv_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/directx/SDL_d3d12.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/directx/d3d12.h * Copyright (c) Microsoft Corporation
+thirdparty/sdl3/src/video/directx/d3d12sdklayers.h * Copyright (c) Microsoft Corporation
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_av1std.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_av1std.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_av1std_decode.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_av1std_decode.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std_decode.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std_decode.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std_encode.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h264std_encode.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std_decode.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std_decode.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std_encode.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codec_h265std_encode.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codecs_common.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vk_video/vulkan_video_codecs_common.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vulkan/vk_platform.h ** Copyright 2014-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vulkan/vk_platform.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vulkan/vulkan.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vulkan/vulkan.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/khronos/vulkan/vulkan_core.h ** Copyright 2015-2024 The Khronos Group Inc.
+thirdparty/sdl3/src/video/khronos/vulkan/vulkan_core.h ** SPDX-License-Identifier: Apache-2.0
+thirdparty/sdl3/src/video/miniz.h In jurisdictions that recognize copyright laws, the author or authors
+thirdparty/sdl3/src/video/miniz.h of this software dedicate any and all copyright interest in the
+thirdparty/sdl3/src/video/miniz.h software under copyright law.
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenevents_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenframebuffer_c.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenopengles.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenvideo.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenvulkan.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/offscreen/SDL_offscreenwindow.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/stb_image.h Copyright (c) 2017 Sean Barrett
+thirdparty/sdl3/src/video/stb_image.h The above copyright notice and this permission notice shall be included in all
+thirdparty/sdl3/src/video/stb_image.h AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+thirdparty/sdl3/src/video/stb_image.h In jurisdictions that recognize copyright laws, the author or authors of this
+thirdparty/sdl3/src/video/stb_image.h software dedicate any and all copyright interest in the software to the public
+thirdparty/sdl3/src/video/stb_image.h this software under copyright law.
+thirdparty/sdl3/src/video/windows/SDL_windowsclipboard.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsevents.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsframebuffer.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsgameinput.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowskeyboard.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsmessagebox.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsmodes.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsmouse.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsopengl.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsopengles.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsrawinput.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsshape.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsvideo.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowsvulkan.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/windows/SDL_windowswindow.h Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb.h // Copyright 2016 Adrien Descamps
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb_common.h // Copyright 2016 Adrien Descamps
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb_internal.h // Copyright 2016 Adrien Descamps
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb_sse_func.h // Copyright 2016 Adrien Descamps
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb_std.h // Copyright 2016 Adrien Descamps
+thirdparty/sdl3/src/video/yuv2rgb/yuv_rgb_std_func.h // Copyright 2016 Adrien Descamps
+thirdparty/simde/simde/check.h *   copyright and related or neighboring rights to this code.  For
+thirdparty/simde/simde/check.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/debug-trap.h *   copyright and related or neighboring rights to this code.  For
+thirdparty/simde/simde/debug-trap.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/hedley.h * copyright and related and neighboring rights to this software to
+thirdparty/simde/simde/hedley.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/simde-align.h *   copyright and related or neighboring rights to this code.  For
+thirdparty/simde/simde/simde-align.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/simde-arch.h *   copyright and related or neighboring rights to this code.  For
+thirdparty/simde/simde/simde-arch.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/simde-common.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-common.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-common.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-common.h * Copyright:
+thirdparty/simde/simde/simde-common.h *   2023      Yi-Yen Chung <eric681@andestech.com> (Copyright owned by Andes Technology)
+thirdparty/simde/simde/simde-common.h *   2023      Ju-Hung Li <jhlee@pllab.cs.nthu.edu.tw> (Copyright owned by NTHU pllab)
+thirdparty/simde/simde/simde-constify.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-constify.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-constify.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-constify.h * Copyright:
+thirdparty/simde/simde/simde-detect-clang.h * copyright and related and neighboring rights to this software to
+thirdparty/simde/simde/simde-detect-clang.h * SPDX-License-Identifier: CC0-1.0
+thirdparty/simde/simde/simde-diagnostic.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-diagnostic.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-diagnostic.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-diagnostic.h * Copyright:
+thirdparty/simde/simde/simde-f16.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-f16.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-f16.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-f16.h * Copyright:
+thirdparty/simde/simde/simde-f16.h *   2023      Ju-Hung Li <jhlee@pllab.cs.nthu.edu.tw> (Copyright owned by NTHU pllab)
+thirdparty/simde/simde/simde-features.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-features.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-features.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-features.h * Copyright:
+thirdparty/simde/simde/simde-features.h *   2023      Ju-Hung Li <jhlee@pllab.cs.nthu.edu.tw> (Copyright owned by NTHU pllab)
+thirdparty/simde/simde/simde-math.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/simde-math.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/simde-math.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/simde-math.h * Copyright:
+thirdparty/simde/simde/simde-math.h *   2023      Yi-Yen Chung <eric681@andestech.com> (Copyright owned by Andes Technology)
+thirdparty/simde/simde/x86/mmx.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/x86/mmx.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/x86/mmx.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/x86/mmx.h * Copyright:
+thirdparty/simde/simde/x86/sse.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/x86/sse.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/x86/sse.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/x86/sse.h * Copyright:
+thirdparty/simde/simde/x86/sse2.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/x86/sse2.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/x86/sse2.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/x86/sse2.h * Copyright:
+thirdparty/simde/simde/x86/sse3.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/x86/sse3.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/x86/sse3.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/x86/sse3.h * Copyright:
+thirdparty/simde/simde/x86/ssse3.h /* SPDX-License-Identifier: MIT
+thirdparty/simde/simde/x86/ssse3.h * The above copyright notice and this permission notice shall be
+thirdparty/simde/simde/x86/ssse3.h * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+thirdparty/simde/simde/x86/ssse3.h * Copyright:
+thirdparty/spdlog/include/spdlog/async.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/async_logger-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/async_logger.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/cfg/helpers-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/cfg/helpers.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/common-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/common.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/backtracer-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/backtracer.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/circular_q.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/console_globals.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/file_helper-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/file_helper.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/fmt_helper.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg_buffer-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg_buffer.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/mpmc_blocking_q.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/null_mutex.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/os-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/os.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/periodic_worker-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/periodic_worker.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/registry-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/registry.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/synchronous_factory.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/thread_pool-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/thread_pool.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/fmt/fmt.h // Copyright(c) 2016-2018 Gabi Melman.
+thirdparty/spdlog/include/spdlog/formatter.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/fwd.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/logger-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/logger.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/mdc.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/pattern_formatter-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/pattern_formatter.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/base_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/base_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/basic_file_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/basic_file_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/msvc_sink.h // Copyright(c) 2016 Alexander Dalshov & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/rotating_file_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/rotating_file_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_color_sinks-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_color_sinks.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_sinks-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_sinks.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/wincolor_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/wincolor_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/spdlog-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/spdlog.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/tweakme.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/version.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/stb/stb_image.h Copyright (c) 2017 Sean Barrett
+thirdparty/stb/stb_image.h The above copyright notice and this permission notice shall be included in all
+thirdparty/stb/stb_image.h AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+thirdparty/stb/stb_image.h In jurisdictions that recognize copyright laws, the author or authors of this
+thirdparty/stb/stb_image.h software dedicate any and all copyright interest in the software to the public
+thirdparty/stb/stb_image.h this software under copyright law.
+thirdparty/tomlplusplus/include/toml++/impl/array.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/array.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/array.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/array.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/at_path.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/at_path.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/at_path.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/at_path.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/date_time.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/date_time.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/formatter.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/formatter.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/forward_declarations.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/forward_declarations.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/key.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/key.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/make_node.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/make_node.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/node.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/node.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/node_view.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node_view.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/parse_error.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parse_error.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/parse_result.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parse_result.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/parser.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parser.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/parser.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parser.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/path.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/path.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/path.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/path.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/preprocessor.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/preprocessor.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/simd.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/simd.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/source_region.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/source_region.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_except.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_except.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_initializer_list.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_initializer_list.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_map.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_map.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_new.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_new.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_optional.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_optional.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_string.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_string.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_string.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_string.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_utility.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_utility.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/std_vector.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_vector.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/table.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/table.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/table.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/table.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/unicode.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/unicode.hpp // Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/unicode_autogenerated.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode_autogenerated.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/value.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/value.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/version.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/version.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.hpp // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.inl // SPDX-License-Identifier: MIT
+thirdparty/tomlplusplus/include/toml++/toml.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/toml.hpp // SPDX-License-Identifier: MIT
+thirdparty/xxHash/xxhash.h * Copyright (C) 2012-2023 Yann Collet
+thirdparty/xxHash/xxhash.h *    * Redistributions of source code must retain the above copyright
+thirdparty/xxHash/xxhash.h *      copyright notice, this list of conditions and the following disclaimer
+thirdparty/xxHash/xxhash.h * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+thirdparty/xxHash/xxhash.h * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT

@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(../../cmake/sdk/x360n_title_sdk.cmake)
-x360n_include_rexglue(generated/rexglue.cmake)
+x360n_setup_rexglue(${PROJECT_NAME} OUTPUT_DIR generated/dash)
 
 # x360-native: fixes for the pinned SDK commit, applied from outside the SDK
 # tree (see cmake/sdk/x360n_sdk_backports.cmake). Only meaningful with REXSDK_DIR.
@@ -47,7 +47,7 @@ endif()
 
 # GPU emulation is a runtime-loaded plugin (cvar gpu_plugin, empty = disabled);
 # stage it next to the executable so --gpu_plugin=xenos can load it.
-rexglue_setup_target(dash_17559 GPU_PLUGINS xenos)
+rexglue_setup_target(dash_17559 )
 
 include(../common/avatar/avatar_service_17559.cmake)
 x360n_add_avatar_service_17559(dash_17559)
@@ -56,7 +56,7 @@ add_library(dash_17559_session_ui SHARED src/session_ui_host.cpp src/system_ui.c
     ../common/dashboard_assets.cpp ../../src/supervisor/sha256.cpp
     ../../src/supervisor/digest_batch.cpp)
 target_compile_definitions(dash_17559_session_ui PRIVATE X360N_SYSTEM_UI_PLUGIN=1)
-target_link_libraries(dash_17559_session_ui PRIVATE rex::runtime)
+target_link_libraries(dash_17559_session_ui PRIVATE rex::sdk)
 if(WIN32)
     target_link_libraries(dash_17559_session_ui PRIVATE bcrypt)
 endif()
@@ -65,7 +65,7 @@ add_dependencies(dash_17559 dash_17559_session_ui)
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every
 # build, not only when it relinks (see cmake/sdk/x360n_sdk_backports.cmake).
 if(REXSDK_DIR)
-    x360n_stage_runtime_dlls(dash_17559 PLUGIN_TARGETS rexgpu-xenos)
+    x360n_stage_runtime_dlls(dash_17559 )
 endif()
 
 # Original system UI also queries the camera state; use the shared platform contract.
@@ -109,7 +109,7 @@ foreach(module signin createprofile vk hud deviceselector avatarminicreator)
     target_include_directories(${module_target} PRIVATE "${generated_dir}")
     # Separate codegen invocations do not populate the SDK's entry/DLL source
     # inventories. These targets still compile PPC and need its shared contract.
-    target_link_libraries(${module_target} PRIVATE rex::runtime x360n_ppc_options)
+    target_link_libraries(${module_target} PRIVATE rex::sdk x360n_ppc_options)
     rexglue_apply_recomp_settings(${module_target} "${generated_dir}/dash_17559_pch.h")
     rexglue_configure_module_target(${module_target} HOST dash_17559)
     add_dependencies(dash_17559 ${module_target})

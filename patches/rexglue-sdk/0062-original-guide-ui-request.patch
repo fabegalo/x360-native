@@ -1,6 +1,29 @@
---- a/src/kernel/xam/xam_ui.cpp
-+++ b/src/kernel/xam/xam_ui.cpp
-@@ -633,7 +633,7 @@
+diff --git a/src/xam/xam_user.cpp b/src/xam/xam_user.cpp
+--- a/src/xam/xam_user.cpp
++++ b/src/xam/xam_user.cpp
+@@ -509,6 +509,12 @@
+   u32 request[136 / 4]{};
+   request[0] = user; request[1] = mode;
+   return DispatchProfileUi(0x2100E, request, 34);
++}
++
++u32 XamShowGuideUI_entry(u32 user) {
++  if (user >= 4) return kernel::X_ERROR_INVALID_PARAMETER;
++  const u32 request[] = {0, user, 0};
++  return DispatchProfileUi(0x21015, request, 3);
+ }
+ 
+ u32 XamShowSigninUI_entry(u32 user_count, u32 flags) {
+@@ -907,3 +913,5 @@
+ REX_XAM_BODY(__imp__XamShowCreateProfileUI, rex::xam::XamShowCreateProfileUI_entry)
+ 
+ REX_XAM_BODY(__imp__XamShowCreateProfileUIEx, rex::xam::XamShowCreateProfileUIEx_entry)
++
++REX_XAM_BODY(__imp__XamShowGuideUI, rex::xam::XamShowGuideUI_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1384,7 +1384,7 @@
  REX_EXPORT_STUB(__imp__XamShowGenericOnlineAppUI);
  REX_EXPORT_STUB(__imp__XamShowGoldUpgradeUI);
  REX_EXPORT_STUB(__imp__XamShowGraduateUserUI);
@@ -9,35 +32,23 @@
  REX_EXPORT_STUB(__imp__XamShowJoinPartyUI);
  REX_EXPORT_STUB(__imp__XamShowJoinSessionByIdInProgressUI);
  REX_EXPORT_STUB(__imp__XamShowJoinSessionInProgressUI);
---- a/src/kernel/xam/xam_user.cpp
-+++ b/src/kernel/xam/xam_user.cpp
-@@ -554,6 +554,13 @@
-                message, count * 4, uint32_t(status), result, kernel->user_profile()->name(),
-                kernel->user_profile()->signin_state());
-   return result;
-+}
-+
-+// Original 17559 816C3580 -> 816C2AF0: Guide request, user at +4.
-+u32 XamShowGuideUI_entry(u32 user) {
-+  if (user >= 4) return X_ERROR_INVALID_PARAMETER;
-+  const uint32_t request[] = {0, user, 0};
-+  return DispatchProfileUi(0x21015, request, 3);
- }
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -348,3 +348,5 @@
+ REX_XAM_FORWARD(__imp__XamShowCreateProfileUI)
  
- u32 XamShowSigninUI_entry(u32 user_count, u32 flags) {
-@@ -968,3 +975,5 @@
- 
- REX_EXPORT(__imp__XamShowCreateProfileUI, rex::kernel::xam::XamShowCreateProfileUI_entry)
- REX_EXPORT(__imp__XamShowCreateProfileUIEx, rex::kernel::xam::XamShowCreateProfileUIEx_entry)
+ REX_XAM_FORWARD(__imp__XamShowCreateProfileUIEx)
 +
-+REX_EXPORT(__imp__XamShowGuideUI, rex::kernel::xam::XamShowGuideUI_entry)
---- a/src/kernel/xam/apps/xam_app.cpp
-+++ b/src/kernel/xam/apps/xam_app.cpp
-@@ -32,6 +32,7 @@
-   auto buffer = memory_->TranslateVirtual(buffer_ptr);
++REX_XAM_FORWARD(__imp__XamShowGuideUI)
+diff --git a/src/xam/app/xam_app.cpp b/src/xam/app/xam_app.cpp
+--- a/src/xam/app/xam_app.cpp
++++ b/src/xam/app/xam_app.cpp
+@@ -40,6 +40,7 @@
+   auto buffer = membase_.TranslateVirtual(buffer_ptr);
    switch (message) {
-     case 0x00021001:
-+    case 0x00021015:
      case 0x0002100E:
++    case 0x00021015:
+     case 0x00021001:
      case 0x00021008: {
-       auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+       auto& ui = CurrentXAM().GetSystemUI();

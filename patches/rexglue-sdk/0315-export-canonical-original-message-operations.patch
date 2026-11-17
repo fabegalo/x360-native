@@ -1,0 +1,35 @@
+diff --git a/include/rex/xam/app_manager.h b/include/rex/xam/app_manager.h
+--- a/include/rex/xam/app_manager.h
++++ b/include/rex/xam/app_manager.h
+@@ -35,6 +35,7 @@
+ #include <rex/memory/mapped_ptr.h>
+ #include <rex/xam/title_lifecycle.h>
+ #include <rex/kernel/types/status.h>
++#include <rex/kernel/types/io.h>
+ #include <rex/memory/stream.h>
+ #include <rex/kernel/types/content.h>
+ #include <rex/result.h>
+@@ -43,6 +44,12 @@
+ #include <rex/title.h>
+ 
+ namespace rex::xam {
++
++// Canonical guest operations used by original-system import diagnostics. Calling these
++// bodies directly avoids recursively resolving the diagnostic hook on ELF hosts.
++REX_XAM_API u32 XMsgInProcessCall_entry(u32 app, u32 message, u32 arg1, u32 arg2);
++REX_XAM_API u32 XMsgCancelIORequest_entry(memory::MappedPtr<kernel::XOVERLAPPED> overlapped, u32 wait);
++REX_XAM_API void XamContentRegisterChangeCallback_entry(u32 callback);
+ 
+ /** Base class of an XAM app, which receives messages dispatched by app ID. */
+ class REX_XAM_API XAMApplet {
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -27,6 +27,7 @@
+ #include <rex/math.h>
+ #include <rex/ppc/hook.h>
+ #include <rex/xam/content_manager.h>
++#include <rex/xam/app_manager.h>
+ #include <rex/xam/device.h>
+ #include <rex/xam/user_profile.h>
+ #include <rex/kernel/thread_registry.h>

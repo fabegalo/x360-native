@@ -1,20 +1,22 @@
 #pragma once
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/pipeline/shader/shader.h>
+#include <rex/xenos/register.h>
+#include <gpu/xenos/pipeline/shader/shader.h>
 #include <stdexcept>
 namespace x360n::native {
 struct Tessellation {
-  using H = rex::graphics::Shader::HostVertexShaderType;
+  using H = rex::gpu::Shader::HostVertexShaderType;
   H host = H::kVertex;
-  rex::graphics::xenos::TessellationMode mode{};
+  rex::xenos::TessellationMode mode{};
   uint32_t control_points = 0;
   bool adaptive = false;
   explicit operator bool() const { return control_points != 0; }
 };
-inline Tessellation GetTessellation(const rex::graphics::RegisterFile& regs,
-    rex::graphics::xenos::PrimitiveType primitive) {
-  using namespace rex::graphics;
-  using namespace rex::graphics::xenos;
+inline Tessellation GetTessellation(const rex::xenos::RegisterFile& regs,
+    rex::xenos::PrimitiveType primitive) {
+  using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+  using namespace rex::xenos;
   const auto draw = regs.Get<reg::VGT_DRAW_INITIATOR>();
   Tessellation t;
   if (!IsMajorModeExplicit(draw.major_mode, primitive) ||

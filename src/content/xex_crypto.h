@@ -1,7 +1,7 @@
 #pragma once
 // AES-128-CBC (zero IV, whole blocks; a partial tail is copied unchanged) and
 // SHA-1 for the XEX formats. Windows uses CNG; other systems the pinned SDK's
-// aes_128 and TinySHA1. Both are held to the same known-answer tests.
+// ExCrypt. Both are held to the same known-answer tests.
 #include <array>
 #include <cstddef>
 #include <cstdint>

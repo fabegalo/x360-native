@@ -1,26 +1,25 @@
-diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
-index 5ff450f..8ad50e2 100644
---- a/src/graphics/command_processor.cpp
-+++ b/src/graphics/command_processor.cpp
-@@ -84,6 +84,11 @@ namespace rex::graphics {
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -42,6 +42,11 @@
+ namespace rex::gpu {
  
- using namespace rex::graphics::xenos;
- 
+ using namespace rex::xenos;
++
 +#if defined(REX_GPU_VALIDATE_PACKET)
 +// Optional backend capability gate. Absent in the original Xenos build.
-+void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords);
++void ValidatePacketForBackend(u32 header, size_t remaining_dwords);
 +#endif
-+
+ 
  namespace {
  
- ReadbackResolveMode ParseReadbackResolveMode(std::string_view value) {
-@@ -694,6 +699,9 @@ void CommandProcessor::ExecutePacket(uint32_t ptr, uint32_t count) {
+@@ -644,6 +649,9 @@
  
  bool CommandProcessor::ExecutePacket(memory::RingBuffer* reader) {
-   const uint32_t packet = reader->ReadAndSwap<uint32_t>();
+   const u32 packet = reader->ReadAndSwap<u32>();
 +#if defined(REX_GPU_VALIDATE_PACKET)
-+  ValidatePacketForBackend(packet, reader->read_count() / sizeof(uint32_t));
++  ValidatePacketForBackend(packet, reader->GetReadCount() / sizeof(u32));
 +#endif
-   const uint32_t packet_type = packet >> 30;
+   const u32 packet_type = packet >> 30;
    if (packet == 0) {
      return true;

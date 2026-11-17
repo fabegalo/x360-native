@@ -1,148 +1,191 @@
---- a/src/system/xex_module.cpp
-+++ b/src/system/xex_module.cpp
-@@ -15,6 +15,12 @@
- #include "pe/pe_image.h"
+diff --git a/src/filesystem/xex.cpp b/src/filesystem/xex.cpp
+--- a/src/filesystem/xex.cpp
++++ b/src/filesystem/xex.cpp
+@@ -1,6 +1,13 @@
+ #include "filesystem/xex_image.h"
  
  #include <algorithm>
-+#include <array>
-+#include <cstdlib>
 +#include <fstream>
 +#include <set>
 +#include <sstream>
-+#include <rex/cvar.h>
- #include <unordered_map>
++#include <rex/setting.h>
++#include <rex/string/path.h>
++#include <rex/string/text.h>
++#include <rex/platform/process.h>
+ #include <cstring>
  
- #include <fmt/format.h>
-@@ -36,6 +42,42 @@
-                                                0x40, 0x58, 0x3F, 0xBB, 0x08, 0x96, 0xBF, 0x91};
- static const uint8_t xe_xex2_devkit_key[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ #include <rex/logging/log_category.h>
+@@ -34,8 +41,49 @@
+      0xD1},
+ }};
+ 
++class XEXSettings final : public SettingOwner {
++ public:
++  XEXSettings() : SettingOwner("xex") {}
++  REX_SETTING(std::string, keys_file, "", "Local wrapping-key overrides; defaults to X360N_XEX_KEYS",
++              kUntilLaunch, kNoSave);
++};
 +
-+// Legacy key material is supplied locally, never embedded in this patch/payload.
-+REXCVAR_DEFINE_STRING(xex_keys_file, "", "Runtime", "Local wrapping-key file; defaults to X360N_XEX_KEYS");
-+static bool XexMasterKey(bool devkit, bool legacy, uint8_t* key) {
-+  if (!legacy) {
-+    std::memcpy(key, devkit ? xe_xex2_devkit_key : xe_xex2_retail_key, 16);
-+    return true;
-+  }
-+  auto path = REXCVAR_GET(xex_keys_file);
-+  if (path.empty()) if (const char* env = std::getenv("X360N_XEX_KEYS")) path = env;
-+  std::ifstream in(std::filesystem::u8path(path));
-+  if (!in) { REXLOG_ERROR("Legacy XEX key unavailable: supply --xex_keys_file or X360N_XEX_KEYS"); return false; }
-+  const std::string wanted = devkit ? "xex1-devkit" : "xex1-retail";
++XEXSettings& XEXOptions() {
++  static XEXSettings settings;
++  return settings;
++}
++
+ const Key& MasterKey(XEXKey key) {
+   return kMasterKeys[static_cast<size_t>(key)];
++}
++
++Result<Key> ResolveMasterKey(XEXKey key) {
++  if (key == XEXKey::kRetail || key == XEXKey::kDevKit) return MasterKey(key);
++  auto path = XEXOptions().keys_file.Get();
++  if (path.empty()) path = platform::GetEnvironmentValue("X360N_XEX_KEYS").value_or("");
++  if (path.empty()) return MasterKey(key);
++  std::ifstream in{string::to_path(path)};
++  if (!in) return Err<Key>(ErrorCategory::kCrypto, "Local XEX key file cannot be opened");
++  const std::string wanted = key == XEXKey::kRetailXEX1 ? "xex1-retail" : "xex1-devkit";
 +  std::set<std::string> seen;
-+  std::array<uint8_t, 16> selected{};
++  Key selected{};
 +  bool found = false;
 +  for (std::string line; std::getline(in, line);) {
-+    if (auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
++    if (const auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
 +    std::istringstream fields(line);
 +    std::string name, hex, extra;
 +    if (!(fields >> name)) continue;
 +    if (!(fields >> hex) || (fields >> extra) || !seen.insert(name).second ||
 +        (name != "xex1-retail" && name != "xex1-devkit" && name != "xex2-retail" && name != "xex2-devkit") ||
-+        hex.size() != 32 || hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
-+      REXLOG_ERROR("Invalid local XEX key file (expected unique names and 32 hex digits)");
-+      return false;
-+    }
-+    if (name == wanted) {
-+      for (size_t i = 0; i < 16; ++i) selected[i] = uint8_t(std::stoul(hex.substr(2*i, 2), nullptr, 16));
-+      found = true;
-+    }
++        hex.size() != 32 || hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
++      return Err<Key>(ErrorCategory::kCrypto, "Invalid local XEX key file (unique names and 32 hex digits required)");
++    if (name != wanted) continue;
++    for (size_t i = 0; i < selected.size(); ++i)
++      selected[i] = static_cast<u8>(std::stoul(hex.substr(2 * i, 2), nullptr, 16));
++    found = true;
 +  }
-+  if (!found) { REXLOG_ERROR("Local XEX key file is missing {}", wanted); return false; }
-+  std::copy(selected.begin(), selected.end(), key);
-+  return true;
-+}
- 
- void aes_decrypt_buffer(const uint8_t* session_key, const uint8_t* input_buffer,
-                         const size_t input_size, uint8_t* output_buffer, const size_t output_size) {
-@@ -354,7 +396,7 @@
-   memcpy(orig_session_key, module->session_key_, 0x10);
- 
-   // Header patch updated the base XEX key, need to redecrypt it
--  aes_decrypt_buffer(module->is_dev_kit_ ? xe_xex2_devkit_key : xe_xex2_retail_key,
-+  aes_decrypt_buffer(module->wrapping_key_,
-                      reinterpret_cast<const uint8_t*>(module->xex_security_info()->aes_key), 16,
-                      module->session_key_, 16);
- 
-@@ -487,12 +529,13 @@
-   return result_code;
++  if (!found) return Err<Key>(ErrorCategory::kCrypto, "Local XEX key file is missing " + wanted);
++  return selected;
  }
  
--int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key) {
-+int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key, bool use_legacy_key) {
-   if (!opt_file_format_info()) {
-     return 1;
+ class CBCDecryptor {
+@@ -79,7 +127,9 @@
+   return Err<T>(ErrorCategory::kFormat, std::move(message));
+ }
+ 
+-}  // namespace
++ }  // namespace
++
++SettingOwner& GetXEXSettings() { return XEXOptions(); }
+ 
+ std::optional<XEXOptHeaderEntry> FindOptHeaderEntry(std::span<const u8> header,
+                                                     kernel::XEXHeaderKey key) {
+@@ -328,7 +378,10 @@
+   for (const auto key :
+        {XEXKey::kRetail, XEXKey::kDevKit, XEXKey::kRetailXEX1, XEXKey::kDevKitXEX1}) {
+     std::ranges::fill(image, u8{0});
+-    session_key_ = DecryptKey(MasterKey(key), security_.aes_key);
++    const auto master = ResolveMasterKey(key);
++    if (!master) { last = master.error(); continue; }
++    wrapping_key_ = *master;
++    session_key_ = DecryptKey(*wrapping_key_, security_.aes_key);
+     auto decoded = DecodeWith(*format, data, image);
+     if (decoded && (IsExecutable(image) || IsResourceOnly(*this))) {
+       key_ = key;
+@@ -449,6 +502,7 @@
+   copy.security_ = security_;
+   copy.imports_ = imports_;
+   copy.session_key_ = session_key_;
++  copy.wrapping_key_ = wrapping_key_;
+   copy.previous_session_key_ = previous_session_key_;
+   copy.xex1_ = xex1_;
+   copy.key_ = key_;
+@@ -521,7 +575,7 @@
+   }
+   REX_TRY_VOID(out.ReadHeader());
+   out.previous_session_key_ = session_key_;
+-  out.session_key_ = DecryptKey(MasterKey(key_), out.security_.aes_key);
++  out.session_key_ = DecryptKey(wrapping_key_.value_or(MasterKey(key_)), out.security_.aes_key);
+   return out;
+ }
+ 
+diff --git a/src/filesystem/xex_image.h b/src/filesystem/xex_image.h
+--- a/src/filesystem/xex_image.h
++++ b/src/filesystem/xex_image.h
+@@ -19,11 +19,14 @@
+ #include <rex/filesystem/xex.h>
+ #include <rex/kernel/types/xex.h>
+ #include <rex/platform.h>
++#include <rex/setting.h>
+ #include <rex/result.h>
+ #include <rex/types.h>
+ #include <rex/utility.h>
+ 
+ namespace rex::filesystem {
++
++SettingOwner& GetXEXSettings();
+ 
+ /**
+  * Finds an optional header entry in a raw XEX header.
+@@ -86,6 +89,7 @@
+   XEXSecurityInfo security_;
+   std::vector<XEXImportLibrary> imports_;
+   std::array<u8, 16> session_key_{};
++  std::optional<std::array<u8, 16>> wrapping_key_;
+   std::array<u8, 16> previous_session_key_{};
+   bool xex1_ = false;
+   XEXKey key_ = XEXKey::kRetail;
+diff --git a/src/filesystem/filesystem_module.h b/src/filesystem/filesystem_module.h
+--- a/src/filesystem/filesystem_module.h
++++ b/src/filesystem/filesystem_module.h
+@@ -11,6 +11,7 @@
+ #include <rex/logging/logger.h>
+ #include <rex/memory/host.h>
+ #include <rex/module.h>
++#include <rex/settings_registry.h>
+ 
+ #include "filesystem/container.h"
+ #include "filesystem/file_system.h"
+@@ -29,17 +30,25 @@
+   std::string_view GetName() const override { return "rexfilesystem"; }
+ 
+   std::span<const InterfaceType> GetRequiredInterfaces() const override {
+-    static constexpr InterfaceType kRequired[] = {ILogger::kInterface};
++    static constexpr InterfaceType kRequired[] = {ILogger::kInterface, ISettingsRegistry::kInterface};
+     return kRequired;
    }
  
-   is_dev_kit_ = use_dev_key;
-+  uses_legacy_key_ = use_legacy_key;
- 
-   if (is_patch()) {
-     // Make a copy of patch data for other XEX's to use with ApplyPatch()
-@@ -509,7 +552,8 @@
-     image_memory_allocated_ = false;
-   }
- 
--  aes_decrypt_buffer(use_dev_key ? xe_xex2_devkit_key : xe_xex2_retail_key,
-+  if (!XexMasterKey(use_dev_key, use_legacy_key, wrapping_key_)) return 1;
-+  aes_decrypt_buffer(wrapping_key_,
-                      reinterpret_cast<const uint8_t*>(xex_security_info()->aes_key), 16,
-                      session_key_, 16);
- 
-@@ -949,18 +993,24 @@
- 
-   uint8_t* data = memory()->TranslateVirtual(base_address_);
- 
--  // Load in the XEX basefile
--  // We'll try using both XEX2 keys to see if any give a valid PE
--  int result_code = ReadImage(xex_addr, xex_length, false);
-+  // Try current keys first, then legacy keys, preserving the original image,
-+  // block digest checks and per-image reservation ownership on every retry.
-+  int result_code = 0;
-+  for (unsigned attempt = 0; attempt < 4; ++attempt) {
-+    const bool legacy = attempt >= 2;
-+    const bool devkit = (attempt & 1) != 0;
-+    result_code = ReadImage(xex_addr, xex_length, devkit, legacy);
-+    if (!result_code) {
-+      if (legacy) REXLOG_INFO("XEX loaded with legacy {} wrapping key", devkit ? "devkit" : "retail");
-+      break;
+   [[nodiscard]] Result<void> Connect(IInterfaceFactory& factory) override {
+     memory::SetTagName(kFilesystem, "Filesystem");
+     logger_ = factory.Get<ILogger>();
+-    return logger_->AddCategories(log::kFileSystemLog);
++    REX_TRY_VOID(logger_->AddCategories(log::kFileSystemLog));
++    settings_ = factory.Get<ISettingsRegistry>();
++    if (auto registered = settings_->Register(GetXEXSettings()); !registered) {
++      logger_->RemoveCategories(log::kFileSystemLog);
++      return registered;
 +    }
-+    REXLOG_WARN("XEX load failed with code {} using {} {} wrapping key", result_code,
-+                legacy ? "legacy" : "current", devkit ? "devkit" : "retail");
-+  }
-   if (result_code) {
--    REXLOG_WARN("XEX load failed with code {}, trying with devkit encryption key...", result_code);
--
--    result_code = ReadImage(xex_addr, xex_length, true);
--    if (result_code) {
--      REXLOG_ERROR("XEX load failed with code {}, tried both encryption keys", result_code);
--      Unload();  // Failed UserModule loads delete this object without calling Unload.
--      return false;
--    }
-+    REXLOG_ERROR("XEX load failed with all supported wrapping keys");
-+    Unload();
-+    return false;
++    return Ok();
    }
  
-   // Note: caller will have to call LoadContinue once it's determined whether a
---- a/include/rex/system/xex_module.h
-+++ b/include/rex/system/xex_module.h
-@@ -191,7 +191,7 @@
+   void Disconnect() override {
++    settings_->Unregister(GetXEXSettings());
++    settings_ = nullptr;
+     logger_->RemoveCategories(log::kFileSystemLog);
+     logger_ = nullptr;
+   }
+@@ -97,6 +106,7 @@
+ 
   private:
-   void ReadSecurityInfo();
+   ILogger* logger_ = nullptr;
++  ISettingsRegistry* settings_ = nullptr;
+ };
  
--  int ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key);
-+  int ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key, bool use_legacy_key = false);
-   bool AllocateImageMemory(uint32_t size);
-   int ReadImageUncompressed(const void* xex_addr, size_t xex_length);
-   int ReadImageBasicCompressed(const void* xex_addr, size_t xex_length);
-@@ -217,6 +217,8 @@
+ }  // namespace rex::filesystem
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -16,6 +16,7 @@
+ namespace {
  
-   uint8_t session_key_[0x10];
-   bool is_dev_kit_ = false;
-+  bool uses_legacy_key_ = false;
-+  uint8_t wrapping_key_[16]{}; // selected local key retained for patch-header rekeying
- 
-   bool image_memory_allocated_ = false;  // Only this module owns this reservation.
-   bool loaded_ = false;         // Loaded into memory?
+ constexpr std::pair<const char*, const char*> kAliases[] = {
++    {"xex_keys_file", "xex.keys_file"},
+     {"xenos.readback_resolve", "gpu.xenos.readback_resolve"},
+     {"xenos.readback_memexport", "gpu.xenos.readback_memexport"},
+     {"xenos.query_occlusion_fake_sample_count", "gpu.xenos.query_occlusion_fake_sample_count"},

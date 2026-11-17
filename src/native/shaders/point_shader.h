@@ -1,10 +1,11 @@
 #pragma once
-#include <rex/graphics/pipeline/shader/dxbc_translator.h>
-#include <rex/graphics/register_file.h>
-#include <rex/graphics/util/draw.h>
+#include <gpu/xenos/pipeline/shader/dxbc_translator.h>
+#include <rex/xenos/register.h>
+#include <gpu/xenos/draw_state.h>
 #include <cstdint>
 #include <vector>
 namespace x360n::native {
+namespace draw_util = rex::gpu::draw_state;
 enum class PipelineGeometryShader : uint32_t { kNone, kPointList, kRectangleList, kQuadList };
 union GeometryShaderKey {
   uint32_t key = 0;
@@ -20,10 +21,13 @@ union GeometryShaderKey {
   };
 };
 void CreateDxbcGeometryShader(GeometryShaderKey key, std::vector<uint32_t>& shader_out);
-inline void SetPointConstants(const rex::graphics::RegisterFile& r,
-    const rex::graphics::draw_util::ViewportInfo& viewport,
-    rex::graphics::DxbcShaderTranslator::SystemConstants& c) {
-  using namespace rex::graphics;
+inline void SetPointConstants(const rex::xenos::RegisterFile& r,
+    const rex::gpu::draw_state::HostViewport& viewport,
+    rex::gpu::DXBCShaderTranslator::SystemConstants& c) {
+  using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
   const auto limits = r.Get<reg::PA_SU_POINT_MINMAX>();
   const auto size = r.Get<reg::PA_SU_POINT_SIZE>();
   c.point_vertex_diameter_min = float(limits.min_size) * 0.125f;

@@ -1,0 +1,667 @@
+diff --git a/include/rex/filesystem/mount.h b/include/rex/filesystem/mount.h
+--- a/include/rex/filesystem/mount.h
++++ b/include/rex/filesystem/mount.h
+@@ -13,6 +13,11 @@
+ #include <filesystem>
+ #include <string>
+ #include <vector>
++#include <functional>
++#include <memory>
++#include <mutex>
++#include <rex/result.h>
++#include <rex/filesystem/file_stat.h>
+ 
+ #include <rex/bit.h>
+ #include <rex/types.h>
+@@ -47,6 +52,11 @@
+   std::filesystem::path source; /**< Host folder or container file, empty for kNull. */
+   MountFlags flags = MountFlags::kNone;
+   std::vector<std::string> null_paths; /**< Paths the null provider answers. */
++  std::function<bool()> is_accessible{};
++  std::function<Result<VolumeStat>()> query_volume{};
++  std::function<Result<void>(u64)> check_growth{};
++  std::shared_ptr<std::recursive_mutex> growth_mutex{};
++
+ };
+ 
+ }  // namespace rex::filesystem
+diff --git a/include/rex/filesystem/file_stat.h b/include/rex/filesystem/file_stat.h
+--- a/include/rex/filesystem/file_stat.h
++++ b/include/rex/filesystem/file_stat.h
+@@ -83,8 +83,8 @@
+   std::string name;   /**< File system name, such as STFS. */
+   u32 attributes = 0; /**< NT filesystem attribute bits. */
+   u32 component_name_max_length = 0;
+-  u32 total_allocation_units = 0;
+-  u32 available_allocation_units = 0;
++  u64 total_allocation_units = 0;
++  u64 available_allocation_units = 0;
+   u32 sectors_per_allocation_unit = 0;
+   u32 bytes_per_sector = 0;
+ };
+diff --git a/include/rex/filesystem/file_system_factory.h b/include/rex/filesystem/file_system_factory.h
+--- a/include/rex/filesystem/file_system_factory.h
++++ b/include/rex/filesystem/file_system_factory.h
+@@ -28,7 +28,7 @@
+ struct XContentPackageHeader;
+ 
+ /** Creates file systems and parsers. Its objects must be destroyed before the module unloads. */
+-REX_DECLARE_INTERFACE(IFileSystemFactory, 5)
++REX_DECLARE_INTERFACE(IFileSystemFactory, 6)
+ /**
+  * Creates an empty mount table.
+  *
+diff --git a/include/rex/filesystem/file.h b/include/rex/filesystem/file.h
+--- a/include/rex/filesystem/file.h
++++ b/include/rex/filesystem/file.h
+@@ -40,6 +40,8 @@
+   [[nodiscard]] virtual Access GetAccess() const = 0;
+ 
+   [[nodiscard]] virtual VolumeStat GetVolume() const = 0;
++  /** Queries live volume accounting and preserves disconnection or IO errors. */
++  [[nodiscard]] virtual Result<VolumeStat> QueryVolume() const { return GetVolume(); }
+ 
+   /**
+    * Copies bytes of the file.
+diff --git a/src/filesystem/provider.h b/src/filesystem/provider.h
+--- a/src/filesystem/provider.h
++++ b/src/filesystem/provider.h
+@@ -24,6 +24,7 @@
+ #include <rex/filesystem/mount.h>
+ #include <rex/result.h>
+ #include <rex/types.h>
++#include <rex/filesystem/file_system_error.h>
+ #include <rex/utility.h>
+ 
+ #include "filesystem/node.h"
+@@ -39,10 +40,10 @@
+   virtual ~Provider();
+ 
+   [[nodiscard]] const MountEntry& GetEntry() const { return entry_; }
+-  [[nodiscard]] bool IsAccessible() const { return !revoked_.load(std::memory_order_acquire); }
++  [[nodiscard]] bool IsAccessible() const { return !revoked_.load(std::memory_order_acquire) && (!entry_.is_accessible || entry_.is_accessible()); }
+   void Revoke() { revoked_.store(true, std::memory_order_release); }
+   [[nodiscard]] std::unique_lock<std::recursive_mutex> LockAccess() const {
+-    if (HasFlags(entry_.flags, MountFlags::kRevokeOnUnmount)) return std::unique_lock(mutex_);
++    if (HasFlags(entry_.flags, MountFlags::kRevokeOnUnmount) || entry_.is_accessible || entry_.check_growth) return std::unique_lock(mutex_);
+     return {};
+   }
+ 
+@@ -53,6 +54,11 @@
+ 
+   /** Returns the volume information titles see. */
+   [[nodiscard]] virtual VolumeStat GetVolume() const = 0;
++  [[nodiscard]] Result<VolumeStat> QueryVolume() const {
++    const auto access = LockAccess();
++    if (!IsAccessible()) return Err<VolumeStat>(BuildError(FileSystemError::kAccessDenied, "the volume is disconnected"));
++    return entry_.query_volume ? entry_.query_volume() : Result<VolumeStat>(GetVolume());
++  }
+ 
+   /**
+    * Returns the node at a path relative to the mount, or null.
+diff --git a/src/filesystem/node_file.h b/src/filesystem/node_file.h
+--- a/src/filesystem/node_file.h
++++ b/src/filesystem/node_file.h
+@@ -48,6 +48,7 @@
+   void Refresh() override;
+   [[nodiscard]] Access GetAccess() const override { return access_; }
+   [[nodiscard]] VolumeStat GetVolume() const override;
++  [[nodiscard]] Result<VolumeStat> QueryVolume() const override;
+   [[nodiscard]] Result<size_t> Read(std::span<u8> buffer, u64 offset) override;
+   [[nodiscard]] Result<size_t> Write(std::span<const u8> buffer, u64 offset) override;
+   [[nodiscard]] Result<void> SetLength(u64 length) override;
+diff --git a/src/filesystem/node_file.cpp b/src/filesystem/node_file.cpp
+--- a/src/filesystem/node_file.cpp
++++ b/src/filesystem/node_file.cpp
+@@ -35,8 +35,10 @@
+   if (IsAccessible()) node_->Refresh();
+ }
+ 
++Result<VolumeStat> NodeFile::QueryVolume() const { return provider_->QueryVolume(); }
++
+ VolumeStat NodeFile::GetVolume() const {
+-  return node_->GetProvider().GetVolume();
++  return QueryVolume().value_or(VolumeStat{});
+ }
+ 
+ Result<size_t> NodeFile::Read(std::span<u8> buffer, u64 offset) {
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -489,7 +489,7 @@
+ Result<VolumeStat> FileSystem::GetVolume(std::string_view path) {
+   std::lock_guard lock(mutex_);
+   REX_TRY(Resolved resolved, ResolveMount(path));
+-  return resolved.provider->GetVolume();
++  return resolved.provider->QueryVolume();
+ }
+ 
+ }  // namespace rex::filesystem
+diff --git a/src/filesystem/host_provider.cpp b/src/filesystem/host_provider.cpp
+--- a/src/filesystem/host_provider.cpp
++++ b/src/filesystem/host_provider.cpp
+@@ -54,12 +54,29 @@
+       return Err<size_t>(
+           BuildError(FileSystemError::kAccessDenied, "the file was opened without write"));
+     }
++    const auto& mount = node_.GetProvider().GetEntry();
++    std::unique_lock<std::recursive_mutex> quota_lock;
++    if (mount.growth_mutex) quota_lock = std::unique_lock(*mount.growth_mutex);
++    if (mount.check_growth && !buffer.empty()) {
++      if (buffer.size() > UINT64_MAX - offset) return Err<size_t>(BuildError(FileSystemError::kInvalidPath, "file length overflow"));
++      node_.Refresh();
++      const u64 size = node_.GetInfo().size;
++      if (offset + buffer.size() > size) REX_TRY_VOID(mount.check_growth(offset + buffer.size() - size));
++    }
+     return file_->Write(offset, buffer);
+   }
+ 
+   [[nodiscard]] Result<void> SetLength(u64 length) override {
+     if (!CanSetLength(access_)) {
+       return Err(BuildError(FileSystemError::kAccessDenied, "the file was opened without write"));
++    }
++    const auto& mount = node_.GetProvider().GetEntry();
++    std::unique_lock<std::recursive_mutex> quota_lock;
++    if (mount.growth_mutex) quota_lock = std::unique_lock(*mount.growth_mutex);
++    if (mount.check_growth) {
++      node_.Refresh();
++      const u64 size = node_.GetInfo().size;
++      if (length > size) REX_TRY_VOID(mount.check_growth(length - size));
+     }
+     return file_->SetLength(length);
+   }
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+@@ -362,7 +362,9 @@
+       break;
+     }
+     case XFileFsSizeInformation: {
+-      const filesystem::VolumeStat volume = file->file->GetVolume();
++      const auto queried_volume = file->file->QueryVolume();
++      if (!queried_volume) { status = ToXStatus(queried_volume.error()); break; }
++      const filesystem::VolumeStat& volume = *queried_volume;
+       auto info = info_ptr.As<X_FILE_FS_SIZE_INFORMATION*>();
+       info->total_allocation_units = volume.total_allocation_units;
+       info->available_allocation_units = volume.available_allocation_units;
+@@ -373,7 +375,9 @@
+       break;
+     }
+     case XFileFsAttributeInformation: {
+-      const filesystem::VolumeStat volume = file->file->GetVolume();
++      const auto queried_volume = file->file->QueryVolume();
++      if (!queried_volume) { status = ToXStatus(queried_volume.error()); break; }
++      const filesystem::VolumeStat& volume = *queried_volume;
+       const auto& name = volume.name;
+       auto info = info_ptr.As<X_FILE_FS_ATTRIBUTE_INFORMATION*>();
+       info->attributes = volume.attributes;
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -58,7 +58,8 @@
+  public:
+   ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                  const std::string_view root_name, const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                 const std::filesystem::path& package_path, u64 storage_epoch);
++                 const std::filesystem::path& package_path, u64 storage_epoch, ContentDeviceInfo volume,
++                 std::shared_ptr<std::recursive_mutex> growth_mutex);
+   ~ContentPackage();
+ 
+   void LoadPackageLicenseMask(const std::filesystem::path& header_path);
+@@ -122,7 +123,7 @@
+                                                     u32 license_mask = 0) override;
+   [[nodiscard]] Result<kernel::XCONTENT_AGGREGATE_DATA> ReadContentHeaderFile(
+       std::string_view file_name, u64 xuid, u32 title_id,
+-      rex::kernel::XContentType content_type) const override;
++      rex::kernel::XContentType content_type, u32 device_id = 1) const override;
+   std::filesystem::path ResolveGameUserContentPath() override;
+   bool IsContentOpen(const kernel::XCONTENT_AGGREGATE_DATA& data) const override;
+   void CloseOpenedFilesFromContent(std::string_view root_name) override;
+@@ -163,14 +164,14 @@
+   std::unique_ptr<rex::filesystem::IXDBFTitleData> GetModuleXDBF(
+       const kernel::ILoadedModule& exec_module) const;
+   std::filesystem::path ResolvePackageRoot(u64 xuid, rex::kernel::XContentType content_type,
+-                                           u32 title_id = 0xFFFFFFFF) const;
++                                           u32 title_id = 0xFFFFFFFF, u32 device_id = 1) const;
+   std::filesystem::path ResolvePackagePath(u64 xuid,
+                                            const kernel::XCONTENT_AGGREGATE_DATA& data) const;
+   std::filesystem::path ResolveHeaderPathFor(u64 xuid,
+                                              const kernel::XCONTENT_AGGREGATE_DATA& data) const;
+   std::filesystem::path ResolvePackageHeaderPath(const std::string_view file_name, u64 xuid,
+                                                  u32 title_id,
+-                                                 rex::kernel::XContentType content_type) const;
++                                                 rex::kernel::XContentType content_type, u32 device_id = 1) const;
+ 
+   std::filesystem::path ResolveManifestPath(u64 xuid,
+                                             const kernel::XCONTENT_AGGREGATE_DATA& data) const;
+@@ -193,6 +194,7 @@
+   std::filesystem::path root_path_;
+   std::vector<ContentDeviceInfo> devices_;
+   bool devices_valid_ = true;
++  std::unordered_map<u32, std::shared_ptr<std::recursive_mutex>> volume_locks_;
+   rex::xam::UserProfile& user_profile_;
+ 
+   mutable rex::platform::RankedMutex mutex_{rex::platform::LockRank::kLeaf};
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -106,7 +106,8 @@
+ ContentPackage::ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                                const std::string_view root_name,
+                                const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                               const std::filesystem::path& package_path, u64 storage_epoch)
++                               const std::filesystem::path& package_path, u64 storage_epoch, ContentDeviceInfo volume,
++                               std::shared_ptr<std::recursive_mutex> growth_mutex)
+     : file_system_(file_system), root_name_(root_name), package_path_(package_path), license_(0), storage_epoch_(storage_epoch) {
+   device_path_ = std::format("\\Device\\Content\\{0}\\", device_index);
+   content_data_ = data;
+@@ -118,6 +119,24 @@
+   entry.path = device_path_;
+   entry.type = folder ? filesystem::ProviderType::kHostDirectory : filesystem::ProviderType::kSTFS;
+   entry.source = package_path;
++  entry.is_accessible = [root = volume.root] {
++    std::error_code error;
++    return IsUnlinkedStoragePath(root) && std::filesystem::is_directory(root, error);
++  };
++  entry.query_volume = [volume, growth_mutex]() mutable -> Result<filesystem::VolumeStat> {
++    std::lock_guard lock(*growth_mutex);
++    if (QueryContentDeviceSpace(volume)) return Err<filesystem::VolumeStat>(kernel::StatusError(kernel::X_STATUS_UNSUCCESSFUL));
++    return filesystem::VolumeStat{"STFS", 0, 255, volume.total_bytes / 512, volume.free_bytes / 512, 1, 512};
++  };
++  if (folder && (volume.capacity_limit || volume.reserve_bytes)) {
++    entry.growth_mutex = growth_mutex;
++    entry.check_growth = [volume](u64 bytes) mutable -> Result<void> {
++      if (!bytes) return Ok();
++      if (QueryContentDeviceSpace(volume)) return Err(kernel::StatusError(kernel::X_STATUS_ACCESS_DENIED));
++      if (bytes > volume.free_bytes) return Err(kernel::StatusError(0xC000007F));
++      return Ok();
++    };
++  }
+   entry.flags = folder ? filesystem::MountFlags::kWritable : filesystem::MountFlags::kNone;
+   if (data.content_type == kernel::XContentType::kSavedGame)
+     entry.flags |= filesystem::MountFlags::kRevokeOnUnmount;
+@@ -177,6 +196,7 @@
+       root_path_(platform::HostPath(title.content_data_root.empty() ? title.user_data_root : title.content_data_root)),
+       user_profile_(user_profile) {
+   devices_.push_back({1, DeviceType::kHDD, 0, 0, u"Hard Drive", root_path_});
++  volume_locks_[1] = std::make_shared<std::recursive_mutex>();
+   const auto config_path = root_path_ / "storage.toml";
+   if (!std::filesystem::exists(config_path)) return;
+   try {
+@@ -205,6 +225,7 @@
+         devices_.push_back({uint32_t(id), type == "mu" ? DeviceType::kMU : DeviceType::kUSB,
+             0, 0, rex::string::ToUTF16(name), root_path_ / "storage" / std::format("{:08X}", id),
+             limit((*table)["capacity_bytes"]), limit((*table)["reserve_bytes"])});
++        volume_locks_[static_cast<u32>(id)] = std::make_shared<std::recursive_mutex>();
+       }
+     }
+   } catch (const std::exception& error) {
+@@ -246,16 +267,8 @@
+ }
+ 
+ void ContentManager::CheckStoragePath(const std::filesystem::path& path) const {
+-  for (auto current = path; current != root_path_ && !current.empty(); current = current.parent_path()) {
+-    std::error_code error;
+-    const auto status = std::filesystem::symlink_status(current, error);
+-    if (error && error != std::errc::no_such_file_or_directory)
+-      throw std::filesystem::filesystem_error("content storage is inaccessible", current, error);
+-    if (std::filesystem::is_symlink(status))
+-      throw std::filesystem::filesystem_error("linked content storage", current,
+-          std::make_error_code(std::errc::permission_denied));
+-    if (current == current.parent_path()) break;
+-  }
++  if (!IsUnlinkedStoragePath(path)) throw std::filesystem::filesystem_error(
++      "linked or inaccessible content storage", path, std::make_error_code(std::errc::permission_denied));
+ }
+ 
+ u32 ContentManager::FlushContent(std::string_view root_name) {
+@@ -291,7 +304,7 @@
+ 
+ std::filesystem::path ContentManager::ResolvePackageRoot(u64 xuid,
+                                                          rex::kernel::XContentType content_type,
+-                                                         u32 title_id) const {
++                                                         u32 title_id, u32 device_id) const {
+   if (title_id == kernel::kRunningTitleID) {
+     title_id = this->GetTitleID();
+   }
+@@ -300,7 +313,7 @@
+   auto content_type_str = std::format("{:08X}", static_cast<u32>(content_type));
+ 
+   // Layout is content_root/xuid/title_id/content_type/
+-  return detail::ResolveChain(root_path_, xuid_str, title_id_str, content_type_str);
++  return detail::ResolveChain(DeviceRoot(device_id), xuid_str, title_id_str, content_type_str);
+ }
+ 
+ std::filesystem::path ContentManager::ResolvePackagePath(
+@@ -314,7 +327,7 @@
+ 
+   if (!ValidName(data.GetFileName())) throw std::filesystem::filesystem_error(
+       "invalid content name", std::make_error_code(std::errc::invalid_argument));
+-  auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id);
++  auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id, data.device_id);
+   auto path = rex::platform::ResolveEntryCase(package_root, data.GetFileName());
+   CheckStoragePath(path);
+   return path;
+@@ -322,7 +335,7 @@
+ 
+ std::filesystem::path ContentManager::ResolvePackageHeaderPath(
+     const std::string_view file_name, u64 xuid, u32 title_id,
+-    rex::kernel::XContentType content_type) const {
++    rex::kernel::XContentType content_type, u32 device_id) const {
+   if (title_id == kernel::kRunningTitleID) {
+     title_id = this->GetTitleID();
+   }
+@@ -338,7 +351,7 @@
+ 
+   if (!ValidName(file_name)) throw std::filesystem::filesystem_error(
+       "invalid content name", std::make_error_code(std::errc::invalid_argument));
+-  auto path = detail::ResolveChain(root_path_, xuid_str, title_id_str, detail::kGameContentHeaderDirName,
++  auto path = detail::ResolveChain(DeviceRoot(device_id), xuid_str, title_id_str, detail::kGameContentHeaderDirName,
+                                    content_type_str, final_name);
+   CheckStoragePath(path);
+   return path;
+@@ -348,7 +361,7 @@
+     u64 xuid, const kernel::XCONTENT_AGGREGATE_DATA& data) const {
+   const u64 used_xuid =
+       (data.xuid != static_cast<u64>(-1) && data.xuid != 0) ? static_cast<u64>(data.xuid) : xuid;
+-  return ResolvePackageHeaderPath(data.GetFileName(), used_xuid, data.title_id, data.content_type);
++  return ResolvePackageHeaderPath(data.GetFileName(), used_xuid, data.title_id, data.content_type, data.device_id);
+ }
+ 
+ std::vector<kernel::XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(
+@@ -359,7 +372,7 @@
+     title_id = this->GetTitleID();
+   }
+ 
+-  auto package_root = ResolvePackageRoot(xuid, content_type, title_id);
++  auto package_root = ResolvePackageRoot(xuid, content_type, title_id, device_id);
+   if (!std::filesystem::exists(package_root)) return result;
+   CheckStoragePath(package_root);
+   for (const auto& child : std::filesystem::directory_iterator(package_root)) {
+@@ -373,7 +386,7 @@
+ 
+     kernel::XCONTENT_AGGREGATE_DATA content_data{};
+     if (auto header =
+-            ReadContentHeaderFile(rex::string::PathToUTF8(name), xuid, title_id, content_type)) {
++            ReadContentHeaderFile(rex::string::PathToUTF8(name), xuid, title_id, content_type, device_id)) {
+       content_data = *header;
+     } else {
+       content_data.device_id = device_id;
+@@ -407,7 +420,7 @@
+     }
+     return true;
+   };
+-  const auto user_root = root_path_ / std::format("{:016X}", xuid);
++  const auto user_root = DeviceRoot(device_id) / std::format("{:016X}", xuid);
+   std::error_code error;
+   std::filesystem::directory_iterator title(user_root, error), end;
+   while (!error && title != end) {
+@@ -436,9 +449,9 @@
+ std::vector<u64> ContentManager::ListContentOwners(u32 device_id) {
+   std::vector<u64> owners;
+   const auto device = GetContentDeviceInfo(device_id);
+-  if (!device || device->device_type != DeviceType::kHDD) return owners;
++  if (!device || device->device_type == DeviceType::kODD) return owners;
+   std::error_code error;
+-  std::filesystem::directory_iterator entry(root_path_, error), end;
++  std::filesystem::directory_iterator entry(DeviceRoot(device_id), error), end;
+   if (error == std::errc::no_such_file_or_directory) return owners;
+   if (error) throw std::filesystem::filesystem_error("content owners", root_path_, error);
+   for (; entry != end; ++entry) {
+@@ -474,8 +487,10 @@
+     if (resolved.xuid == 0 || resolved.xuid == u64(-1)) resolved.xuid = xuid;
+     if (resolved.title_id == kernel::kRunningTitleID) resolved.title_id = GetTitleID();
+   }
++  const auto volume = GetDevice(data.device_id);
++  if (!volume) return nullptr;
+   auto package = std::make_unique<ContentPackage>(title_.file_system, ++device_count_, root_name,
+-                                                  resolved, package_path, user_profile_.GetStorageEpoch());
++                                                  resolved, package_path, user_profile_.GetStorageEpoch(), *volume, volume_locks_.at(data.device_id));
+   return package->IsMounted() ? std::move(package) : nullptr;
+ }
+ 
+@@ -605,8 +620,8 @@
+ 
+ Result<kernel::XCONTENT_AGGREGATE_DATA> ContentManager::ReadContentHeaderFile(
+     const std::string_view file_name, u64 xuid, u32 title_id,
+-    rex::kernel::XContentType content_type) const try {
+-  auto header_file_path = ResolvePackageHeaderPath(file_name, xuid, title_id, content_type);
++    rex::kernel::XContentType content_type, u32 device_id) const try {
++  auto header_file_path = ResolvePackageHeaderPath(file_name, xuid, title_id, content_type, device_id);
+   constexpr u32 kHeaderSize = sizeof(kernel::XCONTENT_AGGREGATE_DATA);
+ 
+   if (!std::filesystem::exists(header_file_path)) {
+@@ -770,7 +785,7 @@
+   u64 used_xuid =
+       (data.xuid != static_cast<u64>(-1) && data.xuid != 0) ? static_cast<u64>(data.xuid) : xuid;
+   auto header_path =
+-      ResolvePackageHeaderPath(data.GetFileName(), used_xuid, data.title_id, data.content_type);
++      ResolvePackageHeaderPath(data.GetFileName(), used_xuid, data.title_id, data.content_type, data.device_id);
+   const std::filesystem::path manifest_path = ResolveManifestPath(used_xuid, data);
+   const u32 title_id =
+       data.title_id == kernel::kRunningTitleID ? GetTitleID() : static_cast<u32>(data.title_id);
+diff --git a/include/rex/xam/content_manager.h b/include/rex/xam/content_manager.h
+--- a/include/rex/xam/content_manager.h
++++ b/include/rex/xam/content_manager.h
+@@ -154,7 +154,7 @@
+    */
+   [[nodiscard]] virtual Result<kernel::XCONTENT_AGGREGATE_DATA> ReadContentHeaderFile(
+       std::string_view file_name, u64 xuid, u32 title_id,
+-      rex::kernel::XContentType content_type) const = 0;
++      rex::kernel::XContentType content_type, u32 device_id = 1) const = 0;
+ 
+   /** Returns the folder of the running title's user content for the signed in profile. */
+   [[nodiscard]] virtual std::filesystem::path ResolveGameUserContentPath() = 0;
+diff --git a/src/xam/xam_content.cpp b/src/xam/xam_content.cpp
+--- a/src/xam/xam_content.cpp
++++ b/src/xam/xam_content.cpp
+@@ -48,7 +48,7 @@
+     const auto& data = *content.As<const kernel::XCONTENT_AGGREGATE_DATA*>();
+     const auto device = rex::xam::GetContentDeviceInfo(data.device_id);
+     if (!device) result = kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+-    else if (device->device_type != rex::xam::DeviceType::kHDD) result = kernel::XResultFromWin32(50);
++    else if (device->device_type == rex::xam::DeviceType::kODD) result = kernel::XResultFromWin32(50);
+     else result = CurrentXAM().GetContentManager().GetContentAttributes(data, attributes.As<u8*>());
+   }
+   if (overlapped) {
+@@ -66,7 +66,7 @@
+     const auto& data = *content.As<const kernel::XCONTENT_AGGREGATE_DATA*>();
+     const auto device = GetContentDeviceInfo(data.device_id);
+     if (!device) result = kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+-    else if (device->device_type != DeviceType::kHDD) result = kernel::XResultFromWin32(50);
++    else if (device->device_type == DeviceType::kODD) result = kernel::XResultFromWin32(50);
+     else result = CurrentXAM().GetContentManager().GetContentMetadata(data, metadata.As<u8*>());
+   }
+   if (overlapped) {
+@@ -120,7 +120,7 @@
+     return kernel::X_E_INVALIDARG;
+   }
+ 
+-  if (saved && device_info && device_info->device_id != std::to_underlying(rex::xam::DummyDeviceID::kHDD))
++  if (saved && device_info && device_info->device_type == DeviceType::kODD)
+     return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+ 
+   if (buffer_size_ptr) {
+@@ -131,9 +131,10 @@
+ 
+   StaticItemList items(items_per_enumerate, sizeof(kernel::XCONTENT_DATA));
+ 
+-  if (!device_info || device_info->device_id == std::to_underlying(rex::xam::DummyDeviceID::kHDD)) {
++  for (const auto& selected : CurrentXAM().GetContentManager().GetDevices()) {
++    if (device_id && selected.device_id != device_id) continue;
+     auto contents = CurrentXAM().GetContentManager().ListContent(
+-        std::to_underlying(rex::xam::DummyDeviceID::kHDD), xuid,
++        selected.device_id, xuid,
+         static_cast<rex::kernel::XContentType>(content_type));
+     for (const auto& content_data : contents) {
+       auto item = items.Append<kernel::XCONTENT_DATA>();
+@@ -142,7 +143,7 @@
+ 
+     if (!saved && xuid != 0) {
+       auto common_datas = CurrentXAM().GetContentManager().ListContent(
+-          std::to_underlying(rex::xam::DummyDeviceID::kHDD), 0,
++          selected.device_id, 0,
+           static_cast<rex::kernel::XContentType>(content_type));
+       for (const auto& content_data : common_datas) {
+         auto item = items.Append<kernel::XCONTENT_DATA>();
+@@ -150,8 +151,6 @@
+       }
+     }
+   }
+-
+-  if (!device_info || device_info->device_id == std::to_underlying(rex::xam::DummyDeviceID::kODD)) {}
+ 
+   REXXAM_DEBUG("XamContentCreateEnumerator: added {} items to enumerator", items.GetItemCount());
+ 
+@@ -184,7 +183,7 @@
+ static kernel::X_RESULT ContentUser(u32 index, kernel::XCONTENT_AGGREGATE_DATA& data, u64& xuid) {
+   if (!ContentManager::ValidName(data.GetFileName())) return kernel::X_ERROR_INVALID_PARAMETER;
+   const auto device = GetContentDeviceInfo(data.device_id);
+-  if (!device || device->device_id != std::to_underlying(DummyDeviceID::kHDD)) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++  if (!device || device->device_type == DeviceType::kODD) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+   if (data.content_type == kernel::XContentType::kSavedGame) {
+     const auto identity = CurrentXAM().GetUserProfile().identity();
+     if (index != 0 || !identity.signin_state) return kernel::X_ERROR_NO_SUCH_USER;
+@@ -606,7 +605,7 @@
+   const auto& data = *content.As<const kernel::XCONTENT_AGGREGATE_DATA*>();
+   const auto device = rex::xam::GetContentDeviceInfo(data.device_id);
+   if (!device) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
+-  if (device->device_type != rex::xam::DeviceType::kHDD || flags) return kernel::XResultFromWin32(50);
++  if (device->device_type == rex::xam::DeviceType::kODD || flags) return kernel::XResultFromWin32(50);
+   const std::string package(data.file_name_raw, std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
+   if (package.empty() || package == "." || package == ".." || package.find_first_of("/\\:") != std::string::npos)
+     return kernel::X_ERROR_INVALID_PARAMETER;
+diff --git a/src/xam/xam_content_aggregate.cpp b/src/xam/xam_content_aggregate.cpp
+--- a/src/xam/xam_content_aggregate.cpp
++++ b/src/xam/xam_content_aggregate.cpp
+@@ -107,19 +107,22 @@
+   if (content_type == 0xFFFFFFFFu) {
+     if (!device_info || device_info->device_type != rex::xam::DeviceType::kODD) {
+       auto& manager = CurrentXAM().GetContentManager();
+-      const auto hdd = std::to_underlying(rex::xam::DummyDeviceID::kHDD);
+-      std::vector<u64> owners{xuid == ~u64{0} ? 0 : xuid};
+-      if (!xuid) owners = manager.ListContentOwners(hdd);
+-      for (u64 owner : owners)
+-        for (const auto& content : manager.ListContentAllTypes(hdd, owner, title_filter))
+-          AppendAggregate(items, content);
++      for (const auto& selected : manager.GetDevices()) {
++        if (device_id && selected.device_id != device_id) continue;
++        std::vector<u64> owners{xuid == ~u64{0} ? 0 : xuid};
++        if (!xuid) owners = manager.ListContentOwners(selected.device_id);
++        for (u64 owner : owners)
++          for (const auto& content : manager.ListContentAllTypes(selected.device_id, owner, title_filter))
++            AppendAggregate(items, content);
++      }
+     }
+   } else {
+   auto content_type_enum = static_cast<rex::kernel::XContentType>(content_type);
+ 
+   u64 profile_xuid = CurrentXAM().GetUserProfile().GetXUID();
+ 
+-  if (!device_info || device_info->device_type == rex::xam::DeviceType::kHDD) {
++  for (const auto& selected : CurrentXAM().GetContentManager().GetDevices()) {
++    if (device_id && selected.device_id != device_id) continue;
+     std::vector<u32> title_ids{kernel::kRunningTitleID};
+     auto exe_module = CurrentTitle().objects.Get<kernel::ILoadedModule>(
+         CurrentTitle().modules.GetExecutable().value_or(0));
+@@ -130,14 +133,14 @@
+ 
+     for (auto& title_id : title_ids) {
+       auto contents = CurrentXAM().GetContentManager().ListContent(
+-          std::to_underlying(rex::xam::DummyDeviceID::kHDD), xuid, content_type_enum, title_id);
++          selected.device_id, xuid, content_type_enum, title_id);
+       for (const auto& content_data : contents) {
+         AppendAggregate(items, content_data);
+       }
+ 
+       if (profile_xuid != 0) {
+         auto common_datas = CurrentXAM().GetContentManager().ListContent(
+-            std::to_underlying(rex::xam::DummyDeviceID::kHDD), 0, content_type_enum, title_id);
++            selected.device_id, 0, content_type_enum, title_id);
+         for (const auto& content_data : common_datas) {
+           AppendAggregate(items, content_data);
+         }
+diff --git a/src/xam/xam_content_device.cpp b/src/xam/xam_content_device.cpp
+--- a/src/xam/xam_content_device.cpp
++++ b/src/xam/xam_content_device.cpp
+@@ -64,6 +64,16 @@
+   return std::nullopt;
+ }
+ 
++u32 XamContentGetDefaultDevice_entry(MappedU32 output) {
++  if (!output || !CurrentTitle().heap.IsGuestRangeAccessible(output.GetGuestAddress(), 4, kernel::kMemoryProtectWrite))
++    return kernel::X_ERROR_INVALID_PARAMETER;
++  *output = 0;
++  const auto devices = CurrentXAM().GetContentManager().GetDevices();
++  if (devices.empty()) return kernel::X_ERROR_DEVICE_NOT_CONNECTED;
++  *output = devices.front().device_id;
++  return kernel::X_ERROR_SUCCESS;
++}
++
+ u32 XamContentGetDeviceName_entry(u32 device_id, MappedWString name_buffer, u32 name_capacity) {
+   auto device_info = GetContentDeviceInfo(device_id);
+   if (!device_info) {
+@@ -185,3 +195,6 @@
+ REX_XAM_BODY(__imp__XamContentGetDeviceData, rex::xam::XamContentGetDeviceData_entry)
+ REX_XAM_BODY(__imp__XamContentCreateDeviceEnumerator,
+              rex::xam::XamContentCreateDeviceEnumerator_entry)
++
++REX_XAM_BODY(__imp__XamContentGetDefaultDevice, rex::xam::XamContentGetDefaultDevice_entry)
++REX_XAM_BODY(__imp__XamContentGetLocalizedDeviceData, rex::xam::XamContentGetDeviceData_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1083,10 +1083,10 @@
+ REX_EXPORT_STUB(__imp__XamContentWritePackageHeader);
+ REX_EXPORT_STUB(__imp__XamContentAddCacheDevice);
+ REX_EXPORT_STUB(__imp__XamContentDeviceCheckUpdates);
+-REX_EXPORT_STUB(__imp__XamContentGetDefaultDevice);
++
+ REX_EXPORT_STUB(__imp__XamContentGetDeviceSerialNumber);
+ REX_EXPORT_STUB(__imp__XamContentGetDeviceVolumePath);
+-REX_EXPORT_STUB(__imp__XamContentGetLocalizedDeviceData);
++
+ REX_EXPORT_STUB(__imp__XamContentRemoveCacheDevice);
+ REX_EXPORT_STUB(__imp__XamInputControl);
+ REX_EXPORT_STUB(__imp__XamInputEnableAutobind);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -426,3 +426,6 @@
+ REX_XAM_FORWARD(__imp__XamUserCreateTitlesPlayedEnumerator)
+ 
+ REX_XAM_FORWARD(__imp__XamLoaderRegisterLaunchRequestCallback)
++
++REX_XAM_FORWARD(__imp__XamContentGetDefaultDevice)
++REX_XAM_FORWARD(__imp__XamContentGetLocalizedDeviceData)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -31,6 +31,7 @@
+ #include "xam/xam_state.h"
+ #include "xam/enumerator_object.h"
+ #include <rex/filesystem/file_system_factory.h>
++#include <rex/filesystem/file_system.h>
+ #include <set>
+ #include <atomic>
+ #include <thread>
+@@ -988,6 +989,9 @@
+       std::filesystem::create_directories(root / path);
+     std::ofstream(root / "E000000000000001/584108B7/000D0000/owned/payload", std::ios::binary).write("seven!!", 7);
+   });
++  const auto optical = fixture.GetRoot() / "optical";
++  std::filesystem::create_directories(optical);
++  REQUIRE(fixture.GetRuntime().GetFileSystem().Mount({.path = "\\Device\\Cdrom0", .type = rex::filesystem::ProviderType::kHostDirectory, .source = optical, .flags = rex::filesystem::MountFlags::kNone, .null_paths = {}}));
+   fixture.RunOnGuestThread([&](Caller& caller) {
+     const auto handle_ptr = caller.Alloc(4), count_ptr = caller.Alloc(4);
+     const auto buffer = caller.Alloc(588);
+@@ -1051,6 +1055,9 @@
+     std::ofstream(package / "payload", std::ios::binary).write("actual bytes", 12);
+     std::ofstream(package / "sub" / "more", std::ios::binary).write("abc", 3);
+   });
++  const auto optical = fixture.GetRoot() / "optical";
++  std::filesystem::create_directories(optical);
++  REQUIRE(fixture.GetRuntime().GetFileSystem().Mount({.path = "\\Device\\Cdrom0", .type = rex::filesystem::ProviderType::kHostDirectory, .source = optical, .flags = rex::filesystem::MountFlags::kNone, .null_paths = {}}));
+   fixture.RunOnGuestThread([&](Caller& caller) {
+     const auto input = caller.Alloc(sizeof(rex::kernel::XCONTENT_AGGREGATE_DATA));
+     auto* data = reinterpret_cast<rex::kernel::XCONTENT_AGGREGATE_DATA*>(caller.GetBase() + input);

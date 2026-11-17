@@ -1,99 +1,81 @@
-diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
-index 1fda053..fc11084 100644
---- a/src/kernel/xam/xam_info.cpp
-+++ b/src/kernel/xam/xam_info.cpp
-@@ -59,45 +59,40 @@ u32 XamGetOnlineSchema_entry() {
-   return schema_guest;
- }
- 
-+// Xenia Canary 2372a541: old dashboards pass locale, FILETIME, buffer, bytes;
-+// new dashboards pass FILETIME, buffer, bytes. Decode before mapping pointers.
-+// Raw registers also preserve all 64 FILETIME bits (the typed integer argument
-+// translator in this SDK revision reads only the low 32 bits).
-+void FormatDashboardDateTime(PPCContext& ctx, uint8_t* base, bool time_only) {
-+  auto valid_time = [](uint64_t value) {
-+    return value >= 125911584000000000ull && value <= 157469184000000000ull;
-+  };
-+  const bool legacy = valid_time(ctx.r4.u64);
-+  const uint64_t filetime = legacy ? ctx.r4.u64 : ctx.r3.u64;
-+  const uint32_t address = legacy ? ctx.r5.u32 : ctx.r4.u32;
-+  const uint32_t bytes = legacy ? ctx.r6.u32 : ctx.r5.u32;
-+  if (!valid_time(filetime) || !address) {
-+    REXKRNL_WARN("XamFormat{}String: invalid FILETIME or null output", time_only ? "Time" : "Date");
-+    return;
-+  }
-+  const uint32_t characters = bytes / sizeof(char16_t);
-+  if (!characters) return;
- #if REX_PLATFORM_WIN32
--static SYSTEMTIME xeGetLocalSystemTime(uint64_t filetime) {
--  FILETIME t;
--  t.dwHighDateTime = filetime >> 32;
--  t.dwLowDateTime = (uint32_t)filetime;
--
--  SYSTEMTIME st;
--  SYSTEMTIME local_st;
--  FileTimeToSystemTime(&t, &st);
--  SystemTimeToTzSpecificLocalTime(NULL, &st, &local_st);
--  return local_st;
--}
--#endif
--
--void XamFormatDateString_entry(u32 unk, u64 filetime, mapped_void output_buffer, u32 output_count) {
--  std::memset(output_buffer, 0, output_count * sizeof(char16_t));
--
--// TODO: implement this for other platforms
--#if REX_PLATFORM_WIN32
--  auto st = xeGetLocalSystemTime(filetime);
--  // TODO: format this depending on users locale?
--  auto str = fmt::format(u"{:02d}/{:02d}/{}", st.wMonth, st.wDay, st.wYear);
--  rex::string::copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
--#else
--  assert_always();
--#endif
--}
--
--void XamFormatTimeString_entry(u32 unk, u64 filetime, mapped_void output_buffer, u32 output_count) {
--  std::memset(output_buffer, 0, output_count * sizeof(char16_t));
--
--// TODO: implement this for other platforms
--#if REX_PLATFORM_WIN32
--  auto st = xeGetLocalSystemTime(filetime);
--  // TODO: format this depending on users locale?
--  auto str = fmt::format(u"{:02d}:{:02d}", st.wHour, st.wMinute);
--  rex::string::copy_and_swap_truncating(output_buffer.as<char16_t*>(), str, output_count);
-+  FILETIME ft{uint32_t(filetime), uint32_t(filetime >> 32)};
-+  SYSTEMTIME utc{}, local{};
-+  if (!FileTimeToSystemTime(&ft, &utc) ||
-+      !SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local)) {
-+    REXKRNL_WARN("XamFormat{}String: time conversion failed", time_only ? "Time" : "Date");
-+    return;
-+  }
-+  // Keep the existing host-local MM/DD/YYYY and HH:MM presentation.
-+  // Locale-specific formatting remains unimplemented.
-+  auto str = time_only ? fmt::format(u"{:02d}:{:02d}", local.wHour, local.wMinute)
-+                       : fmt::format(u"{:02d}/{:02d}/{}", local.wMonth, local.wDay, local.wYear);
-+  auto* output = rex::memory::GuestPtr<char16_t*>(base, address);
-+  rex::string::copy_and_swap_truncating(output, str, characters);
- #else
--  assert_always();
-+  REXKRNL_WARN("XamFormatDate/TimeString: host time conversion is not implemented");
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -117,24 +117,29 @@
  #endif
  }
  
-@@ -335,8 +330,14 @@ u32 XamSwapDisc_entry(u32 disc_number) {
+-void XamFormatDateString_entry([[maybe_unused]] u32 unk, u64 filetime, MappedVoid output_buffer,
+-                               u32 output_count) {
+-  std::memset(output_buffer, 0, output_count * sizeof(char16_t));
+-
++void FormatDashboardDateTime(PPCContext& ctx, u8* base, bool time_only) {
++  const auto valid_time = [](u64 value) {
++    return value >= 125911584000000000ull && value <= 157469184000000000ull;
++  };
++  const bool legacy = valid_time(ctx.r4.u64);
++  const u64 filetime = legacy ? ctx.r4.u64 : ctx.r3.u64;
++  const u32 address = legacy ? ctx.r5.u32 : ctx.r4.u32;
++  const u32 bytes = legacy ? ctx.r6.u32 : ctx.r5.u32;
++  if (!valid_time(filetime) || !address) {
++    REXXAM_WARN("XamFormat{}String: invalid FILETIME or null output", time_only ? "Time" : "Date");
++    return;
++  }
++  const u32 characters = bytes / sizeof(char16_t);
++  if (!characters) return;
+   const LocalDateTime local = ToLocalDateTime(filetime);
+-  auto str =
+-      rex::string::ToUTF16(std::format("{:02d}/{:02d}/{}", local.month, local.day, local.year));
+-  rex::string::CopyAndSwapTruncating(output_buffer.As<char16_t*>(), str, output_count);
+-}
+-
+-void XamFormatTimeString_entry([[maybe_unused]] u32 unk, u64 filetime, MappedVoid output_buffer,
+-                               u32 output_count) {
+-  std::memset(output_buffer, 0, output_count * sizeof(char16_t));
+-
+-  const LocalDateTime local = ToLocalDateTime(filetime);
+-  auto str = rex::string::ToUTF16(std::format("{:02d}:{:02d}", local.hour, local.minute));
+-  rex::string::CopyAndSwapTruncating(output_buffer.As<char16_t*>(), str, output_count);
+-}
++  const auto text = time_only ? std::format("{:02d}:{:02d}", local.hour, local.minute)
++                             : std::format("{:02d}/{:02d}/{}", local.month, local.day, local.year);
++  rex::string::CopyAndSwapTruncating(rex::memory::GuestPtr<char16_t*>(base, address),
++                                    rex::string::ToUTF16(text), characters);
++}
++
++void XamFormatDateStringRaw(PPCContext& ctx, u8* base) { FormatDashboardDateTime(ctx, base, false); }
++void XamFormatTimeStringRaw(PPCContext& ctx, u8* base) { FormatDashboardDateTime(ctx, base, true); }
  
- REX_EXPORT(__imp__XamFeatureEnabled, rex::kernel::xam::XamFeatureEnabled_entry)
- REX_EXPORT(__imp__XamGetOnlineSchema, rex::kernel::xam::XamGetOnlineSchema_entry)
--REX_EXPORT(__imp__XamFormatDateString, rex::kernel::xam::XamFormatDateString_entry)
--REX_EXPORT(__imp__XamFormatTimeString, rex::kernel::xam::XamFormatTimeString_entry)
-+REX_HOOK_RAW(__imp__XamFormatDateString) {
-+  rex::kernel::xam::FormatDashboardDateTime(ctx, base, false);
-+}
-+static rex::ppc::detail::PPCFuncRegistrar date_reg("__imp__XamFormatDateString", &__imp__XamFormatDateString);
-+REX_HOOK_RAW(__imp__XamFormatTimeString) {
-+  rex::kernel::xam::FormatDashboardDateTime(ctx, base, true);
-+}
-+static rex::ppc::detail::PPCFuncRegistrar time_reg("__imp__XamFormatTimeString", &__imp__XamFormatTimeString);
- REX_EXPORT(__imp__XamBuildResourceLocator, rex::kernel::xam::XamBuildResourceLocator_entry)
- REX_EXPORT(__imp__XamBuildGamercardResourceLocator,
-            rex::kernel::xam::XamBuildGamercardResourceLocator_entry)
+ u32 BuildResourceLocator(u64 module, std::u16string_view container, std::u16string_view resource,
+                          MappedVoid buffer_ptr, u32 buffer_count) {
+@@ -418,8 +423,8 @@
+ 
+ REX_XAM_BODY(__imp__XamFeatureEnabled, rex::xam::XamFeatureEnabled_entry)
+ REX_XAM_BODY(__imp__XamGetOnlineSchema, rex::xam::XamGetOnlineSchema_entry)
+-REX_XAM_BODY(__imp__XamFormatDateString, rex::xam::XamFormatDateString_entry)
+-REX_XAM_BODY(__imp__XamFormatTimeString, rex::xam::XamFormatTimeString_entry)
++REX_XAM_BODY_RAW(__imp__XamFormatDateString, rex::xam::XamFormatDateStringRaw)
++REX_XAM_BODY_RAW(__imp__XamFormatTimeString, rex::xam::XamFormatTimeStringRaw)
+ REX_XAM_BODY(__imp__XamBuildResourceLocator, rex::xam::XamBuildResourceLocator_entry)
+ REX_XAM_BODY(__imp__XamBuildGamercardResourceLocator,
+              rex::xam::XamBuildGamercardResourceLocator_entry)
+diff --git a/src/xam/xam_bodies.h b/src/xam/xam_bodies.h
+--- a/src/xam/xam_bodies.h
++++ b/src/xam/xam_bodies.h
+@@ -84,6 +84,16 @@
+   ::rex::xam::XAMBodyRegistrar rex_xam_registrar_##name{#name, &rex_xam_body_##name}; \
+   }
+ 
++/** Registers a body that decodes a guest ABI directly from PPC registers. */
++#define REX_XAM_BODY_RAW(name, function)                                                  \
++  namespace {                                                                         \
++  REX_FUNC(rex_xam_body_##name) {                                                     \
++    REX_XAM_BODY_ZONE(name);                                                          \
++    function(ctx, base);                                  \
++  }                                                                                   \
++  ::rex::xam::XAMBodyRegistrar rex_xam_registrar_##name{#name, &rex_xam_body_##name}; \
++  }
++
+ /**
+  * Defines a shim function and the body its rexshim_ symbol forwards to. The name must be in the
+  * shim registry.

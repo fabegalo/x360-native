@@ -1,0 +1,63 @@
+diff --git a/src/rexglue/command/test_recompiler.h b/src/rexglue/command/test_recompiler.h
+--- a/src/rexglue/command/test_recompiler.h
++++ b/src/rexglue/command/test_recompiler.h
+@@ -28,10 +28,11 @@
+  * @param out_dir The folder to write the generated files into.
+  * @param case_files The number of `ppc_test_cases_N.cpp` files to split the test cases into, at
+  *        least 1.
++ * @param fast_vector_math Use fast vector math for focused fast-path regressions; exact by default.
+  * @return True when every binary was processed and every file was written.
+  */
+ bool RecompileTests(std::string_view bin_dir, std::string_view asm_dir, std::string_view out_dir,
+-                    size_t case_files = 1);
++                    size_t case_files = 1, bool fast_vector_math = false);
+ 
+ void RegisterRecompileTests(CLI::App& parent, const CLIContext& ctx, DeferredAction& pending);
+ 
+diff --git a/src/rexglue/command/test_recompiler.cpp b/src/rexglue/command/test_recompiler.cpp
+--- a/src/rexglue/command/test_recompiler.cpp
++++ b/src/rexglue/command/test_recompiler.cpp
+@@ -115,7 +115,7 @@
+ }  // namespace
+ 
+ bool RecompileTests(std::string_view bin_dir, std::string_view asm_dir, std::string_view out_dir,
+-                    size_t case_files) {
++                    size_t case_files, bool fast_vector_math) {
+   if (case_files == 0) {
+     REXGLUE_ERROR("The number of case files must be at least 1");
+     return false;
+@@ -178,10 +178,9 @@
+ 
+     codegen::RecompilerConfig config;
+     config.out_directory_path = std::string(out_dir);
+-    config.vector_math = {
+-        codegen::VectorMath::kExact, codegen::VectorMath::kExact, codegen::VectorMath::kExact,
+-        codegen::VectorMath::kExact, codegen::VectorMath::kExact, codegen::VectorMath::kExact,
+-        codegen::VectorMath::kExact, codegen::VectorMath::kExact, codegen::VectorMath::kExact};
++    const auto vector_mode = fast_vector_math ? codegen::VectorMath::kFast : codegen::VectorMath::kExact;
++    config.vector_math = {vector_mode, vector_mode, vector_mode, vector_mode, vector_mode,
++                          vector_mode, vector_mode, vector_mode, vector_mode};
+     config.forward_stack_stores = true;
+     auto ctx =
+         codegen::CodegenContext::Create(codegen::BinaryView::FromModule(module), std::move(config));
+@@ -335,6 +334,7 @@
+   std::string asm_dir;
+   std::string output;
+   size_t case_files = 1;
++  bool fast_vector_math = false;
+ };
+ 
+ }  // namespace
+@@ -357,9 +357,11 @@
+                   "Number of ppc_test_cases_N.cpp files to split the cases into")
+       ->type_name("N")
+       ->check(CLI::PositiveNumber);
++  sub->add_flag("--fast-vector-math", args->fast_vector_math,
++                "Generate fast vector math for focused regressions (default: exact)");
+   sub->callback([args, &pending]() {
+     pending = [args]() -> rex::Result<void> {
+-      if (!RecompileTests(args->bin_dir, args->asm_dir, args->output, args->case_files)) {
++      if (!RecompileTests(args->bin_dir, args->asm_dir, args->output, args->case_files, args->fast_vector_math)) {
+         return Err<void>(rex::ErrorCategory::kValidation, "Test recompilation failed");
+       }
+       return rex::Ok();

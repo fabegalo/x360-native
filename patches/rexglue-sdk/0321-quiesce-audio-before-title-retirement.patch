@@ -1,0 +1,97 @@
+diff --git a/src/kernel/apu.h b/src/kernel/apu.h
+--- a/src/kernel/apu.h
++++ b/src/kernel/apu.h
+@@ -57,6 +57,9 @@
+    * @return Ok, or a Runtime error with the decoder status as its code.
+    */
+   [[nodiscard]] Result<void> Setup();
++
++  /** Finishes callback dispatch before guest threads retire; keeps the decoder and streams alive. */
++  void QuiesceCallbacks();
+ 
+   /** Stops the worker and the decoder and waits for the worker to end. */
+   void StopWorker();
+diff --git a/src/kernel/apu.cpp b/src/kernel/apu.cpp
+--- a/src/kernel/apu.cpp
++++ b/src/kernel/apu.cpp
+@@ -93,7 +93,7 @@
+       u32 client_callback_arg;
+       {
+         std::lock_guard lock(mutex_);
+-        client_callback = clients_[index].callback;
++        client_callback = worker_running_ ? clients_[index].callback : 0;
+         client_callback_arg = clients_[index].wrapped_callback_arg;
+       }
+       if (client_callback) {
+@@ -118,14 +118,14 @@
+   worker_running_ = false;
+ }
+ 
+-void APU::StopWorker() {
++void APU::QuiesceCallbacks() {
+   {
+     std::lock_guard pause_lock(pause_mutex_);
+-    if (worker_running_) {
+-      xma_decoder_->Shutdown();
++    {
++      std::lock_guard callback_lock(mutex_);
+       worker_running_ = false;
+-      shutdown_event_->Set();
+-    }
++    }
++    shutdown_event_->Set();
+     paused_ = false;
+     if (parked_) {
+       parked_ = false;
+@@ -133,15 +133,23 @@
+     }
+   }
+   if (worker_thread_) {
+-    {
+-      if (ThreadPin pin = runtime_.GetThreadRegistry().FindByHandle(worker_thread_)) {
+-        pin->RequestStop();
+-        std::array<ThreadPin, 1> threads{std::move(pin)};
+-        WaitForThreadsToStop(threads, kWorkerShutdownTimeout, [](const ThreadPin&) {
+-          REXAPU_WARN("Audio worker still running after {} ms", kWorkerShutdownTimeout.count());
+-        });
+-      }
+-    }
++    if (ThreadPin pin = runtime_.GetThreadRegistry().FindByHandle(worker_thread_)) {
++      // A loader call from this callback cannot wait for its own thread.
++      if (KernelThread::IsInThread(pin.GetThread())) return;
++      std::array<ThreadPin, 1> threads{std::move(pin)};
++      WaitForThreadsToStop(threads, kWorkerShutdownTimeout, [](const ThreadPin& thread) {
++        thread->RequestStop();
++        REXAPU_WARN("Audio callback still running after {} ms", kWorkerShutdownTimeout.count());
++      });
++    }
++  }
++}
++
++void APU::StopWorker() {
++  QuiesceCallbacks();
++  // Keep decoding available until the callback has left its original mixer.
++  xma_decoder_->Shutdown();
++  if (worker_thread_) {
+     CloseOwned(runtime_.GetObjectTable(), worker_thread_);
+     worker_thread_ = 0;
+   }
+diff --git a/src/kernel/process.cpp b/src/kernel/process.cpp
+--- a/src/kernel/process.cpp
++++ b/src/kernel/process.cpp
+@@ -382,6 +382,7 @@
+   }
+ 
+   const auto timeout = std::chrono::milliseconds(GetRuntimeSettings().terminate_timeout_ms.Get());
++  if (apu_) apu_->QuiesceCallbacks();
+   const bool notification_overran = RunTitleTerminateNotifications(timeout);
+   StopGuestThreads(timeout, notification_overran);
+ 
+@@ -426,6 +427,7 @@
+ }
+ 
+ void kernel::TitleState::StopThreads() {
++  if (apu_) apu_->QuiesceCallbacks();
+   const auto timeout = std::chrono::milliseconds(GetRuntimeSettings().terminate_timeout_ms.Get());
+   StopGuestThreads(timeout);
+   if (dispatcher_) {

@@ -8,9 +8,9 @@
 #include <stdexcept>
 namespace x360n::native {
 void VulkanRender::DestroyScaled() {
-  const auto& fn = device_.functions();
-  if (scaled_buffer_) fn.vkDestroyBuffer(device_.device(), scaled_buffer_, nullptr);
-  for (auto memory : scaled_memory_) fn.vkFreeMemory(device_.device(), memory, nullptr);
+  const auto& fn = device_.GetFunctions();
+  if (scaled_buffer_) fn.vkDestroyBuffer(device_.GetDevice(), scaled_buffer_, nullptr);
+  for (auto memory : scaled_memory_) fn.vkFreeMemory(device_.GetDevice(), memory, nullptr);
   scaled_buffer_ = VK_NULL_HANDLE; scaled_memory_.clear(); scaled_bound_.clear();
   retired_scanout_buffers_.clear(); scanout_buffer_.reset();
 }
@@ -19,27 +19,27 @@ VkDescriptorSet VulkanRender::StorageSet(const VkDescriptorBufferInfo& info) {
   VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
   write.dstSet = set; write.descriptorCount = 1; write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   write.pBufferInfo = &info;
-  device_.functions().vkUpdateDescriptorSets(device_.device(), 1, &write, 0, nullptr);
+  device_.GetFunctions().vkUpdateDescriptorSets(device_.GetDevice(), 1, &write, 0, nullptr);
   return set;
 }
 VkDescriptorBufferInfo VulkanRender::UseScaled(uint32_t start, uint64_t length, VkPipelineStageFlags stage, VkAccessFlags access) {
-  const auto& fn = device_.functions();
-  const auto vk = device_.device();
+  const auto& fn = device_.GetFunctions();
+  const auto vk = device_.GetDevice();
   const uint64_t area = uint64_t(scale_x_) * scale_y_, total = uint64_t(GuestMemoryMirror::kSize) * area;
   const uint64_t first = uint64_t(start) * area, size = length * area;
-  const auto& properties = device_.properties();
+  const auto& properties = device_.GetProperties();
   if (!length || first + size > total || size > properties.maxStorageBufferRange || first % properties.minStorageBufferOffsetAlignment)
     throw std::runtime_error("Native Vulkan: scaled memory range exceeds storage buffer limits");
   if (!scaled_buffer_) {
     VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     info.size = total; info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     scaled_sparse_ = properties.sparseBinding && properties.sparseResidencyBuffer &&
-        device_.queue_family_sparse_binding() != UINT32_MAX;
+        device_.GetQueueFamilySparseBinding() != UINT32_MAX;
     if (scaled_sparse_) info.flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
     CheckVulkan(fn.vkCreateBuffer(vk, &info, nullptr, &scaled_buffer_), "create scaled resolve buffer");
     VkMemoryRequirements requirements;
     fn.vkGetBufferMemoryRequirements(vk, scaled_buffer_, &requirements);
-    auto types = requirements.memoryTypeBits & device_.memory_types().device_local;
+    auto types = requirements.memoryTypeBits & device_.GetMemoryTypes().device_local;
     if (!types) throw std::runtime_error("Native Vulkan: no device-local memory for scaled resolves");
     scaled_memory_type_ = std::countr_zero(types);
     if (scaled_sparse_) {
@@ -80,8 +80,8 @@ VkDescriptorBufferInfo VulkanRender::UseScaled(uint32_t start, uint64_t length, 
       CheckVulkan(fn.vkCreateFence(vk, &fence_info, nullptr, &fence), "create sparse bind fence");
       VkResult result;
       {
-        auto queue = device_.AcquireQueue(device_.queue_family_sparse_binding(), 0);
-        result = fn.vkQueueBindSparse(queue.queue(), 1, &info, fence);
+        auto queue = device_.AcquireQueue(device_.GetQueueFamilySparseBinding(), 0);
+        result = fn.vkQueueBindSparse(queue.GetQueue(), 1, &info, fence);
       }
       if (result == VK_SUCCESS) result = fn.vkWaitForFences(vk, 1, &fence, VK_TRUE, UINT64_MAX);
       fn.vkDestroyFence(vk, fence, nullptr);
@@ -120,7 +120,7 @@ VkBuffer VulkanRender::PrepareScanout(const ScanoutTexture& input, ScanoutTextur
   if (!mirror_ || !scaled_.Overlaps(input.address, input.bytes)) return VK_NULL_HANDLE;
   const uint64_t width = uint64_t(input.width) * scale_x_, height = uint64_t(input.height) * scale_y_;
   const uint64_t pitch = (width + 31) & ~uint64_t(31), size = pitch * height * 4;
-  if (!width || !height || size > device_.properties().maxStorageBufferRange || width > 16384 || height > 16384 || (input.address & 15))
+  if (!width || !height || size > device_.GetProperties().maxStorageBufferRange || width > 16384 || height > 16384 || (input.address & 15))
     throw std::runtime_error("Native: requested scale exceeds scanout texture limits");
   output = input; output.width = uint32_t(width); output.height = uint32_t(height); output.pitch = uint32_t(pitch);
   output.tiled = 0; output.bytes = uint32_t(size);

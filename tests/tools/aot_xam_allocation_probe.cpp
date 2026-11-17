@@ -7,23 +7,14 @@
 #include "../../titles/dash_1888/src/system_ui.h"
 #include "../../titles/dash_1888/src/original_assets.h"
 #include "../../titles/common/system_ui_context.h"
-#include <rex/kernel/init.h>
-#include <rex/runtime.h>
-#include <rex/image_info.h>
-#include <rex/ppc/func.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/xmemory.h>
-#include <rex/system/xex_module.h>
-#include <rex/system/user_module.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/logging.h>
-#include <rex/cvar.h>
-#include <rex/audio/audio_system.h>
-#include <rex/audio/audio_driver.h>
-#include <rex/input/input_system.h>
-#include <rex/input/input_driver.h>
-#include <rex/input/device_assignment.h>
+#include "tool_sdk.h"
+#include <rex/filesystem/file_system.h>
+#include <rex/hid/input_system.h>
+#include <rex/hid/input_driver.h>
+#include <rex/driver_module.h>
+#include <rex/apu/audio_system.h>
+#include <rex/kernel/title_exit.h>
+#include <rex/kernel/kernel_settings.h>
 #include <windows.h>
 #include <algorithm>
 #include <iostream>
@@ -33,71 +24,71 @@
 #include <cstring>
 #include <atomic>
 
-using rex::X_STATUS;
+using rex::kernel::X_STATUS;
+using namespace rex::kernel;
 // This explicit diagnostic never installs the boot-intro hook.
 namespace dash1888 { bool BootIntroRunning() { return false; } }
-struct AllocatorCollector final : rex::runtime::IModuleRegistrar {
+struct AllocatorCollector final : rex::kernel::IFunctionRegistrar {
   std::map<uint32_t, PPCFunc*> functions;
   bool SetFunction(uint32_t address, PPCFunc* fn) override {
     return address && fn && functions.emplace(address, fn).second;
   }
 };
-// Diagnostic sink: keep the real SDK's client and callback lifecycle, while
-// sending no samples to an OS audio device. Production audio is unchanged.
-class ProbeSilentDriver final : public rex::audio::AudioDriver {
+// The SDK's no-device audio path still mixes on its timer and delivers callbacks.
+// Script raw pad transitions; the canonical HID system creates the guest keystrokes.
+class ProbeOpeningChord final : public rex::hid::IInputDriver {
  public:
-  using AudioDriver::AudioDriver;
-  void SubmitFrame(uint32_t) override {}
-};
-class ProbeAudio final : public rex::audio::AudioSystem {
- public:
-  explicit ProbeAudio(rex::runtime::FunctionDispatcher* dispatcher) : AudioSystem(dispatcher) {}
-  rex::X_STATUS CreateDriver(size_t, rex::thread::Semaphore*, rex::audio::AudioDriver** out) override {
-    *out = new ProbeSilentDriver(memory());
-    return X_STATUS_SUCCESS;
+  inline static bool reversed=false,delayed=false;
+  inline static ProbeOpeningChord* active=nullptr;
+  std::string_view GetName() const override {return "opening-chord";}
+  rex::Result<void> Initialize(rex::IDriverContext&) override {active=this;return {};}
+  void Shutdown() override {active=nullptr;}
+  rex::u64 GetDeviceRevision() const override {return 1;}
+  void EnumerateDevices(std::vector<rex::hid::PadDevice>& out) override {
+    out.clear();rex::hid::PadDevice pad;pad.id=rex::hid::PadDeviceID{1};pad.name="scripted opening chord";out.push_back(std::move(pad));
   }
-  void DestroyDriver(rex::audio::AudioDriver* driver) override { delete driver; }
-};
-// A scripted controller for the BACK+START opening boundary comparison. No
-// host device is opened and no event is injected into the desktop session.
-class ProbeOpeningChord final : public rex::input::InputDriver {
- public:
-  explicit ProbeOpeningChord(bool reversed, bool delayed = false)
-      : InputDriver(nullptr, 0), reversed_(reversed), delayed_(delayed) {}
-  rex::X_STATUS Setup() override { return X_STATUS_SUCCESS; }
-  void EnumerateDevices(std::vector<rex::input::DeviceInfo>& out) override {
-    out.push_back({rex::input::DeviceId(1), 0, "scripted opening chord", "", false});
+  rex::Result<rex::hid::PadState> GetDeviceState(rex::hid::PadDeviceID) override {
+    if(next_<4 && (!delayed || polls_++>=60u+next_*8u)) {
+      const auto button=bool(next_%2)!=reversed ? rex::hid::kPadStart : rex::hid::kPadBack;
+      if(next_<2)buttons_|=button;else buttons_&=~button;
+      std::cout<<"scripted chord transition="<<next_<<" button="<<std::hex<<button<<std::dec<<'\n';++next_;
+    }
+    rex::hid::PadState state{};state.buttons=buttons_;return state;
   }
-  rex::X_RESULT GetDeviceState(rex::input::DeviceId, rex::input::X_INPUT_STATE* out) override {
-    *out = {};
-    out->gamepad.buttons = rex::input::X_INPUT_GAMEPAD_GUIDE |
-        rex::input::X_INPUT_GAMEPAD_BACK | rex::input::X_INPUT_GAMEPAD_START;
-    return 0;
-  }
-  rex::X_RESULT GetDeviceCapabilities(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_CAPABILITIES*) override { return 0; }
-  rex::X_RESULT SetDeviceVibration(rex::input::DeviceId, rex::input::X_INPUT_VIBRATION*) override { return 0; }
-  rex::X_RESULT GetDeviceKeystroke(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_KEYSTROKE* out) override {
-    if (next_ == 4) return 0x10D2; // X_ERROR_EMPTY.
-    // Separate physical transitions across frames. Delivering the whole chord
-    // during the initial transparent scene missed real UI actions on reopening.
-    if (delayed_ && polls_++ < 60u + next_ * 8u) return 0x10D2;
-    *out = {};
-    out->virtual_key = bool(next_ % 2) != reversed_ ? 0x5814 : 0x5815; // START, BACK.
-    out->flags = next_ < 2 ? rex::input::X_INPUT_KEYSTROKE_KEYDOWN : rex::input::X_INPUT_KEYSTROKE_KEYUP;
-    std::cout << "scripted chord delivered key=" << std::hex << uint16_t(out->virtual_key)
-              << " flags=" << uint16_t(out->flags) << " lr="
-              << (rex::system::XThread::IsInThread() ?
-                  rex::system::XThread::GetCurrentThread()->thread_state()->context()->lr : 0)
-              << std::dec << '\n';
-    ++next_;
-    return 0;
-  }
-  unsigned delivered() const { return next_; }
+  rex::Result<rex::hid::PadCapabilities> GetDeviceCapabilities(rex::hid::PadDeviceID) override {return rex::hid::PadCapabilities{};}
+  rex::Result<void> SetDeviceVibration(rex::hid::PadDeviceID,const rex::hid::PadVibration&) override {return {};}
+  unsigned delivered() const {return next_;}
  private:
-  unsigned next_ = 0;
-  unsigned polls_ = 0;
-  bool reversed_ = false;
-  bool delayed_ = false;
+  unsigned next_=0,polls_=0;uint16_t buttons_=rex::hid::kPadGuide;
+};
+class ProbePadModule final : public rex::IModule,public rex::IDriverModule {
+ public:
+  std::string_view GetName() const override {return "1888-probe-input";}
+  rex::Result<void> Connect(rex::IInterfaceFactory&) override {return {};}
+  void Disconnect() override {}
+  rex::Result<void> Init() override {return {};}
+  void Shutdown() override {}
+  rex::IInterface* QueryInterface(std::string_view name,rex::u32 version) override {return rex::FindModuleInterface<rex::IDriverModule>(*this,name,version);}
+  std::span<const rex::DriverRegistration> GetDrivers() const override {
+    static const std::array drivers{rex::DriverRegistration{rex::DriverType::kInput,"opening-chord",{},[]{return std::unique_ptr<rex::IDriver>(new ProbeOpeningChord);}}};return drivers;
+  }
+};
+class AllocationProbeApp final : public x360n::DiagnosticToolApp {
+ public:
+  AllocationProbeApp(std::filesystem::path work,bool chord,bool portuguese):DiagnosticToolApp("1888-allocation-probe",work),chord_(chord),portuguese_(portuguese) {}
+  ~AllocationProbeApp() override {Shutdown();}
+ protected:
+  void OnRegisterModules(std::vector<rex::IModule*>& modules) override {ToolApp::OnRegisterModules(modules);modules.push_back(&pad_);}
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& settings) override {
+    REX_TRY_VOID(DiagnosticToolApp::OnConfigure(settings));
+    REX_TRY_VOID(settings.Register(dash1888::GetSystemUiSettings()));
+    settings_guard_=rex::ScopeGuard([&settings]{settings.Unregister(dash1888::GetSystemUiSettings());});
+    if(chord_)REX_TRY_VOID(GetInput().GetSettings().drivers.SetText(rex::SettingLayer::kTitle,"opening-chord"));
+    if(portuguese_) {REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle,"kernel.user_language","9"));REX_TRY_VOID(settings.SetText(rex::SettingLayer::kTitle,"kernel.user_country","13"));}
+    return rex::Ok();
+  }
+ private:
+  bool portuguese_;bool chord_;ProbePadModule pad_;rex::ScopeGuard settings_guard_;
 };
 int main(int argc, char** argv) {
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
@@ -112,13 +103,10 @@ int main(int argc, char** argv) {
   const bool guide_animation = opening_chord_raw ||
       (argc == 4 && std::string(argv[3]) == "service-guide-animation");
   const bool service = service_signin || service_guide || service_cycle || draw_cycle || guide_animation;
-  rex::LogConfig logging;
-  logging.log_to_console = true;
-  rex::InitLogging(logging);
   AddVectoredExceptionHandler(0, [](EXCEPTION_POINTERS* exception) -> LONG {
     if (exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-        rex::system::XThread::IsInThread()) {
-      auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+        (rex::kernel::KernelThread::GetCallingThread()!=nullptr)) {
+      auto* ctx = rex::kernel::KernelThread::GetCallingThread()->GetThreadState()->GetContext();
       std::cerr << "diagnostic exception guest LR=" << std::hex << ctx->lr
                 << " r3=" << ctx->r3.u32 << " r4=" << ctx->r4.u32
                 << " r5=" << ctx->r5.u32 << " r6=" << ctx->r6.u32 << '\n' << std::flush;
@@ -134,8 +122,8 @@ int main(int argc, char** argv) {
       LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   if (!library) { std::cerr << "LoadLibrary error=" << GetLastError() << '\n'; return 3; }
   struct Unload { HMODULE library; ~Unload() { FreeLibrary(library); } } unload{library};
-  const auto image_fn = reinterpret_cast<const rex::PPCImageInfo* (*)()>(GetProcAddress(library, "ReXModule_GetImageInfo"));
-  const auto register_fn = reinterpret_cast<rex::runtime::FunctionDispatcher::RegisterFn>(GetProcAddress(library, "ReXModule_Register"));
+  const auto image_fn = reinterpret_cast<const rex::ppc::PPCImage* (*)()>(GetProcAddress(library, "ReXGetModuleImage"));
+  const auto register_fn = reinterpret_cast<rex::kernel::FunctionDispatcher::RegisterFn>(GetProcAddress(library, "ReXRegisterModule"));
   if (!image_fn || !register_fn || image_fn()->image_base != 0x81870000 ||
       image_fn()->image_size != 0x310000 || image_fn()->code_base != 0x818C0000) return 4;
   AllocatorCollector collector;
@@ -154,52 +142,30 @@ int main(int argc, char** argv) {
     const auto error = x360n::VerifyDashboardAssets(originals, "2.0.1888.0", dash1888::kOriginalAssets);
     if (!error.empty()) { std::cerr << error << '\n'; return 9; }
   }
-  rex::Runtime rt(originals, work, {}, work / "cache", work / "metadata");
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  config.kernel_init = rex::kernel::InitializeKernel;
-  ProbeOpeningChord* opening_pad = nullptr;
-  if (guide_animation) config.input_factory = [opening_chord_raw, opening_chord_reversed, opening_chord_delayed, &opening_pad](bool) {
-    // No host drivers: the real input queue is empty and never samples a pad.
-    auto input = std::make_unique<rex::input::InputSystem>(nullptr);
-    if (opening_chord_raw) {
-      auto driver = std::make_unique<ProbeOpeningChord>(opening_chord_reversed, opening_chord_delayed);
-      opening_pad = driver.get();
-      input->AddDriver(std::move(driver));
-      input->SetDeviceAssignment(std::make_unique<rex::input::SlotAssignment>());
-    }
-    return std::unique_ptr<rex::system::IInputSystem>(std::move(input));
+  ProbeOpeningChord::reversed=opening_chord_reversed;ProbeOpeningChord::delayed=opening_chord_delayed;
+  AllocationProbeApp app(work,opening_chord_raw,service_cycle || draw_cycle);
+  if(!app.Start())return 6;
+  auto set=[](const char* name,const char* value){auto result=REX_SETTINGS().SetText(rex::SettingLayer::kTitle,name,value);return result;};
+  if(opening_chord_raw && !set("dash1888.ui_input_trace","true"))return 6;
+  if(service && !set("dash1888.ui_lifecycle_trace","true"))return 6;
+  static std::string recompiled_library=x360n::PathUtf8(std::filesystem::path(dll).replace_extension());
+  rex::ppc::PPCImage descriptor{};
+  if(service)descriptor.register_modules=[](rex::kernel::IModuleRegistry& modules) {
+    modules.RegisterRecompiledModule("xam.xex","game:\\xam.xex",recompiled_library.c_str());
   };
-  if (device_bootstrap || service) config.audio_factory = [](rex::runtime::FunctionDispatcher* dispatcher) {
-    return std::unique_ptr<rex::system::IAudioSystem>(new ProbeAudio(dispatcher));
-  };
-  if (rt.Setup(std::move(config)) != X_STATUS_SUCCESS) return 6;
-  if (opening_chord_raw)
-    rex::cvar::SetFlagByName("dash1888_ui_input_trace", "true");
-  if (service) rex::cvar::SetFlagByName("dash1888_ui_lifecycle_trace", "true");
-  auto* memory = rt.memory();
-  auto* base = memory->virtual_membase();
+  rex::kernel::TitleRuntime rt(descriptor);
+  if(!rt.GetTitlePaths().game_root.Set(originals) ||
+      !rt.GetTitlePaths().entry.Set(service?"dash.xex":"") || !rt.Load())return 6;
+  auto* memory=&rex::kernel::GetAddressSpace(rt);
+  auto* base = memory->GetVirtualMembase();
   if (service) {
-    auto system_root = std::make_unique<rex::filesystem::HostPathDevice>("\\SystemRoot", originals, true);
-    if (!system_root->Initialize() || !rt.file_system()->RegisterDevice(std::move(system_root))) return 9;
-    rt.file_system()->RegisterSymbolicLink("media:", "game:");
-    if (service_cycle || draw_cycle) {
-      rex::cvar::SetFlagByName("user_language", "9");
-      rex::cvar::SetFlagByName("user_country", "13");
-    }
-    const auto library_path = x360n::PathUtf8(dll);
-    rt.kernel_state()->RegisterRecompiledModule("xam.xex", "game:\\xam.xex", library_path.c_str());
-    // Load only the dashboard's data/header for the real title identity. Its
-    // entrypoint and functions are never executed by this service diagnostic.
-    auto dashboard = rt.kernel_state()->LoadUserModule("game:\\dash.xex", false);
-    if (!dashboard) return 9;
-    rt.kernel_state()->SetExecutableModule(dashboard);
+    if(!rt.GetFileSystem().Mount({.path="\\SystemRoot",.source=originals}) ||
+       !rt.GetFileSystem().Link("media:","game:"))return 9;
     dash1888::InstallSystemUi(rt);
     uint32_t result = ~0u, scene = 0;
     std::cout << "diagnostic_only=true gui=false dashboard_entry_execution=false isolated_user_data=true\n"
               << "original service=" << (draw_cycle ? "draw-cycle-pt-br" : service_cycle ? "cycle-pt-br" : service_signin ? "signin" : "guide") << '\n' << std::flush;
-    auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(), 512 * 1024, 0, [&] {
+    auto caller=rt.GetThreadRegistry().LaunchHostThread("1888 diagnostic",512*1024,[&] {
       x360n::SystemUiContext system_context(*memory);
       if (service_cycle || draw_cycle) {
         for (const auto message : {0x21001u, 0x21015u, 0x2100Eu, 0x21001u, 0x21015u}) {
@@ -217,19 +183,18 @@ int main(int argc, char** argv) {
         }
       }
       return 0;
-    }));
-    if (caller->Create() != X_STATUS_SUCCESS) return 12;
+    });
+    if (!caller) return 12;
     uint64_t timeout = uint64_t(-100'000'000ll);
-    if (caller->Wait(0, 0, 0, &timeout) != X_STATUS_SUCCESS) {
+    if (rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*caller,0,0,0,&timeout) != X_STATUS_SUCCESS) {
       std::cout << "FAIL original application lifecycle timed out\n" << std::flush;
       ExitProcess(12);
     }
-    rt.audio_system()->QuiesceTitleCallbacks();
-    rt.audio_system()->Shutdown();
-    dash1888::ReleaseSystemUi();
+    rt.GetTitleExit().TerminateTitle();
+    dash1888::ReleaseSystemUi(rt);
     std::cout << "original application result=" << std::hex << result << " scene=" << scene << '\n';
     if (result || !scene) return 13;
-    if (opening_chord_raw && (!opening_pad || opening_pad->delivered() != 4)) {
+    if (opening_chord_raw && (!ProbeOpeningChord::active || ProbeOpeningChord::active->delivered()!=4)) {
       std::cerr << "FAIL opening chord was not fully delivered to the original UI\n";
       return 14;
     }
@@ -269,24 +234,24 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> image(static_cast<size_t>(input.tellg()));
     input.seekg(0); input.read(reinterpret_cast<char*>(image.data()), image.size());
     if (!input) return 9;
-    std::unique_ptr<rex::runtime::XexModule> module;
+    std::unique_ptr<rex::kernel::XEXModule> module;
     if (device_bootstrap) {
-      module = std::make_unique<rex::runtime::XexModule>(rt.function_dispatcher(), rt.kernel_state());
+      module = std::make_unique<rex::kernel::XEXModule>(&rex::kernel::GetFunctionDispatcher(rt),rt);
       if (!module->Load("xam.xex", "game:\\xam.xex", image.data(), image.size()) ||
-          module->base_address() != 0x81870000 || module->image_size() != 0x310000 ||
+          module->GetBaseAddress() != 0x81870000 || module->GetImageSize() != 0x310000 ||
           !module->LoadContinue()) return 9;
     } else {
       if (image[0] != 'M' || image[1] != 'Z') return 9;
       auto* heap = memory->LookupHeap(0x81870000);
-      if (!heap->AllocFixed(0x81870000, image.size(), heap->page_size(),
-          rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-          rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite)) return 9;
+      if (!heap->AllocFixed(0x81870000, image.size(), heap->GetPageSize(),
+          rex::kernel::kMemoryAllocationReserve | rex::kernel::kMemoryAllocationCommit,
+          rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite)) return 9;
       std::memcpy(base + 0x81870000, image.data(), image.size());
     }
     const auto* layout = image_fn();
-    if (!rt.function_dispatcher()->InitializeFunctionTable(layout->code_base, layout->code_size,
+    if (!(&rex::kernel::GetFunctionDispatcher(rt))->InitializeFunctionTable(layout->code_base, layout->code_size,
         layout->image_base, layout->image_size, true, true)) return 9;
-    rt.function_dispatcher()->RegisterModule("xam-static-probe", layout->code_base, register_fn);
+    (&rex::kernel::GetFunctionDispatcher(rt))->RegisterModule("xam-static-probe", layout->code_base, register_fn);
     const auto word = [&](uint32_t address) { return rex::memory::load_and_swap<uint32_t>(base + address); };
     if (word(0x81AB1208) || word(0x81AB1228)) return 10;
     for (const auto& initializer : dash1888::kUiStaticInitializers) {
@@ -311,13 +276,12 @@ int main(int argc, char** argv) {
     if (initialize == collector.functions.end()) return 11;
     uint32_t result = ~0u;
     std::atomic<DWORD> worker_id = 0;
-    auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
-        rt.kernel_state(), 128 * 1024, 0, [&] {
+    auto caller=rt.GetThreadRegistry().LaunchHostThread("1888 diagnostic",128*1024,[&] {
       worker_id = GetCurrentThreadId();
       x360n::SystemUiContext system_context(*memory);
       const auto call = [&](uint32_t address) {
         std::cout << "starting " << std::hex << address << '\n' << std::flush;
-        const auto value = rt.function_dispatcher()->ExecuteTrap(system_context.thread_state(), address, nullptr, 0);
+        const auto value = (&rex::kernel::GetFunctionDispatcher(rt))->ExecuteTrap(system_context.thread_state(), address, nullptr, 0);
         std::cout << "completed " << std::hex << address << " result=" << uint32_t(value) << '\n' << std::flush;
         return uint32_t(value);
       };
@@ -328,13 +292,13 @@ int main(int argc, char** argv) {
         return 0;
       }
       uint64_t args[]{0, 0, 0x81939B60};
-      result = uint32_t(rt.function_dispatcher()->ExecuteTrap(
+      result = uint32_t((&rex::kernel::GetFunctionDispatcher(rt))->ExecuteTrap(
           system_context.thread_state(), 0x81938E18, args, 3));
       return 0;
-    }));
-    if (caller->Create() != X_STATUS_SUCCESS) return 12;
+    });
+    if (!caller) return 12;
     uint64_t timeout = uint64_t(-50'000'000ll);
-    if (caller->Wait(0, 0, 0, &timeout) != X_STATUS_SUCCESS) {
+    if (rt.GetThreadRegistry().GetObjectWaiter().WaitGuestObject(*caller,0,0,0,&timeout) != X_STATUS_SUCCESS) {
       // Inspect only this diagnostic's own bounded worker, never another app.
       auto worker = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
                                FALSE, worker_id.load());
@@ -359,7 +323,7 @@ int main(int argc, char** argv) {
                             &context, &handler_data, &establisher, nullptr);
           }
         }
-        std::cout << "guest LR=" << std::hex << caller->thread_state()->context()->lr << '\n' << std::flush;
+        std::cout << "guest LR=" << std::hex << rt.GetThreadRegistry().Find(rt.GetObjectTable().Get<rex::kernel::ThreadRef>(*caller)->thread_id)->GetThreadState()->GetContext()->lr << '\n' << std::flush;
         ResumeThread(worker);
       }
       if (worker) CloseHandle(worker);
@@ -370,10 +334,9 @@ int main(int argc, char** argv) {
     if (result) return 11;
     std::cout << "PASS original XUI core initialized without graphics\n";
     if (device_bootstrap) {
-      rt.audio_system()->QuiesceTitleCallbacks();
-      rt.audio_system()->Shutdown();
+      rt.GetTitleExit().TerminateTitle();
     }
-    rt.function_dispatcher()->UnregisterModule("xam-static-probe");
+    (&rex::kernel::GetFunctionDispatcher(rt))->UnregisterModule("xam-static-probe");
   }
   memory->SystemHeapFree(stack);
   std::cout << "PASS original XUI realloc: allocate, grow across page, shrink, free; bytes preserved\n";

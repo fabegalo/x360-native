@@ -1,18 +1,77 @@
-diff --git a/src/kernel/xam/xam_notify.cpp b/src/kernel/xam/xam_notify.cpp
-index 9abcef6..01a0231 100644
---- a/src/kernel/xam/xam_notify.cpp
-+++ b/src/kernel/xam/xam_notify.cpp
-@@ -115,7 +115,12 @@ REX_EXPORT(__imp__XNotifyGetNext, rex::kernel::xam::XNotifyGetNext_entry)
- REX_EXPORT(__imp__XNotifyDelayUI, rex::kernel::xam::XNotifyDelayUI_entry)
- REX_EXPORT(__imp__XNotifyPositionUI, rex::kernel::xam::XNotifyPositionUI_entry)
+diff --git a/src/xam/xam_notify.cpp b/src/xam/xam_notify.cpp
+--- a/src/xam/xam_notify.cpp
++++ b/src/xam/xam_notify.cpp
+@@ -98,6 +98,10 @@
  
--REX_EXPORT_STUB(__imp__XNotifyBroadcast);
-+// The system caller supplies the full notification ID (including its private
-+// bit) and a 32-bit parameter. Delivery uses the same mask/version filtering
-+// and waitable queues as kernel-originated sign-in notifications.
-+extern "C" REX_FUNC(__imp__XNotifyBroadcast) {
-+  REX_KERNEL_STATE()->BroadcastNotification(ctx.r3.u32, ctx.r4.u32);
+ void XNotifyPositionUI_entry([[maybe_unused]] u32 position) {}
+ 
++void XNotifyBroadcast_entry(u32 id, u32 parameter) {
++  CurrentTitle().notifier.BroadcastNotification(id, parameter);
 +}
++
+ }  // namespace xam
+ }  // namespace rex
+ 
+@@ -107,3 +111,5 @@
+ REX_XAM_BODY(__imp__XNotifyGetNext, rex::xam::XNotifyGetNext_entry)
+ REX_XAM_BODY(__imp__XNotifyDelayUI, rex::xam::XNotifyDelayUI_entry)
+ REX_XAM_BODY(__imp__XNotifyPositionUI, rex::xam::XNotifyPositionUI_entry)
++
++REX_XAM_BODY(__imp__XNotifyBroadcast, rex::xam::XNotifyBroadcast_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1239,7 +1239,7 @@
+ REX_EXPORT_STUB(__imp__NetDll_XnpUnregisterKeyForCallerType);
+ REX_EXPORT_STUB(__imp__NetDll_XnpUpdateConfigParams);
+ REX_EXPORT_STUB(__imp__NetDll_getpeername);
+-REX_EXPORT_STUB(__imp__XNotifyBroadcast);
++
  REX_EXPORT_STUB(__imp__XNotifyQueueUI);
  REX_EXPORT_STUB(__imp__XNotifyQueueUIEx);
  REX_EXPORT_STUB(__imp__XNotifyRegisterArea);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -362,3 +362,5 @@
+ REX_XAM_FORWARD(__imp__XamContentGetAttributesInternal)
+ 
+ REX_XAM_FORWARD(__imp__XamContentLaunchImageInternalEx)
++
++REX_XAM_FORWARD(__imp__XNotifyBroadcast)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1150,3 +1150,32 @@
+   CHECK(rex::xam::CurrentXAM().GetLoaderState().launch_path == "XSYSLAUNCH:\\default.xex");
+   CHECK(rex::xam::CurrentXAM().GetLoaderState().launch_flags == 0);
+ }
++
++
++REX_TEST_CASE("system notification exports preserve private IDs and official waitable mask/version filtering", "[kernel][xam][notification-delivery]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& caller) {
++    const auto matching = caller.XAM("XamNotifyCreateListener", {2, 0});
++    const auto filtered = caller.XAM("XamNotifyCreateListener", {4, 0});
++    const auto version1 = caller.XAM("XamNotifyCreateListener", {2, 1});
++    REQUIRE(matching != 0);
++    REQUIRE(filtered != 0);
++    REQUIRE(version1 != 0);
++    const auto id = caller.Alloc(4), parameter = caller.Alloc(4), timeout = caller.AllocQuad(0);
++    CHECK(caller.Kernel("NtWaitForSingleObjectEx", {matching, 0, 0, timeout}) == rex::kernel::X_STATUS_TIMEOUT);
++    caller.XAM("XNotifyBroadcast", {0x82000011, 0xFFFFFFFF});
++    CHECK(caller.Kernel("NtWaitForSingleObjectEx", {matching, 0, 0, timeout}) == 0);
++    CHECK(caller.Kernel("NtWaitForSingleObjectEx", {filtered, 0, 0, timeout}) == rex::kernel::X_STATUS_TIMEOUT);
++    REQUIRE(caller.XAM("XNotifyGetNext", {matching, 0, id, parameter}) == 1);
++    CHECK(caller.Load32(id) == 0x82000011);
++    CHECK(caller.Load32(parameter) == 0xFFFFFFFF);
++    CHECK(caller.Kernel("NtWaitForSingleObjectEx", {matching, 0, 0, timeout}) == rex::kernel::X_STATUS_TIMEOUT);
++    CHECK(caller.XAM("XNotifyGetNext", {filtered, 0, id, parameter}) == 0);
++    caller.XAM("XNotifyBroadcast", {0x82010011, 42});
++    CHECK(caller.XAM("XNotifyGetNext", {matching, 0x82010011, id, parameter}) == 0);
++    REQUIRE(caller.XAM("XNotifyGetNext", {version1, 0x82010011, id, parameter}) == 1);
++    CHECK(caller.Load32(id) == 0x82010011);
++    CHECK(caller.Load32(parameter) == 42);
++    for (const auto handle : {matching, filtered, version1}) CHECK(caller.Kernel("NtClose", {handle}) == 0);
++  });
++}

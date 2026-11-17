@@ -1,105 +1,240 @@
-diff --git a/src/system/util/xdbf_utils.cpp b/src/system/util/xdbf_utils.cpp
-index 8250565..43d3e25 100644
---- a/src/system/util/xdbf_utils.cpp
-+++ b/src/system/util/xdbf_utils.cpp
-@@ -11,6 +11,8 @@
+diff --git a/src/filesystem/xdbf.cpp b/src/filesystem/xdbf.cpp
+--- a/src/filesystem/xdbf.cpp
++++ b/src/filesystem/xdbf.cpp
+@@ -13,6 +13,7 @@
+ #include <rex/kernel/types/content.h>
  
- #include <rex/system/util/xdbf_utils.h>
- 
+ #include <optional>
 +#include <set>
-+
- namespace rex {
- namespace system {
- namespace util {
-@@ -25,31 +27,70 @@ constexpr uint64_t kXdbfIdXstc = 0x58535443;
- constexpr uint64_t kXdbfIdXach = 0x58414348;
  
- XdbfWrapper::XdbfWrapper(const uint8_t* data, size_t data_size)
+ namespace rex {
+ namespace filesystem {
+@@ -39,28 +40,65 @@
+ }  // namespace
+ 
+ XDBFTitleData::XDBFTitleData(const u8* data, size_t data_size)
 -    : data_(data), data_size_(data_size) {
--  if (!data || data_size <= sizeof(XbdfHeader)) {
+-  if (!data || data_size <= sizeof(XDBFHeader)) {
 -    data_ = nullptr;
 -    return;
 -  }
 -
--  const uint8_t* ptr = data_;
--
--  header_ = reinterpret_cast<const XbdfHeader*>(ptr);
--  ptr += sizeof(XbdfHeader);
--  if (header_->magic != kXdbfSignatureXdbf) {
++    : data_size_(data_size) {
++  if (!data || data_size < sizeof(XDBFHeader)) return;
+   const auto header = memory::load<XDBFHeader>(data);
+-  const u32 entry_capacity = memory::load<be_u32>(&header.entry_capacity);
+-  const u32 entry_used = memory::load<be_u32>(&header.entry_used);
+-  const u32 free_count = memory::load<be_u32>(&header.free_count);
+-  const u64 tables_size =
+-      u64{sizeof(XDBFEntry)} * entry_capacity + u64{sizeof(XDBFFileLocation)} * free_count;
+-  if (memory::load<be_u32>(&header.magic) != kXDBFSignatureXDBF || entry_used > entry_capacity ||
+-      tables_size > data_size - sizeof(XDBFHeader)) {
 -    data_ = nullptr;
 -    return;
-+    : data_size_(data_size) {
-+  // Validate before publishing data_. Cached game resources are disk input too;
-+  // an invalid resource must never expose an unchecked pointer to callers.
-+  if (!data || data_size < sizeof(XbdfHeader)) return;
-+  const auto* header = reinterpret_cast<const XbdfHeader*>(data);
-+  if (header->magic != kXdbfSignatureXdbf || header->version != 0x00010000 ||
-+      header->entry_used > header->entry_count || header->free_used > header->free_count) return;
-+  size_t offset = sizeof(XbdfHeader);
-+  if (header->entry_count > (data_size - offset) / sizeof(XbdfEntry)) return;
-+  const auto* entries = reinterpret_cast<const XbdfEntry*>(data + offset);
-+  offset += size_t(header->entry_count) * sizeof(XbdfEntry);
-+  if (header->free_count > (data_size - offset) / sizeof(XbdfFileLoc)) return;
-+  const auto* files = reinterpret_cast<const XbdfFileLoc*>(data + offset);
-+  offset += size_t(header->free_count) * sizeof(XbdfFileLoc);
+-  }
+-
+-  entry_used_ = entry_used;
+-  entries_ = data + sizeof(XDBFHeader);
+-  content_offset_ =
+-      entries_ + sizeof(XDBFEntry) * entry_capacity + sizeof(XDBFFileLocation) * free_count;
++  const u32 capacity = header.entry_capacity, used = header.entry_used;
++  const u32 free_count = header.free_count;
++  if (header.magic != kXDBFSignatureXDBF || header.version != 0x10000 ||
++      used > capacity || header.free_used > free_count) return;
++  size_t offset = sizeof(XDBFHeader);
++  if (capacity > (data_size - offset) / sizeof(XDBFEntry)) return;
++  const auto* entries = data + offset;
++  offset += size_t{capacity} * sizeof(XDBFEntry);
++  if (free_count > (data_size - offset) / sizeof(XDBFFileLocation)) return;
++  offset += size_t{free_count} * sizeof(XDBFFileLocation);
 +  const size_t remaining = data_size - offset;
-+  std::set<std::pair<uint16_t, uint64_t>> keys;
-+  for (uint32_t i = 0; i < header->entry_used; ++i) {
-+    const auto& entry = entries[i];
-+    if (entry.offset > remaining || entry.size > remaining - entry.offset ||
-+        !keys.emplace(entry.section, entry.id).second) return;
-+    const auto* block = data + offset + entry.offset;
-+    if (entry.section == uint16_t(XdbfSection::kStringTable) ||
-+        (entry.section == uint16_t(XdbfSection::kMetadata) && entry.id == kXdbfIdXach)) {
-+      if (entry.size < sizeof(XdbfSectionHeader)) return;
-+      const auto* section = reinterpret_cast<const XdbfSectionHeader*>(block);
-+      const bool strings = entry.section == uint16_t(XdbfSection::kStringTable);
-+      if (section->version != 1 ||
-+          section->magic != (strings ? kXdbfSignatureXstr : kXdbfSignatureXach) ||
-+          section->size < sizeof(XdbfSectionHeader) - 4 || section->size > entry.size - 4) return;
-+      // SPA section sizes exclude the four-byte magic, unlike entry sizes.
-+      const size_t section_end = size_t(section->size) + 4;
-+      size_t position = sizeof(XdbfSectionHeader);
-+      std::set<uint16_t> ids;
-+      for (uint16_t j = 0; j < section->count; ++j) {
++  std::set<std::pair<u16, u64>> keys;
++  for (u32 i = 0; i < used; ++i) {
++    const auto entry = memory::load<XDBFEntry>(entries + size_t{i} * sizeof(XDBFEntry));
++    const u16 section_id = entry.section;
++    const u64 id = entry.id;
++    const u32 at = entry.offset, size = entry.size;
++    if (at > remaining || size > remaining - at || !keys.emplace(section_id, id).second) return;
++    const auto* block = data + offset + at;
++    const bool strings = section_id == static_cast<u16>(XDBFSection::kStringTable);
++    if (strings || (section_id == static_cast<u16>(XDBFSection::kMetadata) && id == kXDBFIdXACH)) {
++      if (size < sizeof(XDBFSectionHeader)) return;
++      const auto section = memory::load<XDBFSectionHeader>(block);
++      const u32 section_size = section.size;
++      if (section.version != 1 || section.magic != (strings ? kXDBFSignatureXSTR : kXDBFSignatureXACH) ||
++          section_size < sizeof(XDBFSectionHeader) - 4 || section_size > size - 4) return;
++      // SPA section size excludes its four-byte magic.
++      const size_t section_end = size_t{section_size} + 4;
++      size_t position = sizeof(XDBFSectionHeader);
++      std::set<u16> ids;
++      for (u16 j = 0; j < section.count; ++j) {
 +        if (strings) {
-+          if (sizeof(XdbfStringTableEntry) > section_end - position) return;
-+          const auto* string = reinterpret_cast<const XdbfStringTableEntry*>(block + position);
-+          position += sizeof(XdbfStringTableEntry);
-+          if (string->string_length > section_end - position ||
-+              !ids.insert(string->id).second) return;
-+          position += string->string_length;
++          if (sizeof(XDBFStringTableEntry) > section_end - position) return;
++          const auto string = memory::load<XDBFStringTableEntry>(block + position);
++          position += sizeof(XDBFStringTableEntry);
++          const u16 length = string.string_length;
++          if (length > section_end - position || !ids.insert(string.id).second) return;
++          position += length;
 +        } else {
-+          if (sizeof(XdbfAchievementTableEntry) > section_end - position) return;
-+          const auto* achievement = reinterpret_cast<const XdbfAchievementTableEntry*>(block + position);
-+          if (!ids.insert(achievement->id).second) return;
-+          position += sizeof(XdbfAchievementTableEntry);
++          if (sizeof(XDBFAchievementTableEntry) > section_end - position) return;
++          const auto achievement = memory::load<XDBFAchievementTableEntry>(block + position);
++          if (!ids.insert(achievement.id).second) return;
++          position += sizeof(XDBFAchievementTableEntry);
 +        }
 +      }
-+    } else if (entry.section == uint16_t(XdbfSection::kMetadata) && entry.id == kXdbfIdXstc) {
-+      if (entry.size < sizeof(XdbfXstc)) return;
-+      const auto* xstc = reinterpret_cast<const XdbfXstc*>(block);
-+      if (xstc->magic != kXdbfSignatureXstc || xstc->version != 1 ||
-+          xstc->size < sizeof(XdbfXstc) - 4 || xstc->size > entry.size - 4) return;
++    } else if (section_id == static_cast<u16>(XDBFSection::kMetadata) && id == kXDBFIdXSTC) {
++      if (size < sizeof(XDBFXSTC)) return;
++      const auto language = memory::load<XDBFXSTC>(block);
++      if (language.magic != kXDBFSignatureXSTC || language.version != 1 ||
++          language.size < sizeof(XDBFXSTC) - 4 || language.size > size - 4) return;
 +    }
-   }
--
--  entries_ = reinterpret_cast<const XbdfEntry*>(ptr);
--  ptr += sizeof(XbdfEntry) * header_->entry_count;
--
--  files_ = reinterpret_cast<const XbdfFileLoc*>(ptr);
--  ptr += sizeof(XbdfFileLoc) * header_->free_count;
--
--  content_offset_ = ptr;
-+  header_ = header;
++  }
++  entry_used_ = used;
 +  entries_ = entries;
-+  files_ = files;
 +  content_offset_ = data + offset;
-+  data_ = data;
++  data_ = data; // Publish only a fully validated resource, including cached disk input.
  }
  
- XdbfBlock XdbfWrapper::GetEntry(XdbfSection section, uint64_t id) const {
-+  if (!is_valid()) return {};
-   for (uint32_t i = 0; i < header_->entry_used; ++i) {
-     auto& entry = entries_[i];
-     if (entry.section == static_cast<uint16_t>(section) && entry.id == id) {
+ XDBFBlock XDBFTitleData::GetEntry(XDBFSection section, u64 id) const {
+diff --git a/tests/unit/kernel/xdbf_test.cpp b/tests/unit/kernel/xdbf_test.cpp
+--- a/tests/unit/kernel/xdbf_test.cpp
++++ b/tests/unit/kernel/xdbf_test.cpp
+@@ -85,7 +85,7 @@
+ 
+ std::vector<u8> TitleStrings(u16 count, std::string_view title) {
+   Bytes bytes;
+-  bytes.Text("XSTR").Put(1, 4).Put(0, 4).Put(count, 2);
++  bytes.Text("XSTR").Put(1, 4).Put(kSectionHeaderSize + kStringEntrySize + title.size() - 4, 4).Put(count, 2);
+   bytes.Put(kTitleId, 2).Put(title.size(), 2).Text(title);
+   return std::move(bytes.data);
+ }
+@@ -110,7 +110,7 @@
+   const std::vector<u8> content(4);
+   const std::vector<u8> data = Database({rex::filesystem::XDBFSection::kImage, 1, 0, 100}, content);
+   const rex::filesystem::XDBFTitleData reader(data.data(), data.size());
+-  REQUIRE(reader.IsValid());
++  REQUIRE_FALSE(reader.IsValid());
+   CHECK_FALSE(reader.GetEntry(rex::filesystem::XDBFSection::kImage, 1));
+ }
+ 
+@@ -129,7 +129,7 @@
+                                          static_cast<u64>(rex::kernel::XLanguage::kEnglish), 0, 10},
+                                         content);
+   const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-  REQUIRE(db.IsValid());
++  REQUIRE_FALSE(db.IsValid());
+   CHECK(db.GetTitle(rex::kernel::XLanguage::kEnglish).empty());
+ }
+ 
+@@ -140,7 +140,7 @@
+        static_cast<u64>(rex::kernel::XLanguage::kEnglish), 0, static_cast<u32>(kSectionHeaderSize)},
+       content);
+   const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-  REQUIRE(db.IsValid());
++  REQUIRE_FALSE(db.IsValid());
+   CHECK(db.GetTitle(rex::kernel::XLanguage::kEnglish).empty());
+ }
+ 
+@@ -152,30 +152,30 @@
+                 static_cast<u32>(kSectionHeaderSize + kStringEntrySize + 2)},
+                content);
+   const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-  REQUIRE(db.IsValid());
++  REQUIRE_FALSE(db.IsValid());
+   CHECK(db.GetTitle(rex::kernel::XLanguage::kEnglish).empty());
+ }
+ 
+ REX_TEST_CASE("An XDBF achievement table stops at its block end", "[kernel][xdbf]") {
+   Bytes content;
+-  content.Text("XACH").Put(1, 4).Put(0, 4).Put(2, 2).Zeros(2 * kAchievementSize);
++  content.Text("XACH").Put(1, 4).Put(kSectionHeaderSize + 2 * kAchievementSize - 4, 4).Put(2, 2).Zeros(2 * kAchievementSize);
+   const std::vector<u8> data = Database({rex::filesystem::XDBFSection::kMetadata, kXachId, 0,
+                                          static_cast<u32>(kSectionHeaderSize + kAchievementSize)},
+                                         content.data);
+   const rex::filesystem::XDBFTitleData reader(data.data(), data.size());
+-  REQUIRE(reader.IsValid());
+-  CHECK(reader.GetAchievements().size() == 1);
++  REQUIRE_FALSE(reader.IsValid());
++  CHECK(reader.GetAchievements().empty());
+ }
+ 
+ REX_TEST_CASE("An XDBF language block smaller than the XSTC structure keeps the default language",
+               "[kernel][xdbf]") {
+   Bytes content;
+-  content.Text("XSTC").Put(1, 4).Put(4, 4).Put(static_cast<u32>(rex::kernel::XLanguage::kJapanese),
++  content.Text("XSTC").Put(1, 4).Put(12, 4).Put(static_cast<u32>(rex::kernel::XLanguage::kJapanese),
+                                                4);
+   const std::vector<u8> data =
+       Database({rex::filesystem::XDBFSection::kMetadata, kXstcId, 0, 8}, content.data);
+   const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-  REQUIRE(db.IsValid());
++  REQUIRE_FALSE(db.IsValid());
+   CHECK(db.GetDefaultLanguage() == rex::kernel::XLanguage::kEnglish);
+ }
+ 
+@@ -198,7 +198,7 @@
+   for (const auto& content : {bad_magic, bad_version}) {
+     const std::vector<u8> data = Database(entry, content);
+     const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-    REQUIRE(db.IsValid());
++    REQUIRE_FALSE(db.IsValid());
+     CHECK(db.GetTitle(rex::kernel::XLanguage::kEnglish).empty());
+   }
+ }
+@@ -211,10 +211,10 @@
+        {std::pair<std::string_view, u32>{"XACH", 1}, std::pair<std::string_view, u32>{"XACX", 1},
+         std::pair<std::string_view, u32>{"XACH", 2}}) {
+     Bytes content;
+-    content.Text(magic).Put(version, 4).Put(0, 4).Put(1, 2).Zeros(kAchievementSize);
++    content.Text(magic).Put(version, 4).Put(kSectionHeaderSize + kAchievementSize - 4, 4).Put(1, 2).Zeros(kAchievementSize);
+     const std::vector<u8> data = Database(entry, content.data);
+     const rex::filesystem::XDBFTitleData reader(data.data(), data.size());
+-    REQUIRE(reader.IsValid());
++    CHECK(reader.IsValid() == (magic == "XACH" && version == 1));
+     CHECK(reader.GetAchievements().size() == (magic == "XACH" && version == 1 ? 1 : 0));
+   }
+ }
+@@ -223,13 +223,41 @@
+               "[kernel][xdbf]") {
+   for (const std::string_view magic : {"XSTC", "XSTX"}) {
+     Bytes content;
+-    content.Text(magic).Put(1, 4).Put(4, 4).Put(static_cast<u32>(rex::kernel::XLanguage::kJapanese),
++    content.Text(magic).Put(1, 4).Put(12, 4).Put(static_cast<u32>(rex::kernel::XLanguage::kJapanese),
+                                                 4);
+     const std::vector<u8> data =
+         Database({rex::filesystem::XDBFSection::kMetadata, kXstcId, 0, 16}, content.data);
+     const rex::filesystem::XDBFTitleData db(data.data(), data.size());
+-    REQUIRE(db.IsValid());
++    CHECK(db.IsValid() == (magic == "XSTC"));
+     CHECK(db.GetDefaultLanguage() ==
+           (magic == "XSTC" ? rex::kernel::XLanguage::kJapanese : rex::kernel::XLanguage::kEnglish));
+   }
+ }
++
++
++REX_TEST_CASE("XDBF validation rejects duplicate keys, repeated IDs and malformed capacities before publication", "[kernel][xam][xdbf][xdbf-validation]") {
++  const std::vector<u8> pixels(4);
++  const Entry duplicates[] = {{XDBFSection::kImage, 1, 0, 4}, {XDBFSection::kImage, 1, 0, 4}};
++  auto raw = Database(duplicates, 2, pixels);
++  CHECK_FALSE(XDBFTitleData(raw.data(), raw.size()).IsValid());
++  raw = Database({XDBFSection::kImage, 1, 0, 4}, pixels);
++  REQUIRE(XDBFTitleData(raw.data(), raw.size()).IsValid());
++  for (size_t offset : {size_t{7}, size_t{23}}) {
++    auto bad = raw; bad[offset] = 2;
++    CHECK_FALSE(XDBFTitleData(bad.data(), bad.size()).IsValid());
++  }
++  Bytes content;
++  content.Text("XACH").Put(1, 4).Put(kSectionHeaderSize + 2 * kAchievementSize - 4, 4).Put(2, 2).Zeros(2 * kAchievementSize);
++  raw = Database({XDBFSection::kMetadata, kXachId, 0, static_cast<u32>(content.data.size())}, content.data);
++  CHECK_FALSE(XDBFTitleData(raw.data(), raw.size()).IsValid());
++  content.data[kSectionHeaderSize + kAchievementSize + 1] = 1;
++  raw = Database({XDBFSection::kMetadata, kXachId, 0, static_cast<u32>(content.data.size())}, content.data);
++  CHECK(XDBFTitleData(raw.data(), raw.size()).IsValid());
++  Bytes strings;
++  strings.Text("XSTR").Put(1, 4).Put(kSectionHeaderSize + 2 * (kStringEntrySize + 1) - 4, 4).Put(2, 2);
++  strings.Put(1, 2).Put(1, 2).Text("A").Put(1, 2).Put(1, 2).Text("B");
++  raw = Database({XDBFSection::kStringTable, 1, 0, static_cast<u32>(strings.data.size())}, strings.data);
++  CHECK_FALSE(XDBFTitleData(raw.data(), raw.size()).IsValid());
++  const std::vector<u8> empty = Database({}, 0, {});
++  CHECK(XDBFTitleData(empty.data(), empty.size()).IsValid());
++}

@@ -1,83 +1,169 @@
-diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
-index 2251429..06a91dc 100644
---- a/src/ui/window_sdl.cpp
-+++ b/src/ui/window_sdl.cpp
-@@ -40,6 +40,8 @@
- #include <rex/ui/surface_gnulinux.h>
- #endif
- 
-+REXCVAR_DEFINE_UINT64(parent_window, 0, "UI", "Optional Windows parent HWND for an embedded title surface");
+diff --git a/src/ui/sdl3/sdl3_ui_driver.h b/src/ui/sdl3/sdl3_ui_driver.h
+--- a/src/ui/sdl3/sdl3_ui_driver.h
++++ b/src/ui/sdl3/sdl3_ui_driver.h
+@@ -28,6 +28,9 @@
+  public:
+   REX_SETTING(std::string, video_driver, "",
+               "SDL video driver, empty for SDL's default; dummy runs with no display",
++              kStartupOnly);
 +
- namespace rex::ui {
++  REX_SETTING(u64, parent_window, 0, "Optional Windows parent HWND for an embedded title surface",
+               kStartupOnly);
  
- namespace {
-@@ -143,6 +145,17 @@ bool WindowSDL::OpenImpl() {
- #else
-   int initial_width = int(SizeToPhysical(GetDesiredLogicalWidth()));
-   int initial_height = int(SizeToPhysical(GetDesiredLogicalHeight()));
-+#endif
+   SDL3UIDriver();
+diff --git a/src/ui/sdl3/sdl3_ui_driver.cpp b/src/ui/sdl3/sdl3_ui_driver.cpp
+--- a/src/ui/sdl3/sdl3_ui_driver.cpp
++++ b/src/ui/sdl3/sdl3_ui_driver.cpp
+@@ -25,6 +25,10 @@
+ #include "ui/sdl3/sdl_helper.h"
+ #include "ui/sdl3/sdl_virtual_key.h"
+ #include "ui/sdl3/video_scope.h"
++
 +#if REX_PLATFORM_WIN32
-+  HWND parent = reinterpret_cast<HWND>(uintptr_t(REXCVAR_GET(parent_window)));
++#include <windows.h>
++#endif
+ 
+ #if REX_PLATFORM_MAC
+ #include <CoreFoundation/CoreFoundation.h>
+@@ -493,6 +497,15 @@
+   const int width = static_cast<int>(config.width);
+   const int height = static_cast<int>(config.height);
+ #endif
++#if REX_PLATFORM_WIN32
++  const auto parent = reinterpret_cast<HWND>(static_cast<uintptr_t>(parent_window.Get()));
 +  if (parent) {
-+    if (!IsWindow(parent)) {
-+      REXLOG_ERROR("parent_window does not identify a live window");
-+      return false;
-+    }
-+    // Match DPI awareness before creating either HWND or swapchain.
++    if (!IsWindow(parent)) return Err(ErrorCategory::kConfig, "parent_window does not identify a live window");
 +    SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(parent));
 +  }
++#else
++  if (parent_window.Get()) return Err(ErrorCategory::kNotImplemented, "embedding a Windows parent is unavailable on this host");
++#endif
+   s.window = SDL_CreateWindow(config.title.c_str(), width, height, flags);
+   if (!s.window) {
+     return Err(ErrorCategory::kPlatform,
+@@ -506,7 +519,7 @@
+   s.monitor = config.monitor;
+   SetLimits(config.min_width, config.min_height, config.aspect_ratio);
+   s.CenterOnMonitor();
+-  if (s.fullscreen) {
++  if (s.fullscreen && !parent_window.Get()) {
+     s.ApplyFullscreenMode();
+     SDL_SetWindowFullscreen(s.window, true);
+   }
+@@ -515,7 +528,41 @@
+                            kCFPreferencesCurrentApplication);
+   CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
  #endif
-   sdl_window_ = SDL_CreateWindow(GetTitle().c_str(), initial_width, initial_height, flags);
-   if (!sdl_window_) {
-@@ -170,7 +183,7 @@ bool WindowSDL::OpenImpl() {
-     }
-   }
- 
--  if (IsFullscreen()) {
-+  if (IsFullscreen() && !REXCVAR_GET(parent_window)) {
-     // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
-     SDL_SetWindowFullscreen(sdl_window_, true);
-   }
-@@ -183,7 +196,34 @@ bool WindowSDL::OpenImpl() {
-   // desired state so a reopened window comes back with the state it had.
-   ApplyTextInputActiveNow();
-   ApplyCursorVisibilityNow();
 +#if REX_PLATFORM_WIN32
 +  if (parent) {
-+    auto child = static_cast<HWND>(GetNativeWindowHandle());
-+    auto style = GetWindowLongPtrW(child, GWL_STYLE);
-+    SetWindowLongPtrW(child, GWL_STYLE,
-+        (style & ~(WS_POPUP | WS_OVERLAPPEDWINDOW)) | WS_CHILD | WS_CLIPSIBLINGS);
++    auto native = GetNativeWindow();
++    if (!native) { CloseUIWindow(); return std::unexpected(native.error()); }
++    const auto child = static_cast<HWND>(native->window);
++    const auto style = GetWindowLongPtrW(child, GWL_STYLE);
 +    SetLastError(0);
-+    const auto previous = SetParent(child, parent);
-+    if (!previous && GetLastError() != 0) {
-+      REXLOG_ERROR("SetParent failed: {}", GetLastError());
-+      DestroySDLWindow();
-+      return false;
++    const auto previous_style = SetWindowLongPtrW(child, GWL_STYLE,
++        (style & ~(WS_POPUP | WS_OVERLAPPEDWINDOW)) | WS_CHILD | WS_CLIPSIBLINGS);
++    if (!previous_style && GetLastError()) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "failed to set embedded window style");
 +    }
-+    RECT rect{}; GetClientRect(parent, &rect);
-+    SetWindowPos(child, nullptr, 0, 0, rect.right, rect.bottom,
-+        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-+    REXLOG_INFO("parent_window attached: parent={}, child={}",
-+        uintptr_t(parent), uintptr_t(child));
++    SetLastError(0);
++    if (!SetParent(child, parent) && GetLastError()) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "SetParent failed");
++    }
++    RECT rect{};
++    if (!GetClientRect(parent, &rect) || !SetWindowPos(child, nullptr, 0, 0, rect.right, rect.bottom,
++        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "failed to size embedded window");
++    }
++    REXUI_INFO("parent_window attached: parent={}, child={}",
++        reinterpret_cast<uintptr_t>(parent), reinterpret_cast<uintptr_t>(child));
 +  }
 +#endif
-   SDL_ShowWindow(sdl_window_);
+   SDL_ShowWindow(s.window);
 +#if REX_PLATFORM_WIN32
 +  if (parent) {
-+    // Publish only after showing: SetFocus cannot target a hidden child.
-+    PostMessageW(parent, WM_APP + 0x360,
-+        reinterpret_cast<WPARAM>(GetNativeWindowHandle()), 0);
++    auto native = GetNativeWindow();
++    PostMessageW(parent, WM_APP + 0x360, reinterpret_cast<WPARAM>(native->window), 0);
 +  }
 +#endif
- 
-   // Actualize state for the common Window code. Listener dispatch is handled
-   // by Window::Open after OpenImpl returns; these only record initial state.
-@@ -292,6 +332,7 @@ uint32_t WindowSDL::GetLatestDpiImpl() const {
+   s.has_focus = (SDL_GetWindowFlags(s.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+   return Ok();
  }
- 
- void WindowSDL::ApplyNewFullscreen() {
-+  if (REXCVAR_GET(parent_window)) return;  // The persistent host owns its frame.
-   if (!sdl_window_) {
+@@ -570,6 +617,7 @@
+   if (!s.window) {
      return;
    }
++  if (parent_window.Get()) return;  // The persistent host owns its frame.
+   const bool monitor_changed = monitor != s.monitor;
+   s.fullscreen = fullscreen;
+   s.exclusive = exclusive;
+diff --git a/tests/unit/ui/sdl3_ui_test.cpp b/tests/unit/ui/sdl3_ui_test.cpp
+--- a/tests/unit/ui/sdl3_ui_test.cpp
++++ b/tests/unit/ui/sdl3_ui_test.cpp
+@@ -13,6 +13,10 @@
+ #include <memory>
+ #include <string>
+ 
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#endif
++#include <rex/utility.h>
+ #include <SDL3/SDL_hints.h>
+ #include <SDL3/SDL_video.h>
+ 
+@@ -104,3 +108,52 @@
+   CHECK((flags & SDL_WINDOW_VULKAN) == 0);
+   driver->Shutdown();
+ }
++
++
++#if REX_PLATFORM_WIN32
++REX_TEST_CASE_METHOD(Fixture, "embedded SDL surfaces retain the host frame across replacement", "[ui][sdl3][embedded-window]") {
++  auto driver = Create();
++  REQUIRE(driver);
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "ui.sdl.video_driver", "windows").has_value());
++  rex::AppDriverContext context(REX_SETTINGS(), REX_LOGGER());
++  REQUIRE(driver->Initialize(context).has_value());
++  rex::ScopeGuard shutdown([&] { driver->Shutdown(); });
++  rex::ScopeGuard reset_parent([&] {
++    CHECK(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "ui.sdl.parent_window", "0").has_value());
++  });
++  const auto previous_dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
++  rex::ScopeGuard restore_dpi([&] { if (previous_dpi) SetThreadDpiAwarenessContext(previous_dpi); });
++  const auto parent = CreateWindowExW(0, L"STATIC", L"SDK embedded surface fixture", WS_OVERLAPPEDWINDOW,
++      0, 0, 400, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
++  REQUIRE(parent != nullptr);
++  rex::ScopeGuard destroy([&] { driver->CloseUIWindow(); DestroyWindow(parent); });
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "ui.sdl.parent_window", "1").has_value());
++  CHECK_FALSE(driver->OpenWindow(rex::ui::WindowConfig{}).has_value());
++  CHECK_FALSE(driver->GetNativeWindow().has_value());
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle, "ui.sdl.parent_window",
++      std::to_string(reinterpret_cast<uintptr_t>(parent))).has_value());
++  for (unsigned replacement = 0; replacement < 3; ++replacement) {
++    REQUIRE(driver->OpenWindow(rex::ui::WindowConfig{}).has_value());
++    auto native = driver->GetNativeWindow();
++    REQUIRE(native.has_value());
++    const auto child = static_cast<HWND>(native->window);
++    CHECK(GetParent(child) == parent);
++    CHECK((GetWindowLongPtrW(child, GWL_STYLE) & WS_CHILD) != 0);
++    CHECK((GetWindowLongPtrW(child, GWL_STYLE) & WS_CLIPSIBLINGS) != 0);
++    RECT host{}, view{};
++    REQUIRE(GetClientRect(parent, &host));
++    REQUIRE(GetWindowRect(child, &view));
++    CHECK(view.right - view.left == host.right);
++    CHECK(view.bottom - view.top == host.bottom);
++    driver->SetFullscreen(true, true, 0, 1920, 1080);
++    CHECK(GetParent(child) == parent);
++    CHECK((SDL_GetWindowFlags(static_cast<SDL_Window*>(native->sdl)) & SDL_WINDOW_FULLSCREEN) == 0);
++    MSG message{};
++    REQUIRE(PeekMessageW(&message, parent, WM_APP + 0x360, WM_APP + 0x360, PM_REMOVE));
++    CHECK(message.wParam == reinterpret_cast<WPARAM>(child));
++    driver->CloseUIWindow();
++    CHECK_FALSE(IsWindow(child));
++    CHECK(IsWindow(parent));
++  }
++}
++#endif

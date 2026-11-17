@@ -1,18 +1,42 @@
-diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
-index c3e3509..7bb662e 100644
---- a/src/kernel/xam/xam_input.cpp
-+++ b/src/kernel/xam/xam_input.cpp
-@@ -319,7 +319,12 @@ REX_EXPORT(__imp__XamUserGetDeviceContext, rex::kernel::xam::XamUserGetDeviceCon
+diff --git a/src/xam/xam_input.cpp b/src/xam/xam_input.cpp
+--- a/src/xam/xam_input.cpp
++++ b/src/xam/xam_input.cpp
+@@ -28,6 +28,11 @@
+ namespace rex {
+ namespace xam {
  
++u32 XamInputGetDeviceStats_entry(u32 user, u32 output) {
++  // The backend has no private device-statistics record; leave storage untouched.
++  return user < 4 && output ? 50u : kernel::X_ERROR_INVALID_PARAMETER;
++}
++
+ using namespace rex::kernel;
+ 
+ using rex::xam::X_INPUT_CAPABILITIES;
+@@ -205,3 +210,5 @@
+ REX_XAM_BODY(__imp__XamInputGetKeystroke, rex::xam::XamInputGetKeystroke_entry)
+ REX_XAM_BODY(__imp__XamInputGetKeystrokeEx, rex::xam::XamInputGetKeystrokeEx_entry)
+ REX_XAM_BODY(__imp__XamUserGetDeviceContext, rex::xam::XamUserGetDeviceContext_entry)
++
++REX_XAM_BODY(__imp__XamInputGetDeviceStats, rex::xam::XamInputGetDeviceStats_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1093,7 +1093,7 @@
+ REX_EXPORT_STUB(__imp__XamContentRemoveCacheDevice);
  REX_EXPORT_STUB(__imp__XamInputControl);
  REX_EXPORT_STUB(__imp__XamInputEnableAutobind);
 -REX_EXPORT_STUB(__imp__XamInputGetDeviceStats);
-+// The input backend does not expose the private device-statistics record.
-+// Do not leave user index zero in r3 as an accidental successful query. Keep
-+// caller storage untouched on failure; no fabricated battery/accessory data.
-+extern "C" REX_FUNC(__imp__XamInputGetDeviceStats) {
-+  ctx.r3.u64 = ctx.r3.u32 < 4 && ctx.r4.u32 ? 50u : 87u;
-+}
++
  REX_EXPORT_STUB(__imp__XamInputGetFailedConnectionOrBind);
  REX_EXPORT_STUB(__imp__XamInputGetKeyLocks);
- extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
+ REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHud);
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -255,3 +255,5 @@
+ REX_XAM_FORWARD(__imp__XamVoiceSetMicArrayIdleUsers)
+ 
+ REX_XAM_FORWARD(__imp__XCustomGetBannerImage)
++
++REX_XAM_FORWARD(__imp__XamInputGetDeviceStats)

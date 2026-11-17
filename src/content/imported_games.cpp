@@ -8,7 +8,7 @@
 #include "child_process.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
-#include <rex/filesystem/devices/stfs_xbox.h>
+#include <rex/filesystem/stfs.h>
 #include <algorithm>
 #include <fstream>
 #include <map>
@@ -16,7 +16,7 @@
 #include <optional>
 #include <set>
 #include <unordered_set>
-#include <fmt/format.h>
+#include <format>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -113,12 +113,12 @@ template<class Units> std::string Name(const Units& units) {
   for (auto v : units) { if (!uint16_t(v)) break; s.push_back(char16_t(uint16_t(v))); }
   return s.empty() ? "" : Utf8(fs::path(s));
 }
-bool ReadPackageHeader(const fs::path& file, rex::filesystem::StfsHeader& header) {
+bool ReadPackageHeader(const fs::path& file, rex::filesystem::XContentPackageHeader& header) {
   if (!io::is_regular_file(file)) return false;
   io::ifstream in(file, std::ios::binary);
   in.read(reinterpret_cast<char*>(&header), sizeof(header));
   if (in.gcount() != sizeof(header)) return false;
-  const auto magic = header.header.magic.get();
+  const auto magic = header.header.magic;
   using Type = rex::filesystem::XContentPackageType;
   return magic == Type::kCon || magic == Type::kLive || magic == Type::kPirs;
 }
@@ -155,12 +155,12 @@ std::string SaveThumbnail(const ProjectPaths& paths, const std::vector<uint8_t>&
   return sha;
 }
 void PackageMetadata(const fs::path& original, Json& r, std::vector<uint8_t>& thumbnail) {
-  auto header = std::make_unique<rex::filesystem::StfsHeader>();
+  auto header = std::make_unique<rex::filesystem::XContentPackageHeader>();
   if (!ReadPackageHeader(original, *header)) return;
   const auto& md = header->metadata;
   thumbnail = Thumbnail(md);
-  r["package_title_id"] = fmt::format("{:08X}", uint32_t(md.execution_info.title_id));
-  r["content_type"] = fmt::format("{:08X}", uint32_t(md.content_type.get()));
+  r["package_title_id"] = std::format("{:08X}", uint32_t(md.execution_info.title_id));
+  r["content_type"] = std::format("{:08X}", uint32_t(md.content_type.Get()));
   r["publisher"] = Name(md.publisher_raw.uint);
   r["name"] = Name(md.title_name_raw.uint);
   Json names = Json::array();
@@ -175,10 +175,10 @@ void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
   if ((r["name"] != "" && !thumbnail.empty()) || r["title_id"] == "") return;
   for (const auto& entry : io::directory_iterator(root)) {
     if (entry.is_redirect() || !entry.is_regular_file() || Key(Utf8(entry.path().filename())) != "nxeart") continue;
-    auto header = std::make_unique<rex::filesystem::StfsHeader>();
+    auto header = std::make_unique<rex::filesystem::XContentPackageHeader>();
     if (!ReadPackageHeader(entry.path(), *header)) return;
     const auto& md = header->metadata;
-    if (fmt::format("{:08X}", uint32_t(md.execution_info.title_id)) != r["title_id"].get<std::string>()) return;
+    if (std::format("{:08X}", uint32_t(md.execution_info.title_id)) != r["title_id"].get<std::string>()) return;
     if (r["name"] == "") r["name"] = Name(md.title_name_raw.uint);
     if (thumbnail.empty()) thumbnail = Thumbnail(md);
     return;

@@ -19,7 +19,7 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
-namespace rex::ui { struct RawImage; }
+namespace rex::gpu { struct RawImage; }
 namespace x360n::native {
 struct FrameStats {
   uint64_t frame = 0;
@@ -36,7 +36,7 @@ std::string FrameStatsCsvHeader();
 std::string FrameStatsCsvRow(const FrameStats&);
 // The presenter's composed output (RGB of each row and the size); false for an
 // empty or truncated image, which no check may accept.
-bool HashImage(const rex::ui::RawImage&, capture::Hash&);
+bool HashImage(const rex::gpu::RawImage&, capture::Hash&);
 BackendCounters operator-(const BackendCounters& later, const BackendCounters& earlier);
 
 class CaptureBackend final : public ScanoutBackend {
@@ -49,13 +49,14 @@ class CaptureBackend final : public ScanoutBackend {
     uint32_t skip_frames = 0, frames = 1;
     uint32_t scale_x = 1, scale_y = 1;
     std::string backend;
+    uint32_t edram_tile_count = rex::xenos::kEDRAMTileCount;
   };
   // Returns the backend itself when no option is set.
-  static std::unique_ptr<ScanoutBackend> Wrap(std::unique_ptr<ScanoutBackend>, rex::memory::Memory&, Options);
-  CaptureBackend(std::unique_ptr<ScanoutBackend>, rex::memory::Memory&, Options);
+  static std::unique_ptr<ScanoutBackend> Wrap(std::unique_ptr<ScanoutBackend>, rex::IPhysicalMemory&, const rex::gpu::XenosSettings&, Options);
+  CaptureBackend(std::unique_ptr<ScanoutBackend>, rex::IPhysicalMemory&, const rex::gpu::XenosSettings&, Options);
   ~CaptureBackend() override;
 
-  void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels, const uint32_t* lut,
+  void Present(rex::gpu::Presenter&, const ScanoutTexture&, const void* pixels, const uint32_t* lut,
                const ScanoutOverlay*, const void* overlay_pixels, ScanoutPostEffect) override;
   void Drain() override;
   void InitializeShaderStorage(const std::filesystem::path& path, uint32_t title_id) override {
@@ -63,10 +64,10 @@ class CaptureBackend final : public ScanoutBackend {
   }
   void CompleteGuestWrites(GuestSync, uint32_t opcode) override;
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) override;
-  rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t) override;
-  void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
-            rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose) override;
-  void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&) override;
+  rex::gpu::Shader* LoadShader(rex::xenos::ShaderType, const uint32_t*, uint32_t) override;
+  void Draw(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&, rex::gpu::Shader*, rex::gpu::Shader*,
+            rex::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose) override;
+  void Resolve(const rex::xenos::RegisterFile&, rex::IPhysicalMemory&) override;
   SampleCounts ReadSampleCounts(bool counting_after) override;
   void SetSampleCounts(const SampleCounts&, bool visibility_only) override;
   void CompleteFrame(const ScanoutTexture& texture, const void* pixels) override { inner_->CompleteFrame(texture, pixels); }
@@ -93,18 +94,19 @@ class CaptureBackend final : public ScanoutBackend {
   void FinishRecording();
   // Stops recording and deletes the incomplete file (never a partial capture).
   void AbortRecording(const std::string& reason);
-  void EmitRegisters(const rex::graphics::RegisterFile&);
-  uint32_t EmitShader(rex::graphics::Shader*);
+  void EmitRegisters(const rex::xenos::RegisterFile&);
+  uint32_t EmitShader(rex::gpu::Shader*);
   // Records guest bytes a call reads, except pages that hold GPU results.
   void EmitRange(uint32_t address, uint32_t length);
   void EmitRun(uint32_t address, uint32_t length);
   void MarkGpuWritten(uint32_t address, uint32_t length);
-  void EmitDrawInputs(const rex::graphics::RegisterFile&, rex::graphics::Shader*, rex::graphics::Shader*,
+  void EmitDrawInputs(const rex::xenos::RegisterFile&, rex::gpu::Shader*, rex::gpu::Shader*,
                       const DrawIndices*, DrawPurpose);
   void EndProfileFrame();
 
   std::unique_ptr<ScanoutBackend> inner_;
-  rex::memory::Memory& memory_;
+  rex::IPhysicalMemory& memory_;
+  const rex::gpu::XenosSettings& settings_;
   Options options_;
   uint64_t presents_ = 0;
   // Frame profile.
@@ -116,7 +118,7 @@ class CaptureBackend final : public ScanoutBackend {
   std::unique_ptr<capture::Writer> writer_;
   bool capture_done_ = false;
   uint32_t recorded_frames_ = 0;
-  std::unordered_map<const rex::graphics::Shader*, ShaderInfo> shaders_;
+  std::unordered_map<const rex::gpu::Shader*, ShaderInfo> shaders_;
   uint32_t next_shader_ = 0;
   std::unique_ptr<uint32_t[]> registers_;
   std::map<std::pair<uint32_t, uint32_t>, capture::Hash> emitted_ranges_;
@@ -125,6 +127,6 @@ class CaptureBackend final : public ScanoutBackend {
   // frame end (after publication) to recognize later CPU writes.
   struct GpuPage { bool hashed = false; capture::Hash hash{}; };
   std::unordered_map<uint32_t, GpuPage> gpu_pages_;
-  std::unordered_map<const rex::graphics::Shader*, bool> memexport_known_;
+  std::unordered_map<const rex::gpu::Shader*, bool> memexport_known_;
 };
 }

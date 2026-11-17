@@ -1,5 +1,5 @@
 // Explicit synthetic hardware test; no window, title, Native backend or console claim.
-#include <rex/graphics/pipeline/shader/dxbc_translator.h>
+#include <gpu/xenos/pipeline/shader/dxbc_translator.h>
 #include <d3d12.h>
 #include <d3d12shader.h>
 #include <d3d12sdklayers.h>
@@ -15,7 +15,9 @@
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
-using namespace rex::graphics;
+using namespace rex::gpu;
+namespace xenos=rex::xenos;
+namespace ucode=rex::xenos::ucode;
 namespace {
 void Need(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 D3D12_RESOURCE_DESC BufferDesc(UINT64 bytes) {
@@ -178,14 +180,14 @@ void CheckUnorm8Gpu(const std::vector<uint8_t>& baseline, const std::vector<uint
         if (b.Type==D3D_SIT_CBUFFER) {
           auto cb=buffer(4096,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
           void* mapping=nullptr; Need(SUCCEEDED(cb->Map(0,nullptr,&mapping)),"constant map"); std::memset(mapping,0,4096);
-          if (b.BindPoint==UINT(DxbcShaderTranslator::CbufferRegister::kSystemConstants)) {
-            DxbcShaderTranslator::SystemConstants system{};
-            system.flags=DxbcShaderTranslator::kSysFlag_AlphaPassIfLess|DxbcShaderTranslator::kSysFlag_AlphaPassIfEqual|DxbcShaderTranslator::kSysFlag_AlphaPassIfGreater;
+          if (b.BindPoint==UINT(DXBCShaderTranslator::CbufferRegister::kSystemConstants)) {
+            DXBCShaderTranslator::SystemConstants system{};
+            system.flags=DXBCShaderTranslator::kSysFlagAlphaPassIfLess|DXBCShaderTranslator::kSysFlagAlphaPassIfEqual|DXBCShaderTranslator::kSysFlagAlphaPassIfGreater;
             for (auto& bias:system.color_exp_bias) bias=1.0f;
             system.texture_swizzled_signs[0]=c.signed_value?0x55:0;
             std::memcpy(mapping,&system,sizeof(system));
-          } else if (b.BindPoint==UINT(DxbcShaderTranslator::CbufferRegister::kFetchConstants)) {
-            xenos::xe_gpu_texture_fetch_t fetch{}; fetch.type=xenos::FetchConstantType::kTexture; fetch.format=c.guest; fetch.num_format=c.integer;
+          } else if (b.BindPoint==UINT(DXBCShaderTranslator::CbufferRegister::kFetchConstants)) {
+            xenos::TextureFetch fetch{}; fetch.type=xenos::FetchConstantType::kTexture; fetch.format=c.guest; fetch.num_format=c.integer;
             fetch.dimension=xenos::DataDimension::k2DOrStacked; fetch.size_2d.width=255;
             std::memcpy(mapping,&fetch,sizeof(fetch));
           }

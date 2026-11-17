@@ -1,7 +1,7 @@
 #pragma once
-namespace rex { class Runtime; }
+namespace rex::kernel { class TitleRuntime; }
 namespace dash17559 {
 // Optional profile-specific bootstrap. Direct dashboard launch is the default.
-void InstallBootIntro(rex::Runtime& runtime);
+void InstallBootIntro(rex::kernel::TitleRuntime& runtime);
 bool BootIntroRunning();
 }

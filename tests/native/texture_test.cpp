@@ -1,7 +1,7 @@
 #include "../../src/native/textures/texture.h"
 #include "../../src/native/textures/texture_snapshot.h"
 #include <catch2/catch_test_macros.hpp>
-using namespace rex::graphics::xenos;
+using namespace rex::xenos;
 TEST_CASE("Native packed signed RGB10A2 preserves endpoints and negative steps") {
   for (unsigned bits : {2u, 10u}) {
     const unsigned sign = 1u << (bits - 1);
@@ -39,7 +39,7 @@ TEST_CASE("Native RGBA4 preserves every guest channel and UNORM endpoint") {
   }
 }
 TEST_CASE("Native scanout validates guest texture contracts") {
-  xe_gpu_texture_fetch_t f{};
+  TextureFetch f{};
   f.type = FetchConstantType::kTexture; f.dimension = DataDimension::k2DOrStacked;
   f.format = TextureFormat::k_8_8_8_8; f.pitch = 8; f.base_address = 0x100;
   f.size_2d.width = 255; f.size_2d.height = 127; f.swizzle = 0x688;

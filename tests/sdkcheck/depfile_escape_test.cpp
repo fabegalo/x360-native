@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <rex/codegen/output_stamp.h>
+#include "codegen/output_stamp.h"
 
 namespace fs = std::filesystem;
 

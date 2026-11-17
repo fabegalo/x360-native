@@ -34,20 +34,20 @@ int main() {
     check(alias_word_half(&word, reinterpret_cast<uint16_t*>(&word)) == 0xffff0000u,
           "overlapping word/halfword stores");
     PPCFPSCRRegister fpscr{};
-    const auto saved = fpscr.getcsr();
-    fpscr.loadFromHost();
-    fpscr.disableFlushModeUnconditional();
-    fpscr.storeFromGuest(rex::ppc::kRoundNearest);
+    const auto saved = fpscr.GetCSR();
+    fpscr.LoadFromHost();
+    fpscr.DisableFlushModeUnconditional();
+    fpscr.StoreToHost(rex::ppc::kRoundNearest);
     check(rounded_sum() == 1.0, "nearest halfway");
-    fpscr.storeFromGuest(rex::ppc::kRoundUp);
+    fpscr.StoreToHost(rex::ppc::kRoundUp);
     check(rounded_sum() == std::bit_cast<double>(uint64_t{0x3ff0000000000001}),
           "FPSCR upward halfway");
-    fpscr.storeFromGuest(rex::ppc::kRoundDown);
+    fpscr.StoreToHost(rex::ppc::kRoundDown);
     check(std::signbit(cancellation(1.0, 1.0)), "FPSCR downward signed zero");
-    fpscr.storeFromGuest(rex::ppc::kRoundNearest);
+    fpscr.StoreToHost(rex::ppc::kRoundNearest);
     check(std::isinf(divide(1.0, 0.0)), "division infinity");
     check(std::isnan(divide(0.0, 0.0)), "division NaN");
     check(divide(0x1p-1022, 2.0) == 0x1p-1023, "gradual underflow");
-    fpscr.setcsr(saved);
+    fpscr.SetCSR(saved);
     return failures ? 1 : 0;
 }

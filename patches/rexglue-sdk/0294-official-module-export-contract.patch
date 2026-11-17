@@ -1,0 +1,50 @@
+diff --git a/tests/unit/kernel/module_object_test.cpp b/tests/unit/kernel/module_object_test.cpp
+--- a/tests/unit/kernel/module_object_test.cpp
++++ b/tests/unit/kernel/module_object_test.cpp
+@@ -160,7 +160,7 @@
+ }
+ }  // namespace
+ 
+-REX_TEST_CASE("A user module hands the same thunk to a caller that asks for an ordinal again",
++REX_TEST_CASE("A same-module ordinal keeps its original guest address across thunk-cache invalidation",
+               "[kernel][module]") {
+   rex::test::KernelFixture fixture;
+   rex::kernel::TitleRuntime& runtime = fixture.GetRuntime();
+@@ -191,13 +191,14 @@
+     const u32 caller = kExportImageBase + 0x104;
+     const u32 first = module->GetExportAddress(runtime, kExportOrdinal, caller);
+     CHECK(first != 0);
+-    CHECK(first != kExportImageBase + kExportFunctionOffset);
++    CHECK(first == kExportImageBase + kExportFunctionOffset);
+     CHECK(module->GetExportAddress(runtime, kExportOrdinal, caller) == first);
+ 
+     module->InvalidateThunkCache(first, first + 4);
+     const u32 renewed = module->GetExportAddress(runtime, kExportOrdinal, caller);
+     CHECK(renewed != 0);
+-    CHECK(renewed != first);
++    CHECK(renewed == first);
++    // Cross-module thunk recycling is covered by sdkcheck's user-exports regression.
+     CHECK(module->GetExportAddress(runtime, kExportOrdinal, caller) == renewed);
+   }
+   rex::kernel::CloseOwned(runtime.GetObjectTable(), handle);
+diff --git a/tests/unit/kernel/recompiled_module_test.cpp b/tests/unit/kernel/recompiled_module_test.cpp
+--- a/tests/unit/kernel/recompiled_module_test.cpp
++++ b/tests/unit/kernel/recompiled_module_test.cpp
+@@ -153,7 +153,16 @@
+     auto first = modules.LoadUserModule(kPathA);
+     REQUIRE(first);
+     CHECK(CallFunction(runtime) == kResultA);
+-    modules.UnloadUserModule(*first);
++    {
++      auto loaded = runtime.GetObjectTable().Get<rex::kernel::ModuleObject>(*first);
++      REQUIRE(loaded);
++      CHECK(loaded->path != kPathA);
++      // RegisterRecompiledModule normalizes game:\a.xex to its registration filename.
++      CHECK(loaded->user.recompiled_key == "a.xex");
++      CHECK(loaded->path != loaded->user.recompiled_key);
++    }
++    modules.UnloadUserModule(*first);
++    CHECK(StateOf(runtime).GetFunctionDispatcher()->GetFunction(kFunctionAddress) == nullptr);
+     auto second = modules.LoadUserModule(kPathA);
+     REQUIRE(second);
+     CHECK(CallFunction(runtime) == kResultA);

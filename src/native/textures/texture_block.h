@@ -1,5 +1,8 @@
 #pragma once
-#include <rex/graphics/xenos.h>
+#include <rex/xenos/state.h>
+#include <rex/xenos/fetch.h>
+#include <rex/xenos/ucode.h>
+#include <rex/xenos/packet.h>
 #include <span>
 #include <cstring>
 #include <stdexcept>
@@ -8,15 +11,15 @@ namespace x360n::native {
 // Texture blocks are naturally aligned. Normalize endian once per word,
 // retaining the byte-address XOR rules for sub-word formats.
 inline void ReadTextureBlock(std::span<const uint8_t> source, size_t offset,
-    unsigned bytes, rex::graphics::xenos::Endian endian, uint8_t* output) {
-  using E = rex::graphics::xenos::Endian;
+    unsigned bytes, rex::xenos::Endian endian, uint8_t* output) {
+  using E = rex::xenos::Endian;
   if (bytes >= 4 && !(offset & 3) && !(bytes & 3)) {
     if (offset > source.size() || bytes > source.size() - offset)
       throw std::runtime_error("Native texture snapshot extent overflow");
     if (endian == E::kNone) { std::memcpy(output, source.data()+offset, bytes); return; }
     for (unsigned b = 0; b < bytes; b += 4) {
       uint32_t word; std::memcpy(&word, source.data()+offset+b, 4);
-      word = rex::graphics::xenos::GpuSwap(word, endian);
+      word = rex::xenos::GPUSwap(word, endian);
       std::memcpy(output+b, &word, 4);
     }
   } else {
@@ -28,7 +31,7 @@ inline void ReadTextureBlock(std::span<const uint8_t> source, size_t offset,
     }
   }
 }
-// In the 2D tiled layout (texture_util::GetTiledOffset2D) block X bits below
+// In the 2D tiled layout (rex::xenos::GetTiledOffset2D) block X bits below
 // this run size only form the low 16-byte address bits: such aligned X runs
 // are contiguous in guest memory, ascending with X.
 constexpr unsigned TiledContiguousBlocks(unsigned bytes_per_block_log2) {

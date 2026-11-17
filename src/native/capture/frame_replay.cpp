@@ -1,14 +1,17 @@
 #include "frame_replay.h"
 #include "../memory/physical_write.h"
 #include <rex/chrono/frame_layout.h>
-#include <rex/graphics/register_file.h>
-#include <rex/system/xmemory.h>
-#include <rex/ui/presenter.h>
-#include <fmt/format.h>
+#include <rex/xenos/register.h>
+#include <rex/kernel/heap.h>
+#include <gpu/xenos/host/presenter.h>
+#include <format>
 #include <xxhash.h>
 #include <chrono>
 namespace x360n::native {
-using namespace rex::graphics;
+using namespace rex::gpu;
+using namespace rex::xenos;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
 using capture::Record;
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -16,30 +19,32 @@ double Ms(Clock::duration d) { return std::chrono::duration<double, std::milli>(
 static_assert(unsigned(kGuestSyncSources) == 5, "capture_format.cpp validates GuestSync against 5 sources");
 ScanoutTexture Texture(const uint32_t* f) { return {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8] != 0}; }
 }
-void EnsurePhysicalAllocated(rex::memory::Memory& memory, uint32_t address, uint32_t length) {
+void EnsurePhysicalAllocated(rex::IPhysicalMemory& memory, rex::kernel::ISystemHeap& heap,
+                             uint32_t address, uint32_t length) {
   if (!length) return;
-  if (uint64_t(address) + length > capture::kPhysicalSize) throw std::runtime_error("Native replay: memory outside guest physical range");
-  auto* heap = memory.LookupHeap(0xA0000000);
-  for (uint64_t page = address & ~uint64_t(0xFFFF); page < uint64_t(address) + length; page += 0x10000) {
-    uint32_t protect = 0;
-    if (heap->QueryProtect(0xA0000000u + uint32_t(page), &protect) && protect) continue;
-    // A 4 KiB allocation of another view may already back part of this page.
-    bool other = false;
-    for (uint32_t base : {0xE0000000u, 0xC0000000u}) {
-      auto* alias = memory.LookupHeap(base);
-      const uint32_t origin = memory.GetPhysicalAddress(base);
-      if (page >= origin && page < uint64_t(origin) + alias->heap_size() &&
-          alias->QueryProtect(base + uint32_t(page - origin), &protect) && protect) other = true;
-    }
-    if (other) continue;
-    if (!heap->AllocFixed(0xA0000000u + uint32_t(page), 0x10000, 0x10000,
-            rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-            rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite))
-      throw std::runtime_error(fmt::format("Native replay: cannot allocate guest physical page {:08X}", page));
+  if (uint64_t(address) + length > capture::kPhysicalSize)
+    throw std::runtime_error("Native replay: memory outside guest physical range");
+  // Allocate missing 4 KiB pages through the runtime. Existing pages in any
+  // physical aperture remain owned by their original allocation and keep their bytes.
+  for (uint64_t page = address & ~uint64_t(0xFFF); page < uint64_t(address) + length; page += 0x1000) {
+    const rex::PhysicalRange range{uint32_t(page), 0x1000};
+    if (memory.IsPhysicalRangeAllocated(range)) continue;
+    const auto allocated = heap.AllocPhysical(0x1000, 0x1000,
+        rex::kernel::kMemoryProtectRead | rex::kernel::kMemoryProtectWrite,
+        uint32_t(page), uint32_t(page + 0xFFF), 0x1000);
+    if (!allocated || !memory.IsPhysicalRangeAllocated(range))
+      throw std::runtime_error(std::format("Native replay: cannot allocate guest physical page {:08X}", page));
   }
 }
-ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex::memory::Memory& memory,
-                           const ReplayOptions& options) {
+namespace {
+const uint8_t* Physical(rex::IPhysicalMemory& memory, uint32_t address, uint32_t length) {
+  const auto span = memory.GetReadOnlyPhysicalSpan({address, length});
+  if (!span) throw std::runtime_error(span.error().GetDescription());
+  return reinterpret_cast<const uint8_t*>(span->data());
+}
+}
+ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex::IPhysicalMemory& memory,
+                           rex::kernel::ISystemHeap& heap, const ReplayOptions& options) {
   // Every record is decoded and range-checked before the renderer sees one.
   capture::ValidateFile(reader, RegisterFile::kRegisterCount);
   ReplayResult result;
@@ -82,17 +87,18 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
         }
         case Record::kMemory: {
           const auto record = capture::DecodeMemory(reader, p, size);
-          EnsurePhysicalAllocated(memory, record.address, record.length);
+          EnsurePhysicalAllocated(memory, heap, record.address, record.length);
           ++result.memory_records;
           const bool tamper = memory_index++ == options.tamper_memory_record;
           for (uint32_t offset = 0; offset < record.length;) {
             const uint32_t end = std::min<uint32_t>(record.length, ((record.address + offset) | 4095u) + 1 - record.address);
-            uint8_t* target = memory.TranslatePhysical(record.address + offset);
+            const uint8_t* target = Physical(memory, record.address + offset, end - offset);
             std::vector<uint8_t> bytes(record.bytes.begin() + offset, record.bytes.begin() + end);
             if (tamper && offset == 0) for (size_t i = 0; i < std::min<size_t>(16, bytes.size()); ++i) bytes[i] ^= 0x5A;
             if (std::memcmp(target, bytes.data(), bytes.size())) {
-              NotifyPhysicalWrite(memory, record.address + offset, uint32_t(bytes.size()));
-              std::memcpy(target, bytes.data(), bytes.size());
+              const auto written = memory.CopyToPhysical(record.address + offset,
+                  std::as_bytes(std::span(bytes)));
+              if (!written) throw std::runtime_error(written.error().GetDescription());
               ++result.memory_pages_written;
             }
             offset = end;
@@ -117,7 +123,7 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
         case Record::kDraw: {
           const auto d = capture::DecodeDraw(p, size);
           DrawIndices indices{xenos::IndexFormat(d.index_format), xenos::Endian(d.index_endian), d.index_count, d.index_base, d.index_length};
-          if (d.indexed) EnsurePhysicalAllocated(memory, d.index_base, d.index_length);
+          if (d.indexed) EnsurePhysicalAllocated(memory, heap, d.index_base, d.index_length);
           timed(frame.draw_ms, [&] {
             backend.Draw(*regs, memory, shader(d.vs), shader(d.ps), xenos::PrimitiveType(d.primitive), d.count,
                          d.indexed ? &indices : nullptr, DrawPurpose(d.purpose));
@@ -155,7 +161,7 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
           XXH3_128bits_update(digest, actual.data(), sizeof(actual));
           if (actual != record.counts) {
             ++result.sample_mismatches;
-            mismatch(fmt::format("pass {} frame {}: sample counts differ", pass, frame_index));
+            mismatch(std::format("pass {} frame {}: sample counts differ", pass, frame_index));
           }
           break;
         }
@@ -167,64 +173,64 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
         case Record::kPresent: {
           const auto record = capture::DecodePresent(p, size);
           const auto texture = Texture(record.texture);
-          EnsurePhysicalAllocated(memory, texture.address, texture.bytes);
+          EnsurePhysicalAllocated(memory, heap, texture.address, texture.bytes);
           if (options.presenter) {
             ScanoutOverlay overlay{};
             const void* overlay_pixels = nullptr;
             if (record.has_overlay) {
               const auto* o = record.overlay;
               overlay = {Texture(o), o[9], o[10], o[11], o[12], o[13], o[14], o[15], o[16]};
-              EnsurePhysicalAllocated(memory, overlay.surface.address, overlay.surface.bytes);
-              overlay_pixels = memory.TranslatePhysical(overlay.surface.address);
+              EnsurePhysicalAllocated(memory, heap, overlay.surface.address, overlay.surface.bytes);
+              overlay_pixels = Physical(memory, overlay.surface.address, overlay.surface.bytes);
             }
             rex::chrono::FrameLayout::SetDisplayAspect(record.aspect_x, record.aspect_y);
             timed(frame.present_ms, [&] {
-              backend.Present(*options.presenter, texture, memory.TranslatePhysical(texture.address), record.lut.data(),
+              backend.Present(*options.presenter, texture, Physical(memory, texture.address, texture.bytes), record.lut.data(),
                               record.has_overlay ? &overlay : nullptr, overlay_pixels, ScanoutPostEffect(record.post_effect));
             });
           } else {
-            timed(frame.present_ms, [&] { backend.CompleteFrame(texture, memory.TranslatePhysical(texture.address)); });
+            timed(frame.present_ms, [&] { backend.CompleteFrame(texture, Physical(memory, texture.address, texture.bytes)); });
           }
           // The frame ends with its present; the checks below are the replay's
           // own work (hashes, presenter readback) and are not frame time.
           const auto frame_end = Clock::now();
           const auto latest = backend.Counters();
-          const auto frontbuffer = capture::HashBytes(memory.TranslatePhysical(texture.address), texture.bytes);
+          const auto frontbuffer = capture::HashBytes(Physical(memory, texture.address, texture.bytes), texture.bytes);
           XXH3_128bits_update(digest, frontbuffer.data(), sizeof(frontbuffer));
           if (capture::Recorded(record.frontbuffer)) {
             ++result.frontbuffer_checks;
             if (frontbuffer != record.frontbuffer) {
               ++result.frontbuffer_mismatches;
-              mismatch(fmt::format("pass {} frame {}: scanout {:08X}+{} differs", pass, frame_index, texture.address, texture.bytes));
+              mismatch(std::format("pass {} frame {}: scanout {:08X}+{} differs", pass, frame_index, texture.address, texture.bytes));
             }
           }
           for (const auto& range : record.written) {
             ++result.written_checks;
-            EnsurePhysicalAllocated(memory, range.address, range.length);
-            const auto hash = capture::HashBytes(memory.TranslatePhysical(range.address), range.length);
+            EnsurePhysicalAllocated(memory, heap, range.address, range.length);
+            const auto hash = capture::HashBytes(Physical(memory, range.address, range.length), range.length);
             XXH3_128bits_update(digest, hash.data(), sizeof(hash));
             if (hash != range.hash) {
               ++result.written_mismatches;
-              mismatch(fmt::format("pass {} frame {}: GPU-written {:08X}+{} differs", pass, frame_index, range.address, range.length));
+              mismatch(std::format("pass {} frame {}: GPU-written {:08X}+{} differs", pass, frame_index, range.address, range.length));
             }
           }
           if (options.presenter) {
             // Every frame of a valid capture has its composed image: a replay
             // presenter that yields none (or an invalid one) is a difference.
             ++result.output_checks;
-            rex::ui::RawImage image;
+            rex::gpu::RawImage image;
             capture::Hash output{};
             const bool captured = !options.drop_output && options.presenter->CaptureGuestOutput(image);
             const bool valid = captured && HashImage(image, output);
             XXH3_128bits_update(digest, output.data(), sizeof(output));
             if (!valid) {
               ++result.output_mismatches;
-              mismatch(captured ? fmt::format("pass {} frame {}: presenter returned an invalid {}x{} image", pass,
+              mismatch(captured ? std::format("pass {} frame {}: presenter returned an invalid {}x{} image", pass,
                                               frame_index, image.width, image.height)
-                                : fmt::format("pass {} frame {}: presenter returned no composed image", pass, frame_index));
+                                : std::format("pass {} frame {}: presenter returned no composed image", pass, frame_index));
             } else if (image.width != record.output_width || image.height != record.output_height || output != record.output) {
               ++result.output_mismatches;
-              mismatch(fmt::format("pass {} frame {}: presenter output {}x{} differs from the captured {}x{}", pass,
+              mismatch(std::format("pass {} frame {}: presenter output {}x{} differs from the captured {}x{}", pass,
                                    frame_index, image.width, image.height, record.output_width, record.output_height));
             }
           }

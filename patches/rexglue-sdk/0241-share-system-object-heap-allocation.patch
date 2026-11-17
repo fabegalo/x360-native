@@ -1,25 +1,26 @@
---- a/src/system/xmemory.cpp
-+++ b/src/system/xmemory.cpp
-@@ -1326,10 +1326,8 @@
-   size = rex::round_up(size, page_size_);
-   alignment = rex::round_up(alignment, page_size_);
+diff --git a/src/kernel/memory.cpp b/src/kernel/memory.cpp
+--- a/src/kernel/memory.cpp
++++ b/src/kernel/memory.cpp
+@@ -1159,9 +1159,7 @@
+   alignment = rex::RoundUpNonZero(alignment, page_size_);
  
-+  // Share ordinary free holes while retaining the reserved system range.
-   uint32_t low_address = heap_base_;
--  if (heap_type_ == memory::HeapType::kGuestVirtual) {
--    low_address = heap_base_ + heap_size_ - 0x10000000;
+   u32 low_address = heap_base_;
+-  if (heap_type_ == kernel::HeapType::kGuestVirtual) {
+-    low_address = GetSystemRangeBase();
 -  }
-   uint32_t high_address = heap_base_ + (heap_size_ - 1);
++  // System objects share ordinary free holes; normal title bounds stay reserved.
+   u32 high_address = heap_base_ + (heap_size_ - 1);
    return AllocRange(low_address, high_address, size, alignment, allocation_type, protect, top_down,
                      out_address);
---- a/include/rex/system/xmemory.h
-+++ b/include/rex/system/xmemory.h
-@@ -188,7 +188,7 @@
-                           uint32_t alignment, uint32_t allocation_type, uint32_t protect,
-                           bool top_down, uint32_t* out_address);
+diff --git a/include/rex/kernel/heap.h b/include/rex/kernel/heap.h
+--- a/include/rex/kernel/heap.h
++++ b/include/rex/kernel/heap.h
+@@ -244,7 +244,7 @@
+                           u32 allocation_type, u32 protect, bool top_down, u32* out_address);
  
--  // Allocates from the system portion of the heap (top of virtual heaps).
-+  // Allocates system objects from shared free holes and the reserved upper range.
-   // Physical heaps delegate to regular Alloc since there is no split.
-   virtual bool AllocSystemHeap(uint32_t size, uint32_t alignment, uint32_t allocation_type,
-                                uint32_t protect, bool top_down, uint32_t* out_address);
+   /**
+-   * Allocates from the system portion, the top of a virtual heap. A physical heap uses Alloc.
++   * Allocates system objects from shared free holes and the reserved upper range.
+    *
+    * @param allocation_type MemoryAllocationFlag bits.
+    * @param protect MemoryProtectFlag bits.

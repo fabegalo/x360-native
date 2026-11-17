@@ -1,0 +1,55 @@
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -646,6 +646,16 @@
+     fs::create_directories(staged_package / dir, ec);
+     if (ec) return X_ERROR_ACCESS_DENIED;
+   }
++  const auto growth_mutex = volume_locks_.at(destination_device);
++  const auto write_staged = [&](FILE* output, const u8* bytes, size_t count) -> u32 {
++    // Share the mounted-file growth lock: another writer may consume the initial free-space snapshot.
++    std::lock_guard lock(*growth_mutex);
++    auto snapshot = *device;
++    if (const auto error = QueryContentDeviceSpace(snapshot)) return error;
++    if (count > snapshot.free_bytes) return kDiskFull;
++    if (fwrite(bytes, 1, count, output) != count || fflush(output)) return X_ERROR_ACCESS_DENIED;
++    return X_ERROR_SUCCESS;
++  };
+   uint64_t done = 0;
+   if (progress && !progress(0, total, true)) return X_ERROR_CANCELLED;
+   std::vector<uint8_t> buffer(1024 * 1024);
+@@ -655,9 +665,14 @@
+     auto out = rex::platform::OpenFile(staged_package / relative, "wb");
+     if (!out) { fclose(in); return X_ERROR_ACCESS_DENIED; }
+     bool ok = true, cancelled = false;
++    u32 write_error = X_ERROR_SUCCESS;
+     for (uint64_t left = size; ok && left;) {
+       const size_t chunk = size_t(std::min<uint64_t>(left, buffer.size()));
+-      ok = fread(buffer.data(), 1, chunk, in) == chunk && fwrite(buffer.data(), 1, chunk, out) == chunk;
++      ok = fread(buffer.data(), 1, chunk, in) == chunk;
++      if (ok) {
++        write_error = write_staged(out, buffer.data(), chunk);
++        ok = write_error == X_ERROR_SUCCESS;
++      }
+       left -= chunk;
+       done += chunk;
+       if (ok && progress && !progress(done, total, false)) { cancelled = true; break; }
+@@ -665,13 +680,16 @@
+     fclose(in);
+     if (fclose(out)) ok = false;
+     if (cancelled) return X_ERROR_CANCELLED;
++    if (write_error) return write_error;
+     if (!ok) return X_ERROR_ACCESS_DENIED;
+   }
+   {
+     auto out = rex::platform::OpenFile(staged_header, "wb");
+     if (!out) return X_ERROR_ACCESS_DENIED;
+-    const bool written = fwrite(header.data(), 1, header.size(), out) == header.size();
+-    if (fclose(out) || !written) return X_ERROR_ACCESS_DENIED;
++    const auto write_error = write_staged(out, header.data(), header.size());
++    const bool closed = fclose(out) == 0;
++    if (write_error) return write_error;
++    if (!closed) return X_ERROR_ACCESS_DENIED;
+     done += header.size();
+     if (progress && !progress(done, total, false)) return X_ERROR_CANCELLED;
+   }

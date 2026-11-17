@@ -75,16 +75,18 @@ std::vector<std::string> SessionConsoleArguments(const std::vector<std::string>&
     auto arg = args[i];
     if (arg == "--") throw std::runtime_error("Session manifests cannot terminate option parsing");
     std::replace(arg.begin(), arg.end(), '-', '_');
-    if (arg == "__user_language" || arg == "__user_country") {
+    if (arg == "__user_language" || arg == "__user_country" ||
+        arg == "__kernel.user_language" || arg == "__kernel.user_country") {
       if (++i == args.size() || args[i].starts_with("--"))
         throw std::runtime_error("Missing manifest console setting value");
       continue;
     }
-    if (arg.starts_with("__user_language=") || arg.starts_with("__user_country=")) continue;
+    if (arg.starts_with("__user_language=") || arg.starts_with("__user_country=") ||
+        arg.starts_with("__kernel.user_language=") || arg.starts_with("__kernel.user_country=")) continue;
     result.push_back(args[i]);
   }
-  result.push_back("--user_language=" + std::to_string(settings.language));
-  result.push_back("--user_country=" + std::to_string(settings.country));
+  result.push_back("--kernel.user_language=" + std::to_string(settings.language));
+  result.push_back("--kernel.user_country=" + std::to_string(settings.country));
   return result;
 }
 }

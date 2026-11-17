@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rex/codegen/codegen.h>
+#include "codegen/pipeline.h"
+#include "codegen/decoded_binary.h"
 #include "synthetic_xex.h"
 #include <algorithm>
 #include <fstream>
-#include "../../external/rexglue-sdk/src/codegen/decoded_binary.h"
 
 using namespace x360n::test;
 
@@ -83,24 +83,24 @@ TEST_CASE("CRT nonlocal jumps are recognized without title addresses",
     Workdir work("x360n_nonlocal_jump", "automatic");
     work.write("test.xex",bytes);
     std::ofstream(work.dir/"test.toml") << "project_name='jumps'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir/"test.toml");
+    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     if (variant == 4 || variant == 5) {
       // Analyze/Register must not read the tail outside the declared section.
       (void)pipeline->RunAnalyze();
     } else REQUIRE(pipeline->RunAnalyze().has_value());
-    CHECK(pipeline->context().Config().setJmpAddress == 0);
-    CHECK(pipeline->context().Config().longJmpAddress == 0);
+    CHECK(pipeline->GetContext().GetConfig().setjmp_address == 0);
+    CHECK(pipeline->GetContext().GetConfig().longjmp_address == 0);
     if (variant == 4 || variant == 5) {
-      const auto* routine = pipeline->context().graph.getFunction(variant == 4 ? restore_address : save_address);
-      CHECK((!routine || routine->authority()!=rex::codegen::FunctionAuthority::HELPER));
+      const auto* routine = pipeline->GetContext().graph.GetFunction(variant == 4 ? restore_address : save_address);
+      CHECK((!routine || routine->GetAuthority()!=rex::codegen::FunctionAuthority::kHelper));
       continue;
     }
     if (variant == 6) {
       for (uint32_t address : {save_address+0x1000,restore_address+0x1000}) {
-        const auto* routine=pipeline->context().graph.getFunction(address);
+        const auto* routine=pipeline->GetContext().graph.GetFunction(address);
         REQUIRE(routine);
-        CHECK(routine->authority()==rex::codegen::FunctionAuthority::HELPER);
+        CHECK(routine->GetAuthority()==rex::codegen::FunctionAuthority::kHelper);
       }
     }
     REQUIRE(pipeline->RunWrite().has_value());
@@ -150,17 +150,17 @@ TEST_CASE("Materialized code addresses discover bounded frameless callbacks",
     put(kXexPdata+4,(1u<<30)|((variant==5 ? 16u : 6u)<<8));
     Workdir work("x360n_code_address","callback"); work.write("test.xex",bytes);
     std::ofstream(work.dir/"test.toml") << "project_name='addressed'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir/"test.toml");
+    auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value()); REQUIRE(pipeline->RunAnalyze().has_value());
     if(variant==9) {
       for(unsigned i=0;i<9;++i) {
-        const auto* decoded=pipeline->context().decoded().get(target+i*4);
+        const auto* decoded=pipeline->GetContext().GetDecoded().FindInsn(target+i*4);
         CAPTURE(i);
         REQUIRE(decoded);
-        CHECK(decoded->opcode!=rex::codegen::ppc::Opcode::kUnknown);
+        CHECK(decoded->opcode!=rex::codegen::detail::Opcode::kUnknown);
       }
     }
-    CHECK(pipeline->context().graph.isEntryPoint(target)==(variant<3 || variant==9));
+    CHECK(pipeline->GetContext().graph.IsEntryPoint(target)==(variant<3 || variant==9));
     REQUIRE(pipeline->RunWrite().has_value());
   }
 }
@@ -180,15 +180,15 @@ TEST_CASE("Embedded jump-table data is not a materialized function entry",
   put(kXexText,0x48000041);put(kXexText+4,0x4E800020);
   Workdir work("x360n_code_address","embedded_table");work.write("test.xex",bytes);
   std::ofstream(work.dir/"test.toml") << "project_name='embedded'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir/"test.toml");
+  auto pipeline=rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());REQUIRE(pipeline->RunAnalyze().has_value());
-  const auto& graph=pipeline->context().graph;
-  const auto* entry=graph.getFunction(dispatch);REQUIRE(entry);
-  REQUIRE(entry->jumpTables().size()==1);
-  CHECK(entry->jumpTables()[0].tableAddress==dispatch+32);
-  CHECK(entry->jumpTables()[0].tableByteLength==8);
-  CHECK_FALSE(graph.isEntryPoint(dispatch+32));
-  CHECK(entry->containsAddress(dispatch+64));
+  const auto& graph=pipeline->GetContext().graph;
+  const auto* entry=graph.GetFunction(dispatch);REQUIRE(entry);
+  REQUIRE(entry->GetJumpTables().size()==1);
+  CHECK(entry->GetJumpTables()[0].table_address==dispatch+32);
+  CHECK(entry->GetJumpTables()[0].table_byte_length==8);
+  CHECK_FALSE(graph.IsEntryPoint(dispatch+32));
+  CHECK(entry->ContainsAddress(dispatch+64));
   REQUIRE(pipeline->RunWrite().has_value());
 }
 
@@ -215,12 +215,12 @@ TEST_CASE("Data references discover frameless callbacks without RTTI",
     Workdir work("x360n_discovery", "data_callback");
     work.write("test.xex", bytes);
     std::ofstream(work.dir / "test.toml") << "project_name='callbacks'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    const auto* callback = pipeline->context().graph.getFunction(kXexText + 16);
+    const auto* callback = pipeline->GetContext().graph.GetFunction(kXexText + 16);
     REQUIRE(callback);
-    CHECK(callback->isSealed());
+    CHECK(callback->IsSealed());
     REQUIRE(pipeline->RunWrite().has_value());
   }
 }
@@ -241,12 +241,12 @@ TEST_CASE("Data entry discovery excludes metadata interiors and ordinary fallthr
   Workdir work("x360n_discovery", "invalid_data_candidates");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='callbacks'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  const auto& graph = pipeline->context().graph;
+  const auto& graph = pipeline->GetContext().graph;
   for (uint32_t address : {kXexText+4,kXexText+12,kXexText+13,kXexSlots+64})
-    CHECK_FALSE(graph.isEntryPoint(address));
+    CHECK_FALSE(graph.IsEntryPoint(address));
   REQUIRE(pipeline->RunWrite().has_value());
 }
 
@@ -277,12 +277,12 @@ TEST_CASE("GapFill discovers direct tail targets hidden behind adjacent wrappers
   Workdir work("x360n_discovery", "direct_tail_wrappers");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='tails'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   const auto result = pipeline->RunAnalyze();
   for (uint32_t offset : {16u,32u,40u,48u,128u,136u,144u}) {
     CAPTURE(offset);
-    CHECK(pipeline->context().graph.isEntryPoint(kXexText + offset));
+    CHECK(pipeline->GetContext().graph.IsEntryPoint(kXexText + offset));
   }
   REQUIRE(result.has_value());
   REQUIRE(pipeline->RunWrite().has_value());
@@ -311,17 +311,17 @@ TEST_CASE("Direct tail discovery preserves data and declared metadata holes",
     config << "project_name='tails'\nfile_path='test.xex'\nout_directory_path='out'\n";
     if (protection == 1) config << "[functions]\n0x82010000 = { size = 32 }\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     const auto result = pipeline->RunAnalyze();
-    CHECK_FALSE(pipeline->context().graph.isEntryPoint(target));
+    CHECK_FALSE(pipeline->GetContext().graph.IsEntryPoint(target));
     if (!protection) {
       CHECK_FALSE(result.has_value()); // Branches into data remain errors.
     } else {
       REQUIRE(result.has_value());
-      const auto* owner = pipeline->context().graph.getFunction(kXexText);
+      const auto* owner = pipeline->GetContext().graph.GetFunction(kXexText);
       REQUIRE(owner);
-      CHECK(owner->containsAddress(target));
+      CHECK(owner->ContainsAddress(target));
     }
   }
 }
@@ -342,18 +342,29 @@ TEST_CASE("Direct tail entries take precedence over speculative gap fallthrough"
   Workdir work("x360n_discovery", "referenced_gap_interior");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='tails'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  const auto* target = pipeline->context().graph.getFunction(kXexText + 48);
+  const auto* target = pipeline->GetContext().graph.GetFunction(kXexText + 48);
   REQUIRE(target);
-  CHECK(target->isSealed());
-  const auto* prefix = pipeline->context().graph.getFunction(kXexText + 32);
+  CHECK(target->IsSealed());
+  const auto* prefix = pipeline->GetContext().graph.GetFunction(kXexText + 32);
   REQUIRE(prefix);
-  // Falling through is still executable behavior: preserve it as well as the
-  // separate entry used by the direct caller, rather than returning early.
-  CHECK(prefix->containsAddress(kXexText + 48));
+  // The official graph splits at callable entries and records the fall-through
+  // edge; emission must execute that edge before returning to the caller.
+  CHECK(prefix->GetFallThroughs().contains(kXexText + 48));
   REQUIRE(pipeline->RunWrite().has_value());
+  std::string cpp;
+  for (const auto& file : std::filesystem::directory_iterator(work.dir / "out")) {
+    if (file.path().filename().string().find("_recomp.") == std::string::npos) continue;
+    std::ifstream input(file.path());
+    cpp.append(std::istreambuf_iterator<char>(input), {});
+  }
+  const auto start = cpp.find("DEFINE_REX_FUNC(sub_82010020)");
+  REQUIRE(start != std::string::npos);
+  const auto end = cpp.find("\n}", start);
+  REQUIRE(end != std::string::npos);
+  CHECK(cpp.substr(start, end - start).find("sub_82010030(ctx, base);") != std::string::npos);
 }
 
 TEST_CASE("GapFill separates adjacent virtual tail thunks without pdata or RTTI",
@@ -373,24 +384,24 @@ TEST_CASE("GapFill separates adjacent virtual tail thunks without pdata or RTTI"
   Workdir work("x360n_discovery", "virtual_thunks");
   work.write("test.xex", bytes);
   std::ofstream(work.dir / "test.toml") << "project_name='thunks'\nfile_path='test.xex'\nout_directory_path='out'\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  const auto& graph = pipeline->context().graph;
-  const auto* first = graph.getFunction(kXexText + 8);
-  const auto* second = graph.getFunction(kXexText + 24);
-  const auto* leaf = graph.getFunction(kXexText + 40);
+  const auto& graph = pipeline->GetContext().graph;
+  const auto* first = graph.GetFunction(kXexText + 8);
+  const auto* second = graph.GetFunction(kXexText + 24);
+  const auto* leaf = graph.GetFunction(kXexText + 40);
   REQUIRE(first);
   REQUIRE(second);
   REQUIRE(leaf);
-  CHECK(first->blocks().size() == 1);
-  CHECK(first->blocks().front().size == 16);
-  CHECK(second->blocks().size() == 1);
-  CHECK(second->blocks().front().size == 16);
-  CHECK(leaf->blocks().front().size == 8);
-  CHECK(first->jumpTables().empty());
-  CHECK(second->jumpTables().empty());
-  CHECK(graph.getFunction(kXexText)->authority() == rex::codegen::FunctionAuthority::PDATA);
+  CHECK(first->GetBlocks().size() == 1);
+  CHECK(first->GetBlocks().front().size == 16);
+  CHECK(second->GetBlocks().size() == 1);
+  CHECK(second->GetBlocks().front().size == 16);
+  CHECK(leaf->GetBlocks().front().size == 8);
+  CHECK(first->GetJumpTables().empty());
+  CHECK(second->GetJumpTables().empty());
+  CHECK(graph.GetFunction(kXexText)->GetAuthority() == rex::codegen::FunctionAuthority::kPData);
   REQUIRE(pipeline->RunWrite().has_value());
 }
 
@@ -423,10 +434,10 @@ TEST_CASE("GapFill does not split calls or ambiguous CTR dispatch as virtual thu
     Workdir work("x360n_discovery", "ambiguous_ctr");
     work.write("test.xex", bytes);
     std::ofstream(work.dir / "test.toml") << "project_name='thunks'\nfile_path='test.xex'\nout_directory_path='out'\n";
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    CHECK_FALSE(pipeline->context().graph.isEntryPoint(kXexText + 24));
+    CHECK_FALSE(pipeline->GetContext().graph.IsEntryPoint(kXexText + 24));
   }
 }
 
@@ -451,11 +462,11 @@ TEST_CASE("Virtual thunk discovery respects declared extents including unreachab
     config << "project_name='thunks'\nfile_path='test.xex'\nout_directory_path='out'\n";
     if (configExtent) config << "[functions]\n0x82010000 = { size = 48 }\n";
     config.close();
-    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
     REQUIRE(pipeline.has_value());
     REQUIRE(pipeline->RunAnalyze().has_value());
-    CHECK_FALSE(pipeline->context().graph.isEntryPoint(kXexText + 24));
-    CHECK_FALSE(pipeline->context().graph.isEntryPoint(kXexText + 40));
+    CHECK_FALSE(pipeline->GetContext().graph.IsEntryPoint(kXexText + 24));
+    CHECK_FALSE(pipeline->GetContext().graph.IsEntryPoint(kXexText + 40));
   }
 }
 
@@ -474,16 +485,16 @@ TEST_CASE("Manual switch targets retain ownership across a virtual thunk boundar
   std::ofstream(work.dir / "test.toml") <<
       "project_name='thunks'\nfile_path='test.xex'\nout_directory_path='out'\n"
       "[[switch_tables]]\naddress=0x82010014\nregister=3\nlabels=[0x82010018]\n";
-  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+  auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml", work.GetTools());
   REQUIRE(pipeline.has_value());
   REQUIRE(pipeline->RunAnalyze().has_value());
-  const auto& graph = pipeline->context().graph;
-  const auto* thunk = graph.getFunction(kXexText + 8);
+  const auto& graph = pipeline->GetContext().graph;
+  const auto* thunk = graph.GetFunction(kXexText + 8);
   REQUIRE(thunk);
-  REQUIRE(thunk->jumpTables().size() == 1);
-  CHECK(thunk->jumpTables().front().targets == std::vector<uint32_t>{kXexText + 24});
-  CHECK(thunk->containsAddress(kXexText + 24));
-  CHECK_FALSE(graph.isEntryPoint(kXexText + 24));
-  CHECK(thunk->isLabel(kXexText + 24));
+  REQUIRE(thunk->GetJumpTables().size() == 1);
+  CHECK(thunk->GetJumpTables().front().targets == std::vector<uint32_t>{kXexText + 24});
+  CHECK(thunk->ContainsAddress(kXexText + 24));
+  CHECK_FALSE(graph.IsEntryPoint(kXexText + 24));
+  CHECK(thunk->IsLabel(kXexText + 24));
   REQUIRE(pipeline->RunWrite().has_value());
 }

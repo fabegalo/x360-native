@@ -1,169 +1,203 @@
-diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
-index 01900b6..c7e884c 100644
---- a/include/rex/kernel/xam/module.h
-+++ b/include/rex/kernel/xam/module.h
-@@ -45,6 +45,23 @@ class XamModule : public system::KernelModule {
-   // The profile selects the original system UI module; the shared runtime only
-   // transports requests and tracks registrations. No UI/state change is implied.
-   std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
-+  // Optional original-system presentation, called only after a durable new
-+  // offline unlock. It must queue work; XGI may call from a worker thread.
-+  using AchievementUnlockedCallback = std::function<void(uint64_t, uint32_t, uint32_t, uint32_t)>;
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -12,6 +12,7 @@
+ 
+ /** Original-system UI registration and transport, owned by the attached XAM title. */
+ #include <functional>
++#include <utility>
+ #include <mutex>
+ #include <optional>
+ #include <string>
+@@ -25,6 +26,19 @@
+   std::function<u32(u32, u32, u32)> system_ui_request;
+   // The original-system host decides which original modules it can load.
+   std::function<u32(const std::string&, u32, u32, u32)> system_app_load;
++  using AchievementUnlockedCallback = std::function<void(u64, u32, u32, u32)>;
 +  void SetAchievementUnlockedCallback(AchievementUnlockedCallback callback) {
 +    std::lock_guard lock(achievement_callback_mutex_);
 +    achievement_unlocked_ = std::move(callback);
 +  }
-+  void NotifyAchievementUnlocked(uint64_t xuid, uint32_t user, uint32_t title, uint32_t achievement) {
++  void NotifyAchievementUnlocked(u64 xuid, u32 user, u32 title, u32 achievement) {
 +    AchievementUnlockedCallback callback;
 +    {
 +      std::lock_guard lock(achievement_callback_mutex_);
 +      callback = achievement_unlocked_;
 +    }
-+    // The host may replace/clear the callback concurrently or from the callback
-+    // itself. An already captured callback owns its lifetime until it returns.
 +    if (callback) callback(xuid, user, title, achievement);
 +  }
    struct SystemUiSession {
-     uint32_t module = 0, user = 0;
+     u32 module = 0, user = 0;
      bool visible = false, input_enabled = false, close_requested = false, resume_requested = false;
-@@ -144,6 +161,8 @@ class XamModule : public system::KernelModule {
-   uint32_t GetLanguageLocaleFallback(uint32_t language);
- 
+@@ -104,6 +118,8 @@
+     return it->second;
+   }
   private:
 +  std::mutex achievement_callback_mutex_;
 +  AchievementUnlockedCallback achievement_unlocked_;
+   SystemUiSession system_ui_;
    std::mutex system_apps_mutex_;
-   std::unordered_map<uint32_t, SystemApp> system_apps_;
-   LoaderData loader_data_;
-diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
-index 35704f4..1e8289d 100644
---- a/src/kernel/xam/apps/xam_app.cpp
-+++ b/src/kernel/xam/apps/xam_app.cpp
-@@ -34,6 +34,7 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
-     case 0x00021001:
+   std::unordered_map<u32, SystemApp> system_apps_;
+diff --git a/src/xam/app/xam_app.cpp b/src/xam/app/xam_app.cpp
+--- a/src/xam/app/xam_app.cpp
++++ b/src/xam/app/xam_app.cpp
+@@ -46,6 +46,7 @@
      case 0x00021015:
-     case 0x0002100E:
+     case 0x00021001:
+     case 0x00021018:
 +    case 0x00021013:
      case 0x00021008: {
-       auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-       if (xam && xam->system_ui_request)
-diff --git a/src/kernel/xam/xam_notify.cpp b/src/kernel/xam/xam_notify.cpp
-index 01a0231..651dbbf 100644
---- a/src/kernel/xam/xam_notify.cpp
-+++ b/src/kernel/xam/xam_notify.cpp
-@@ -16,6 +16,8 @@
- #include <rex/system/kernel_state.h>
- #include <rex/system/xnotifylistener.h>
- #include <rex/system/xtypes.h>
-+#include <rex/system/xam/app_manager.h>
+       auto& ui = CurrentXAM().GetSystemUI();
+       if (ui.system_ui_request) return ui.system_ui_request(message, buffer_ptr, buffer_length);
+diff --git a/src/xam/xam_notify.cpp b/src/xam/xam_notify.cpp
+--- a/src/xam/xam_notify.cpp
++++ b/src/xam/xam_notify.cpp
+@@ -21,6 +21,8 @@
+ #include <rex/kernel/types/status.h>
+ #include <rex/kernel/object/object_table.h>
+ #include "xam/xam_bodies.h"
 +#include <cstring>
++#include <rex/kernel/heap.h>
  
  namespace rex {
- namespace kernel {
-@@ -121,8 +123,52 @@ REX_EXPORT(__imp__XNotifyPositionUI, rex::kernel::xam::XNotifyPositionUI_entry)
- extern "C" REX_FUNC(__imp__XNotifyBroadcast) {
-   REX_KERNEL_STATE()->BroadcastNotification(ctx.r3.u32, ctx.r4.u32);
- }
--REX_EXPORT_STUB(__imp__XNotifyQueueUI);
--REX_EXPORT_STUB(__imp__XNotifyQueueUIEx);
-+namespace {
-+bool NotificationStringReadable(uint32_t address) {
+ namespace xam {
+@@ -98,6 +100,41 @@
+ 
+ void XNotifyPositionUI_entry([[maybe_unused]] u32 position) {}
+ 
++static bool NotificationStringReadable(u32 address) {
 +  if (!address) return true;
 +  if (address & 1) return false;
-+  auto* memory = REX_KERNEL_MEMORY();
-+  uint32_t checked_page = 0xFFFFFFFF;
-+  // The original queue copies at most 255 UTF16 code units.
-+  for (uint32_t i = 0; i < 256; ++i) {
-+    const uint64_t next = uint64_t(address) + i * 2;
-+    if (next + 2 > 0x100000000ull) return false;
-+    const auto current = static_cast<uint32_t>(next);
-+    if ((current >> 12) != checked_page) {
-+      auto* heap = memory->LookupHeap(current);
-+      rex::memory::HeapAllocationInfo region{};
-+      if (!heap || !heap->QueryRegionInfo(current, &region) ||
-+          !(region.state & rex::memory::kMemoryAllocationCommit) ||
-+          !(region.protect & rex::memory::kMemoryProtectRead)) return false;
-+      checked_page = current >> 12;
-+    }
-+    if (!rex::memory::load_and_swap<uint16_t>(memory->TranslateVirtual(current))) return true;
++  for (u32 i = 0; i < 256; ++i) {
++    const u64 at = u64{address} + i * 2;
++    if (at + 2 > 0x100000000ull || !CurrentTitle().heap.IsGuestRangeAccessible(
++        static_cast<u32>(at), 2, kernel::kMemoryProtectRead)) return false;
++    if (!memory::load_and_swap<u16>(CurrentTitle().membase.TranslateVirtual(static_cast<u32>(at)))) return true;
 +  }
 +  return true;
 +}
-+uint32_t QueueOriginalNotification(PPCContext& ctx, bool extended) {
-+  // 816A9DE8: exact FE/21013 request, including the 64-bit context at +32.
-+  const uint32_t user = ctx.r4.u32, priority = ctx.r5.u32;
-+  if ((user >= 4 && user != 0xFF) || priority > 3) return 0x80070057u;
-+  if (!NotificationStringReadable(ctx.r6.u32)) return 0x80070057u;
-+  auto* memory = REX_KERNEL_MEMORY();
-+  const uint32_t request = memory->SystemHeapAlloc(40);
-+  if (!request) return 0x8007000Eu;
-+  auto* words = memory->TranslateVirtual<rex::be<uint32_t>*>(request);
++
++static u32 QueueOriginalNotification(u32 type, u32 user, u32 priority, u32 text, u64 context,
++                                    u32 arg1 = 0, u32 arg2 = 0, u32 arg3 = 0) {
++  if ((user >= 4 && user != 0xFF) || priority > 3 || !NotificationStringReadable(text))
++    return kernel::X_E_INVALIDARG;
++  const auto request = CurrentTitle().heap.SystemHeapAlloc(40);
++  if (!request) return 0x8007000E;
++  ScopeGuard release([&] { CurrentTitle().heap.SystemHeapFree(request); });
++  auto* words = CurrentTitle().membase.TranslateVirtual<be_u32*>(request);
 +  std::memset(words, 0, 40);
-+  words[0] = ctx.r3.u32; words[1] = user; words[2] = priority; words[3] = ctx.r6.u32;
-+  if (extended) {
-+    words[4] = ctx.r8.u32; words[5] = ctx.r7.u32; words[6] = ctx.r9.u32;
-+  }
-+  const uint64_t context = extended ? ctx.r10.u64 : ctx.r7.u64;
-+  words[8] = static_cast<uint32_t>(context >> 32); words[9] = static_cast<uint32_t>(context);
-+  const auto status = REX_KERNEL_STATE()->app_manager()->DispatchMessageSync(0xFE, 0x21013, request, 40);
-+  memory->SystemHeapFree(request);
-+  return status;
++  words[0] = type; words[1] = user; words[2] = priority; words[3] = text;
++  words[4] = arg2; words[5] = arg1; words[6] = arg3;
++  words[8] = static_cast<u32>(context >> 32); words[9] = static_cast<u32>(context);
++  return CurrentXAM().GetAppManager().DispatchMessageSync(0xFE, 0x21013, request, 40);
 +}
++
++u32 XNotifyQueueUI_entry(u32 type, u32 user, u32 priority, u32 text, u64 context) {
++  return QueueOriginalNotification(type, user, priority, text, context);
 +}
-+extern "C" REX_FUNC(__imp__XNotifyQueueUI) { ctx.r3.u64 = QueueOriginalNotification(ctx, false); }
-+extern "C" REX_FUNC(__imp__XNotifyQueueUIEx) { ctx.r3.u64 = QueueOriginalNotification(ctx, true); }
++
++u32 XNotifyQueueUIEx_entry(u32 type, u32 user, u32 priority, u32 text, u32 arg1, u32 arg2, u32 arg3, u64 context) {
++  return QueueOriginalNotification(type, user, priority, text, context, arg1, arg2, arg3);
++}
++
+ void XNotifyBroadcast_entry(u32 id, u32 parameter) {
+   CurrentTitle().notifier.BroadcastNotification(id, parameter);
+ }
+@@ -113,3 +150,7 @@
+ REX_XAM_BODY(__imp__XNotifyPositionUI, rex::xam::XNotifyPositionUI_entry)
+ 
+ REX_XAM_BODY(__imp__XNotifyBroadcast, rex::xam::XNotifyBroadcast_entry)
++
++REX_XAM_BODY(__imp__XNotifyQueueUI, rex::xam::XNotifyQueueUI_entry)
++
++REX_XAM_BODY(__imp__XNotifyQueueUIEx, rex::xam::XNotifyQueueUIEx_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -1240,8 +1240,8 @@
+ REX_EXPORT_STUB(__imp__NetDll_XnpUpdateConfigParams);
+ REX_EXPORT_STUB(__imp__NetDll_getpeername);
+ 
+-REX_EXPORT_STUB(__imp__XNotifyQueueUI);
+-REX_EXPORT_STUB(__imp__XNotifyQueueUIEx);
++
++
  REX_EXPORT_STUB(__imp__XNotifyRegisterArea);
  REX_EXPORT_STUB(__imp__XNotifyUIGetOptions);
  REX_EXPORT_STUB(__imp__XNotifyUISetOptions);
-diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
-index 83a70b6..835de7f 100644
---- a/src/kernel/xam/xam_ui.cpp
-+++ b/src/kernel/xam/xam_ui.cpp
-@@ -14,6 +14,7 @@
- #include <rex/string.h>
- #include <rex/system/flags.h>
- #include <rex/system/kernel_state.h>
-+#include <rex/system/xam/app_manager.h>
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -406,3 +406,7 @@
+ REX_XAM_FORWARD(__imp__XamProfileRenameAccount)
  
- #include <imgui.h>
- 
-@@ -596,9 +597,36 @@ REX_EXPORT_STUB(__imp__XamIsUIThread);
- REX_EXPORT_STUB(__imp__XamNavigate);
- REX_EXPORT_STUB(__imp__XamNavigateBack);
- REX_EXPORT_STUB(__imp__XamOverrideHudOpenType);
--REX_EXPORT_STUB(__imp__XamShowAchievementDetailsUI);
--REX_EXPORT_STUB(__imp__XamShowAchievementsUI);
--REX_EXPORT_STUB(__imp__XamShowAchievementsUIEx);
-+namespace {
-+// Retail 17559 wrappers 816C4678/816C4808 request the original GamerProfile
-+// application in modes 2/4. XUID is passed in one PPC argument register (r5).
-+uint32_t ShowOriginalAchievements(uint32_t user, uint32_t title, uint64_t xuid,
-+                                  uint32_t mode, uint32_t achievement) {
-+  if (user >= 4) return 87;  // ERROR_INVALID_PARAMETER
-+  auto* kernel = REX_KERNEL_STATE();
-+  auto* memory = REX_KERNEL_MEMORY();
-+  const uint32_t request = memory->SystemHeapAlloc(544);
-+  if (!request) return 14;
-+  auto* words = memory->TranslateVirtual<rex::be<uint32_t>*>(request);
-+  std::memset(words, 0, 544);
-+  words[0] = user; words[1] = mode;
-+  words[2] = static_cast<uint32_t>(xuid >> 32); words[3] = static_cast<uint32_t>(xuid);
-+  words[4] = title; words[5] = achievement;
-+  const auto status = kernel->app_manager()->DispatchMessageSync(0xFE, 0x21008, request, 544);
-+  memory->SystemHeapFree(request);
-+  // 816C16C8 uses the same error mapping as the existing GamerCard request.
-+  return static_cast<int32_t>(status) < 0 ? (status == 0x8007000Eu ? 14u : 1627u) : 0u;
+ REX_XAM_FORWARD(__imp__XamShowAvatarMiniCreatorUI)
++
++REX_XAM_FORWARD(__imp__XNotifyQueueUI)
++
++REX_XAM_FORWARD(__imp__XNotifyQueueUIEx)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -33,6 +33,7 @@
+ #include <rex/filesystem/file_system_factory.h>
+ #include <set>
+ #include <atomic>
++#include <thread>
+ #include <rex/kernel/title_exit.h>
+ #include <rex/kernel/xboxkrnl.h>
+ #include <rex/title.h>
+@@ -2017,3 +2018,53 @@
+     CHECK(c.XAM("XamShowAvatarMiniCreatorUI", {0, 0}) == 1627);
+   });
+ }
++
++
++REX_TEST_CASE("original notification requests preserve the full context and Ex argument layout", "[kernel][xam][achievement-ui]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([&](Caller& c) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    std::array<u32, 10> words{};
++    u32 address = 0, calls = 0;
++    ui.system_ui_request = [&](u32 message, u32 packet, u32 size) {
++      CHECK(message == 0x21013); CHECK(size == 40);
++      address = packet; ++calls;
++      for (u32 i = 0; i < words.size(); ++i) words[i] = c.Load32(packet + i * 4);
++      return 0;
++    };
++    const auto text = c.Alloc(512);
++    for (u32 i = 0; i < 128; ++i) c.Store32(text + i * 4, 0x00410041);
++    constexpr u64 context = 0xE123456789ABCDEFull;
++    REQUIRE(c.XAM("XNotifyQueueUI", {1, 255, 3, text, context}) == 0);
++    CHECK(words[0] == 1); CHECK(words[1] == 255); CHECK(words[2] == 3); CHECK(words[3] == text);
++    CHECK(words[4] == 0); CHECK(words[5] == 0); CHECK(words[6] == 0); CHECK(words[7] == 0);
++    CHECK(words[8] == 0xE1234567); CHECK(words[9] == 0x89ABCDEF);
++    CHECK(rex::xam::CurrentTitle().heap.QueryAllocationSize(address) == 0);
++    REQUIRE(c.XAM("XNotifyQueueUIEx", {2, 1, 0, 0, 0xAA, 0xBB, 0xCC, context}) == 0);
++    CHECK(words[0] == 2); CHECK(words[1] == 1); CHECK(words[4] == 0xBB); CHECK(words[5] == 0xAA);
++    CHECK(words[6] == 0xCC); CHECK(words[7] == 0); CHECK(words[8] == 0xE1234567); CHECK(words[9] == 0x89ABCDEF);
++    const auto before = calls;
++    CHECK(c.XAM("XNotifyQueueUI", {1, 4, 0, 0, 0}) == rex::kernel::X_E_INVALIDARG);
++    CHECK(c.XAM("XNotifyQueueUI", {1, 0, 4, 0, 0}) == rex::kernel::X_E_INVALIDARG);
++    CHECK(c.XAM("XNotifyQueueUI", {1, 0, 0, text + 1, 0}) == rex::kernel::X_E_INVALIDARG);
++    CHECK(c.XAM("XNotifyQueueUI", {1, 0, 0, 0x7F100000, 0}) == rex::kernel::X_E_INVALIDARG);
++    CHECK(c.XAM("XNotifyQueueUI", {1, 0, 0, 0xFFFFFFFE, 0}) == rex::kernel::X_E_INVALIDARG);
++    CHECK(calls == before);
++    ui.system_ui_request = {};
++    CHECK(c.XAM("XNotifyQueueUI", {1, 0, 0, 0, context}) == rex::kernel::X_E_NOTFOUND);
++  });
 +}
++
++REX_TEST_CASE("original achievement callbacks can unregister themselves on the unlocking thread", "[kernel][xam][achievement-ui]") {
++  KernelFixture fixture;
++  auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++  u32 calls = 0;
++  ui.SetAchievementUnlockedCallback([&](u64 xuid, u32 user, u32 title, u32 achievement) {
++    ++calls; CHECK(xuid == 0xE123456789ABCDEFull); CHECK(user == 2); CHECK(title == 42); CHECK(achievement == 99);
++    ui.SetAchievementUnlockedCallback({});
++  });
++  std::thread worker([&] { ui.NotifyAchievementUnlocked(0xE123456789ABCDEFull, 2, 42, 99); });
++  worker.join();
++  ui.NotifyAchievementUnlocked(0xE123456789ABCDEFull, 2, 42, 99);
++  CHECK(calls == 1);
 +}
-+extern "C" REX_FUNC(__imp__XamShowAchievementsUI) {
-+  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, 0, 2, 0);
-+}
-+extern "C" REX_FUNC(__imp__XamShowAchievementsUIEx) {
-+  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, ctx.r5.u64, 2, 0);
-+}
-+extern "C" REX_FUNC(__imp__XamShowAchievementDetailsUI) {
-+  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, 0, 4, ctx.r5.u32);
-+}
- REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
- REX_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
- REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);

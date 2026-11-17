@@ -161,8 +161,8 @@ int bench(Runner& r) {
 
 int main(int argc, char** argv) {
   Runner r;
-  r.c.fpscr.loadFromHost();
-  r.c.fpscr.enableFlushModeUnconditional();  // the state generated VMX code selects
+  r.c.fpscr.LoadFromHost();
+  r.c.fpscr.EnableFlushModeUnconditional();  // the state generated VMX code selects
   if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) return bench(r);
 
   for (bool four : {false, true}) {

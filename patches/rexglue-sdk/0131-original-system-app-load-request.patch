@@ -1,0 +1,203 @@
+diff --git a/include/rex/kernel/heap.h b/include/rex/kernel/heap.h
+--- a/include/rex/kernel/heap.h
++++ b/include/rex/kernel/heap.h
+@@ -97,6 +97,9 @@
+   virtual void SystemHeapFree(u32 address, u32* out_region_size = nullptr) = 0;
+ 
+   [[nodiscard]] virtual bool IsAddressMapped(u32 address) const = 0;
++
++  /** Checks every page of a nonempty guest span against the guest protection bits. */
++  [[nodiscard]] virtual bool IsGuestRangeAccessible(u32 address, u32 size, u32 required) const = 0;
+ 
+   /** Returns committed allocation bytes, 0 for an interior, freed or invalid address. */
+   [[nodiscard]] virtual u32 QueryAllocationSize(u32 address) = 0;
+@@ -744,6 +747,14 @@
+ 
+   bool IsAddressMapped(u32 address) const override { return LookupHeap(address) != nullptr; }
+ 
++  bool IsGuestRangeAccessible(u32 address, u32 size, u32 required) const override {
++    if (!address || !size || u64{address} + size > 0x100000000ull) return false;
++    const u64 last = u64{address} + size - 1;
++    for (u64 page = address; page <= last; page = (page & ~u64{0xFFF}) + 0x1000)
++      if (!TryTranslateVirtual<const u8*>(static_cast<u32>(page), required)) return false;
++    return true;
++  }
++
+   const BaseHeap* LookupHeap(u32 address) const;
+ 
+   BaseHeap* LookupHeap(u32 address) {
+diff --git a/include/rex/xam/title_lifecycle.h b/include/rex/xam/title_lifecycle.h
+--- a/include/rex/xam/title_lifecycle.h
++++ b/include/rex/xam/title_lifecycle.h
+@@ -62,7 +62,7 @@
+ };
+ 
+ /** Title load and unload calls from the kernel to XAM. */
+-REX_DECLARE_INTERFACE(IXAMTitleLifecycle, 2)
++REX_DECLARE_INTERFACE(IXAMTitleLifecycle, 3)
+   virtual ~IXAMTitleLifecycle() = default;
+ 
+   /**
+diff --git a/include/rex/xam/system_ui.h b/include/rex/xam/system_ui.h
+--- a/include/rex/xam/system_ui.h
++++ b/include/rex/xam/system_ui.h
+@@ -14,6 +14,7 @@
+ #include <functional>
+ #include <mutex>
+ #include <optional>
++#include <string>
+ #include <unordered_map>
+ #include <rex/types.h>
+ 
+@@ -22,6 +23,8 @@
+  public:
+   // The original-system host selects and renders the original module.
+   std::function<u32(u32, u32, u32)> system_ui_request;
++  // The original-system host decides which original modules it can load.
++  std::function<u32(const std::string&, u32, u32, u32)> system_app_load;
+   struct SystemUiSession {
+     u32 module = 0, user = 0;
+     bool visible = false, input_enabled = false, close_requested = false, resume_requested = false;
+diff --git a/src/xam/xam_info.cpp b/src/xam/xam_info.cpp
+--- a/src/xam/xam_info.cpp
++++ b/src/xam/xam_info.cpp
+@@ -486,6 +486,37 @@
+ }
+ 
+ u32 GetTickCount_entry() { return rex::Clock::GetGuestUptimeMillis(); }
++u32 XamAppRequestLoad_entry() {
++  return CurrentXAM().GetSystemUI().system_app_load ? 1 : 0;
++}
++
++u32 XamAppLoad_entry(u32 name, u32 user, u32 buffer, u32 buffer_size, u32 overlapped, u32 app_handle) {
++  auto& title = CurrentTitle();
++  const auto readable = kernel::kMemoryProtectRead;
++  const auto writable = readable | kernel::kMemoryProtectWrite;
++  if (overlapped && !title.heap.IsGuestRangeAccessible(overlapped, sizeof(kernel::XOVERLAPPED), writable))
++    return kernel::X_E_INVALIDARG;
++  u32 result = kernel::X_E_FAIL;
++  if (overlapped || app_handle) {
++    result = 0x80004001u;
++  } else if (auto& callback = CurrentXAM().GetSystemUI().system_app_load; callback && name) {
++    std::string module;
++    for (u32 i = 0; i < 260; ++i) {
++      if (u64{name} + i > 0xFFFFFFFFull || !title.heap.IsGuestRangeAccessible(name + i, 1, readable))
++        return kernel::X_E_INVALIDARG;
++      const auto ch = *title.membase.TranslateVirtual<const char*>(name + i);
++      if (!ch) break;
++      module.push_back(ch);
++    }
++    const auto size = buffer ? std::min(buffer_size, 256u) : 0;
++    if (size && !title.heap.IsGuestRangeAccessible(buffer, size, readable)) return kernel::X_E_INVALIDARG;
++    result = callback(module, user, buffer, size);
++  }
++  if (overlapped && kernel::XFAILED(result))
++    title.overlapped_dispatcher.Complete(overlapped, {.result = 1627, .extended_error = result, .length = 0});
++  return result;
++}
++
+ u32 XamAppUnloadSelf_entry() { return CurrentXAM().GetSystemUI().RequestSystemUiClose() ? 0 : 1627; }
+ u32 XamAppUnloadStack_entry(u32 flags) {
+   if (flags) return 87;
+@@ -556,3 +587,6 @@
+ REX_XAM_BODY(__imp__XamAppUnloadStack, rex::xam::XamAppUnloadStack_entry)
+ 
+ REX_XAM_BODY(__imp__XamEnableSystemAppInput, rex::xam::XamEnableSystemAppInput_entry)
++
++REX_XAM_BODY(__imp__XamAppLoad, rex::xam::XamAppLoad_entry)
++REX_XAM_BODY(__imp__XamAppRequestLoad, rex::xam::XamAppRequestLoad_entry)
+diff --git a/src/kernel/xam/xam_stub.cpp b/src/kernel/xam/xam_stub.cpp
+--- a/src/kernel/xam/xam_stub.cpp
++++ b/src/kernel/xam/xam_stub.cpp
+@@ -283,11 +283,11 @@
+ REX_EXPORT_STUB(__imp__XamAppFreeInterappWorkspace);
+ REX_EXPORT_STUB(__imp__XamAppGetInterappWorkspace);
+ REX_EXPORT_STUB(__imp__XamAppGetSessionId);
+-REX_EXPORT_STUB(__imp__XamAppLoad);
++
+ REX_EXPORT_STUB(__imp__XamAppLoadPass2SysApps);
+ REX_EXPORT_STUB(__imp__XamAppReinitialize);
+ REX_EXPORT_STUB(__imp__XamAppReportError);
+-REX_EXPORT_STUB(__imp__XamAppRequestLoad);
++
+ REX_EXPORT_STUB(__imp__XamAppRequestLoadEx);
+ REX_EXPORT_STUB(__imp__XamAppSetTestOption);
+ 
+diff --git a/src/kernel/xam/xam_forwards.cpp b/src/kernel/xam/xam_forwards.cpp
+--- a/src/kernel/xam/xam_forwards.cpp
++++ b/src/kernel/xam/xam_forwards.cpp
+@@ -373,3 +373,6 @@
+ REX_XAM_FORWARD(__imp__XamNetworkStorageShouldHideFromTitle)
+ 
+ REX_XAM_FORWARD(__imp__XamShowOptionsUI)
++
++REX_XAM_FORWARD(__imp__XamAppLoad)
++REX_XAM_FORWARD(__imp__XamAppRequestLoad)
+diff --git a/tests/unit/kernel/xam_test.cpp b/tests/unit/kernel/xam_test.cpp
+--- a/tests/unit/kernel/xam_test.cpp
++++ b/tests/unit/kernel/xam_test.cpp
+@@ -1370,3 +1370,35 @@
+     REQUIRE(ui.EndSystemUi(5));
+   });
+ }
++
++
++REX_TEST_CASE("original app loading preserves host routing, bounded payload and explicit unsupported completions", "[kernel][xam][original-app-load]") {
++  KernelFixture fixture;
++  fixture.RunOnGuestThread([](Caller& c) {
++    auto& ui = rex::xam::CurrentXAM().GetSystemUI();
++    const auto name = c.AllocString("GamerProfile.xex"), buffer = c.Alloc(512);
++    const auto overlap = c.Alloc(sizeof(rex::kernel::XOVERLAPPED));
++    CHECK(c.XAM("XamAppRequestLoad") == 0);
++    CHECK(c.XAM("XamAppLoad", {name, 2, buffer, 512, 0, 0}) == static_cast<u32>(rex::kernel::X_E_FAIL));
++    u32 calls = 0;
++    ui.system_app_load = [&](const std::string& module, u32 user, u32 input, u32 size) {
++      ++calls;
++      CHECK(module == "GamerProfile.xex"); CHECK(user == 2);
++      CHECK(input == buffer); CHECK(size == 256);
++      return 0u;
++    };
++    rex::ScopeGuard clear([&] { ui.system_app_load = {}; });
++    CHECK(c.XAM("XamAppRequestLoad") == 1);
++    CHECK(c.XAM("XamAppLoad", {name, 2, buffer, 512, 0, 0}) == 0);
++    CHECK(calls == 1);
++    CHECK(c.XAM("XamAppLoad", {name, 2, buffer, 512, overlap, 0}) == 0x80004001u);
++    CHECK(c.Load32(overlap) == 1627); CHECK(c.Load32(overlap + 24) == 0x80004001u);
++    CHECK(c.Load32(overlap + 4) == 0);
++    CHECK(c.XAM("XamAppLoad", {name, 2, buffer, 512, 0, 1}) == 0x80004001u);
++    CHECK(c.XAM("XamAppLoad", {0x7F100000, 2, 0, 0, 0, 0}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(c.XAM("XamAppLoad", {name, 2, 0xFFFFFFF0, 256, 0, 0}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(c.XAM("XamAppLoad", {name, 2, 0, 0, 0x7F100000, 0}) == static_cast<u32>(rex::kernel::X_E_INVALIDARG));
++    CHECK(calls == 1);
++    CHECK_FALSE(ui.GetSystemUiSession().visible);
++  });
++}
+diff --git a/tests/unit/kernel/guest_memory_test.cpp b/tests/unit/kernel/guest_memory_test.cpp
+--- a/tests/unit/kernel/guest_memory_test.cpp
++++ b/tests/unit/kernel/guest_memory_test.cpp
+@@ -225,3 +225,25 @@
+   CHECK(raw->GetTitlePages() == before);
+   CHECK_FALSE(memory.GetReadOnlySpan(*address, 4).has_value());
+ }
++
++
++REX_TEST_CASE("the shared XAM heap range contract checks every guest page and access bit", "[kernel][guest_memory][xam]") {
++  KernelFixture fixture;
++  auto& memory = fixture.GetRuntime().GetGuestMemory();
++  auto& heap = fixture.GetRuntime().GetGuestHeap();
++  auto allocation = memory.Allocate(0x30000, 0x10000, rex::kernel::GuestProtect::kReadWrite);
++  REQUIRE(allocation.has_value());
++  const auto address = *allocation;
++  rex::ScopeGuard release([&] { CHECK(memory.Free(address).has_value()); });
++  const u32 read = rex::kernel::kMemoryProtectRead, write = read | rex::kernel::kMemoryProtectWrite;
++  CHECK(heap.IsGuestRangeAccessible(address, 0x30000, write));
++  auto* pages = StateOf(fixture.GetRuntime()).GetAddressSpace()->LookupHeap(address);
++  REQUIRE(pages->Protect(address + 0x10000, 0x10000, rex::kernel::kMemoryProtectRead));
++  CHECK(heap.IsGuestRangeAccessible(address, 0x30000, read));
++  CHECK_FALSE(heap.IsGuestRangeAccessible(address, 0x30000, write));
++  CHECK_FALSE(heap.IsGuestRangeAccessible(address, 0, read));
++  CHECK_FALSE(heap.IsGuestRangeAccessible(0, 4, read));
++  CHECK_FALSE(heap.IsGuestRangeAccessible(0xFFFFFFF0, 32, read));
++  REQUIRE(pages->Protect(address + 0x10000, 0x10000, rex::kernel::kMemoryProtectNoAccess));
++  CHECK_FALSE(heap.IsGuestRangeAccessible(address, 0x30000, read));
++}

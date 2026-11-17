@@ -1,27 +1,27 @@
-diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
---- a/include/rex/graphics/command_processor.h
-+++ b/include/rex/graphics/command_processor.h
-@@ -55,11 +55,6 @@
-   uint32_t start;
-   uint32_t count;
+diff --git a/src/gpu/xenos/command_processor.h b/src/gpu/xenos/command_processor.h
+--- a/src/gpu/xenos/command_processor.h
++++ b/src/gpu/xenos/command_processor.h
+@@ -63,11 +63,6 @@
+   u32 start;
+   u32 count;
  };
 -
 -// Clock backstop for strict retire, triggered on the first failed guest wait.
--constexpr uint64_t kStrictZPDRetireDeadlineMs = 2;
+-constexpr u64 kStrictZPDRetireDeadlineMs = 2;
 -// The fast modes only need to keep queue growth in check.
--constexpr uint64_t kFastZPDRetireDeadlineMs = 250;
+-constexpr u64 kFastZPDRetireDeadlineMs = 250;
  
  // Cap for the fast-mode cached delta map.  Games reuse a small set of report
  // addresses so this should never be hit, but prevents unbounded growth if a
-@@ -347,6 +342,7 @@
+@@ -478,6 +473,7 @@
    // Queues the current interval at report_address and starts the next one.
-   void QueueZPDReport(uint32_t report_address);
+   void QueueZPDReport(u32 report_address);
    // Opens a new host query segment when CanOpenQuery is true.
 +  void FailQuery(const char* reason);
    void OpenQuerySegment(bool can_close_submission);
    // Closes the current segment at a submission or render pass boundary.
    // The report and VIZ ID stay open and a new segment will open at the next
-@@ -373,8 +369,7 @@
+@@ -504,8 +500,7 @@
    // Handles a strict report the guest is waiting on while the ring is empty.
    void PrepareZPDForWait();
    // Called from PrepareForWait and submission boundaries so retired reports
@@ -30,8 +30,8 @@ diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/com
 +  // reach the guest before it loops again. Unresolved GPU segments stay pending.
    void PumpPendingRetire();
    // Guest writeback.
-   void WriteZPDReport(uint32_t report_address, const XenosZPDReport& value);
-@@ -389,8 +384,7 @@
+   void WriteZPDReport(u32 report_address, const XenosZPDReport& value);
+@@ -520,8 +515,7 @@
      zpd_sample_counter_ = {};
      zpd_speculative_sample_counter_ = {};
      fake_zpd_sample_count_ = 0;
@@ -41,32 +41,32 @@ diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/com
    }
  
    // VIZ_QUERY has the scan converter track 64 query IDs. An ID is visible when
-@@ -488,7 +482,7 @@
-   // Shared memexport readback enable state with backend legacy-flag override support.
-   bool IsReadbackMemexportEnabled(bool legacy_backend_flag) const;
+@@ -658,7 +652,7 @@
+ 
+   const Setting<bool>* driver_readback_memexport_ = nullptr;
  
 -  ZPDMode zpd_mode_ = ZPDMode::kFast;
 +  ZPDMode zpd_mode_ = ZPDMode::kStrict;
  
    ReportHandle zpd_next_report_handle_ = 1;
    // The report the next event will end. No handle means nothing is measuring.
-@@ -508,11 +502,10 @@
+@@ -678,11 +672,10 @@
    XenosZPDReport zpd_speculative_sample_counter_;
-   std::unordered_map<uint32_t, XenosZPDReport> fast_zpd_report_cached_deltas_;
+   std::unordered_map<u32, XenosZPDReport> fast_zpd_report_cached_deltas_;
  
 -  bool zpd_force_fake_fallback_ = false;
 +  bool query_backend_failed_ = false;
-   uint32_t fake_zpd_sample_count_ = 0;
+   u32 fake_zpd_sample_count_ = 0;
  
    // Uptime in ms when the current retire backstop was armed.
--  uint64_t zpd_pending_retire_start_ms_ = 0;
+-  u64 zpd_pending_retire_start_ms_ = 0;
  
    // Set by the backend when resolution scale changes.
-   uint32_t zpd_draw_resolution_scale_x_ = 1;
-diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
---- a/src/graphics/command_processor.cpp
-+++ b/src/graphics/command_processor.cpp
-@@ -93,7 +93,8 @@
+   u32 zpd_draw_resolution_scale_x_ = 1;
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -51,7 +51,8 @@
    if (mode == "fake") return ZPDMode::kFake;
    if (mode == "strict") return ZPDMode::kStrict;
    if (mode == "fast-alt") return ZPDMode::kFastAlt;
@@ -74,9 +74,19 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 +  if (mode == "fast") return ZPDMode::kFast;
 +  return ZPDMode::kStrict;
  }
- void SetZPDMode(const std::string& mode) { cvar::SetFlagByName("occlusion_query", mode); }
- 
-@@ -1424,7 +1425,8 @@
+ void SetZPDMode(XenosSettings& settings, const std::string& mode) {
+   if (auto result = settings.occlusion_query.Set(mode); !result)
+@@ -299,8 +300,7 @@
+       REX_PROFILE_SCOPE_TEXT("gpu", "rex::gpu::CommandProcessor::Stall");
+       PrepareForWait();
+       do {
+-        const int wait_time_ms = zpd_mode_ == ZPDMode::kStrict && zpd_awaited_report_count_
+-            ? static_cast<int>(kStrictZPDRetireDeadlineMs) : 5;
++        const int wait_time_ms = 5;
+         rex::platform::Wait(write_ptr_index_event_.get(), true,
+                             std::chrono::milliseconds(wait_time_ms));
+         if (zpd_mode_ == ZPDMode::kStrict && zpd_awaited_report_count_)
+@@ -1281,7 +1281,8 @@
      return true;
    }
  
@@ -86,7 +96,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
      // Z-Pass Done (ZPD) facilitates all D3D occlusion queries.
      // D3D fills the counters (usually ZPass_A + ZPass_B, but some 2005-2006 D3D
      // versions use ZFail_A + ZFail_B, and sometimes even both counters' B
-@@ -1433,10 +1435,10 @@
+@@ -1290,10 +1291,10 @@
      // processor treats each event as a free-running sample counter snapshot.
      // VIZ_QUERY is a coarse hi-Z visibility test, not strictly an OQ.
      QueueZPDReport(report_address);
@@ -98,10 +108,10 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 +  }
 +
 +  // Explicitly selected fake mode only.
-   if (REXCVAR_GET(occlusion_query_fake_lower_threshold) < 0) {
+   if (GetXenosSettings().occlusion_query_fake_lower_threshold.Get() < 0) {
      return true;
    }
-@@ -1848,7 +1850,7 @@
+@@ -1680,7 +1681,7 @@
        active_segment_.viz.generation == query.generation) {
      return;
    }
@@ -109,8 +119,8 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 +  FailQuery("VIZ survey was not measured");
  }
  
- void CommandProcessor::OnVIZQueryResolved(uint32_t id, uint64_t generation,
-@@ -1948,6 +1950,7 @@
+ void CommandProcessor::OnVIZQueryResolved(u32 id, u64 generation,
+@@ -1779,6 +1780,7 @@
      CloseQuerySegment();
    }
  
@@ -118,7 +128,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
    ZPDReport& report = zpd_current_report_;
    report.address = report_address;
    if (zpd_mode_ == ZPDMode::kStrict) {
-@@ -1987,6 +1990,12 @@
+@@ -1825,6 +1827,12 @@
    active_segment_.segment_pending_begin = true;
  }
  
@@ -131,7 +141,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
  void CommandProcessor::OpenQuerySegment(bool can_close_submission) {
    ActiveQuerySegment& segment = active_segment_;
    if (segment.segment_active || query_segment_opening_ || !CanOpenQuery()) {
-@@ -2001,17 +2010,7 @@
+@@ -1839,17 +1847,7 @@
  
    EnsureQueryResources();
    if (!IsQueryPoolReady()) {
@@ -150,7 +160,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
      return;
    }
  
-@@ -2022,29 +2021,10 @@
+@@ -1860,29 +1858,10 @@
    query_segment_opening_ = true;
    QueryOpenResult result = OpenQuery(can_close_submission);
    query_segment_opening_ = false;
@@ -160,7 +170,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 -    // passing sample instead of waiting for a slot to become available.
 -    if (report) {
 -      zpd_current_report_.delta.z_pass =
--          std::max<uint64_t>(zpd_current_report_.delta.z_pass, 1);
+-          std::max<u64>(zpd_current_report_.delta.z_pass, 1);
 -      segment.segment_pending_begin = false;
 -    }
 -    if (viz) {
@@ -182,7 +192,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
      return;
    }
    segment.segment_active = true;
-@@ -2062,6 +2042,7 @@
+@@ -1900,6 +1879,7 @@
    const bool closed = CloseQuery(
        segment.report ? zpd_current_report_.handle : kInvalidReportHandle,
        segment.viz, submission);
@@ -190,7 +200,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
    if (segment.report && closed) {
      zpd_current_report_.pending_segments++;
      zpd_current_report_.last_segment_end_submission = submission;
-@@ -2073,8 +2054,8 @@
+@@ -1911,8 +1891,8 @@
        query.last_segment_end_submission = submission;
        ++viz_pending_resolves_;
      } else {
@@ -201,7 +211,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
      }
    }
    // The report resumes at the next opportunity if this segment counted for
-@@ -2159,6 +2140,7 @@
+@@ -1997,6 +1977,7 @@
  }
  
  void CommandProcessor::PrepareZPDForWait() {
@@ -209,11 +219,11 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
    ReportHandle awaited_handle = kInvalidReportHandle;
    for (const ZPDReport& report : zpd_reports_) {
      if (report.awaited) {
-@@ -2188,43 +2170,15 @@
+@@ -2026,43 +2007,15 @@
      return;
    }
  
--  uint64_t now_ms = chrono::Clock::QueryHostUptimeMillis();
+-  u64 now_ms = chrono::Clock::QueryHostUptimeMillis();
 -  if (!zpd_pending_retire_start_ms_) {
 -    zpd_pending_retire_start_ms_ = now_ms;
 -    return;
@@ -224,7 +234,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 -
 -  ZPDReport& front = zpd_reports_.front();
 -  // Keep what resolved, with a floor of one so culling doesn't flash occluded.
--  front.delta.z_pass = std::max<uint64_t>(front.delta.z_pass, 1);
+-  front.delta.z_pass = std::max<u64>(front.delta.z_pass, 1);
 -  front.pending_segments = 0;
 -  PumpPendingRetire();
 +  // A failed wait is not a sample count. Keep the report pending.
@@ -240,7 +250,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 -        break;
 -      }
 -      // A stuck front report would block everything behind it.
--      uint64_t now_ms = chrono::Clock::QueryHostUptimeMillis();
+-      u64 now_ms = chrono::Clock::QueryHostUptimeMillis();
 -      if (!zpd_pending_retire_start_ms_) {
 -        zpd_pending_retire_start_ms_ = now_ms;
 -        break;
@@ -248,7 +258,7 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
 -      if (now_ms - zpd_pending_retire_start_ms_ < kFastZPDRetireDeadlineMs) {
 -        break;
 -      }
--      front.delta.z_pass = std::max<uint64_t>(front.delta.z_pass, 1);
+-      front.delta.z_pass = std::max<u64>(front.delta.z_pass, 1);
 -      front.pending_segments = 0;
 -    }
 -    zpd_pending_retire_start_ms_ = 0;
@@ -256,19 +266,19 @@ diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor
  
      zpd_sample_counter_ += front.delta;
      if (front.speculative) {
-diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
---- a/src/graphics/d3d12/command_processor.cpp
-+++ b/src/graphics/d3d12/command_processor.cpp
-@@ -2360,6 +2360,7 @@
- #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -2130,6 +2130,7 @@
+   REX_PROFILE_SCOPE("gpu");
+ #endif  // REXGPU_FINE_GRAINED_DRAW_SCOPES
  
-   ID3D12Device* device = GetD3D12Provider().GetDevice();
 +  if (query_backend_failed_) return false;
-   const RegisterFile& regs = *register_file_;
-   const bool viz_survey = draw_util::IsVIZSurveyDraw(regs);
+   const xenos::RegisterFile& regs = *register_file_;
+   const bool viz_survey = draw_state::IsVIZSurveyDraw(regs, GetXenosSettings().occlusion_query_viz.Get());
  
-@@ -2629,6 +2630,12 @@
-   zpd_draw_resolution_scale_y_ = texture_cache_->draw_resolution_scale_y();
+@@ -2363,6 +2364,12 @@
+   zpd_draw_resolution_scale_y_ = texture_cache_->GetDrawResolutionScaleY();
    UpdateQuerySegment(zpd_draw_resolution_scale_x_ * zpd_draw_resolution_scale_y_,
                       zpd_hybrid, viz_survey);
 +  if (query_backend_failed_) return false;
@@ -280,43 +290,31 @@ diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/comma
  
    // Update system constants before uploading them.
    // TODO(Triang3l): With ROV, pass the disabled render target mask for safety.
-diff --git a/src/graphics/flags.cpp b/src/graphics/flags.cpp
---- a/src/graphics/flags.cpp
-+++ b/src/graphics/flags.cpp
-@@ -57,8 +57,8 @@
- 
- REXCVAR_DEFINE_BOOL(xenos_sample_positions, false, "GPU", "Use Xenos MSAA sample positions for host render targets when supported; ROV/FSI always use Xenos depth positions");
- 
--REXCVAR_DEFINE_STRING(occlusion_query, "fast", "GPU",
--    "ZPD reports: fake, fast, fast-alt or strict; real queries in all but fake mode")
-+REXCVAR_DEFINE_STRING(occlusion_query, "strict", "GPU",
-+    "ZPD: strict waits for real samples (default); fast/fast-alt speculate until resolve; fake is explicit")
-     .allowed({"fake", "fast", "fast-alt", "strict"}).lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
- REXCVAR_DEFINE_BOOL(occlusion_query_viz, true, "GPU", "Enable real VIZ surveys and draw predication")
-     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
---- a/src/graphics/vulkan/command_processor.cpp
-+++ b/src/graphics/vulkan/command_processor.cpp
-@@ -3965,6 +3965,7 @@
-   SCOPE_profile_cpu_f("gpu");
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -3630,6 +3630,7 @@
+   REX_PROFILE_SCOPE("gpu");
  #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
  
 +  if (query_backend_failed_) return false;
-   const RegisterFile& regs = *register_file_;
-   const bool viz_survey = draw_util::IsVIZSurveyDraw(regs);
+   const xenos::RegisterFile& regs = *register_file_;
+   const bool viz_survey = draw_state::IsVIZSurveyDraw(regs);
    const bool query_fsi = render_target_cache_->GetPath() == RenderTargetCache::Path::kPixelShaderInterlock &&
-@@ -4326,6 +4327,7 @@
+@@ -3939,6 +3940,9 @@
    VkDeviceSize predicate_offset = 0;
    const VkBuffer predicate_buffer = BindVIZPredicate(predicate_offset);
    UpdateQuerySegment(draw_resolution_scale_x * draw_resolution_scale_y, zpd_hybrid, viz_survey);
 +  if (query_backend_failed_) return false;
- 
-   // Get dynamic rasterizer state.
-   draw_util::ViewportInfo viewport_info;
-@@ -4564,6 +4566,12 @@
++
++  // Get dynamic rasterizer state.
+   draw_state::HostViewport viewport_info;
+   // maxViewportDimensions alone suffices since viewportBoundsRange[1] is at least twice as large.
+   // directly to pixel address and to things like ps_param_gen.
+@@ -4133,6 +4137,12 @@
    SubmitBarriersAndEnterRenderTargetCacheRenderPass(
-       render_target_cache_->last_update_render_pass(),
-       render_target_cache_->last_update_framebuffer());
+       render_target_cache_->GetLastUpdateRenderPass(),
+       render_target_cache_->GetLastUpdateFramebuffer());
 +  if (query_backend_failed_) return false;
 +  if (!active_segment_.segment_active && (active_segment_.report_measuring() ||
 +      active_segment_.viz.generation != kInvalidVIZGeneration)) {
@@ -326,3 +324,15 @@ diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/com
  
    if (zpd_counter_index_force_update_) {
    UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -75,7 +75,7 @@
+               "Refresh the page valid state from GPU written memory at frame end. Turning it off "
+               "lowers CPU cost but may break memory coherency");
+   REX_SETTING(bool, occlusion_query_enable, true, "Enable host occlusion query handling");
+-  REX_SETTING(std::string, occlusion_query, "fast", "ZPD report mode", Allowed("fake", "fast", "fast-alt", "strict"), kRestart);
++  REX_SETTING(std::string, occlusion_query, "strict", "ZPD report mode", Allowed("fake", "fast", "fast-alt", "strict"), kRestart);
+   REX_SETTING(bool, occlusion_query_viz, true, "Enable real visibility surveys and predication", kRestart);
+   REX_SETTING(bool, occlusion_query_full_counters, false, "Count ZFail, stencil failures and total shader coverage", kRestart);
+   REX_SETTING(i32, occlusion_query_fake_lower_threshold, 80, "Lower sample threshold in explicitly selected fake mode", kRestart);

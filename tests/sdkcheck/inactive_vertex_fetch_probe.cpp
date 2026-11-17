@@ -1,8 +1,10 @@
-#include <rex/graphics/d3d12/inactive_vertex_fetch.h>
+#include <catch2/catch_test_macros.hpp>
+#include "gpu/xenos/d3d12/inactive_vertex_fetch.h"
 #include <array>
 #include <iostream>
-using namespace rex::graphics;
-using namespace rex::graphics::ucode;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+using namespace rex::xenos::ucode;
 using Words = std::array<uint32_t, 3>;
 static uint64_t Exec(ControlFlowOpcode opcode, uint32_t address, uint32_t count,
                      uint32_t sequence, bool condition = false) {
@@ -34,16 +36,16 @@ static std::vector<uint32_t> Program(uint32_t index, Words predicate, bool fetch
   code.insert(code.end(), fetch.begin(), fetch.end());
   return code;
 }
-int main() {
+TEST_CASE("Inactive vertex fetch proof follows predicates and current constants", "[sdk][gpu][shader-fetch]") {
   RegisterFile regs;
   std::memset(&regs, 0, sizeof(regs));
   unsigned checks=0, failures=0;
-  auto check=[&](bool ok, const char* name){++checks;if(!ok){++failures;std::cerr<<"FAIL "<<name<<'\n';}};
+  auto check=[&](bool ok, const char* name){++checks; INFO(name); REQUIRE(ok);};
   auto proof=[&](const auto& code,uint32_t index){return d3d12::IsVertexFetchInactive(code,regs,index);};
   for(uint32_t index=0;index<96;++index) {
     for(uint32_t constant : {0u,17u,127u,255u}) {
       auto code=Program(index,Setp(constant));
-      uint32_t& value=regs[XE_GPU_REG_SHADER_CONSTANT_000_X+4*constant];
+      uint32_t& value=regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_000_X)+4*constant];
       value=0; check(proof(code,index),"zero / inactive");
       value=0x80000000; check(proof(code,index),"negative zero / inactive");
       value=1; check(proof(code,index),"denormal / inactive");
@@ -67,12 +69,12 @@ int main() {
   check(proof(Program(7,Setp(17),false,true),7),"uniform EXEC predication alone");
   auto ne=Program(7,Setp(17,AluScalarOpcode::kSetpNe));
   check(!proof(ne,7),"setp_ne zero active");
-  regs[XE_GPU_REG_SHADER_CONSTANT_000_X+4*17]=0x3F800000;
+  regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_000_X)+4*17]=0x3F800000;
   check(proof(ne,7),"setp_ne one inactive");
-  regs[XE_GPU_REG_SHADER_CONSTANT_000_X+4*17]=0;
-  regs[XE_GPU_REG_SQ_VS_CONST]=0xFF100;check(!proof(code,7),"unsupported constant base");
-  regs[XE_GPU_REG_SQ_VS_CONST]=0xFF000;check(proof(code,7),"supported constant base");
-  regs[XE_GPU_REG_SQ_VS_CONST]=0;
+  regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_000_X)+4*17]=0;
+  regs[std::to_underlying(rex::xenos::Register::SQ_VS_CONST)]=0xFF100;check(!proof(code,7),"unsupported constant base");
+  regs[std::to_underlying(rex::xenos::Register::SQ_VS_CONST)]=0xFF000;check(proof(code,7),"supported constant base");
+  regs[std::to_underlying(rex::xenos::Register::SQ_VS_CONST)]=0;
   for(auto op:{ControlFlowOpcode::kCondJmp,ControlFlowOpcode::kCondCall,ControlFlowOpcode::kLoopStart,
                ControlFlowOpcode::kReturn,ControlFlowOpcode::kCondExecEnd}) {
     auto changed=code;changed[1]=(changed[1]&0xFFFF0FFFu)|(uint32_t(op)<<12);
@@ -94,13 +96,13 @@ int main() {
   auto conditional=code;
   conditional[1]=(conditional[1]&0xFFFF0000u)|(uint32_t(ControlFlowOpcode::kCondExec)<<12)|(1u<<10);
   check(!proof(conditional,7),"skipped predicate producer remains unknown");
-  regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031]=1;
+  regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_BOOL_000_031)]=1;
   check(proof(conditional,7),"executed predicate producer");
-  regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031]=0;
+  regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_BOOL_000_031)]=0;
   // patch 0145: SPIR-V without DenormFlushToZero may compare a denormal as
   // non-zero, so only DXBC-like flushing proves it inactive.
   auto shared=[&](const auto& code,uint32_t index,bool flush){return IsVertexFetchInactive(code,regs,index,flush);};
-  uint32_t& c17=regs[XE_GPU_REG_SHADER_CONSTANT_000_X+4*17];
+  uint32_t& c17=regs[std::to_underlying(rex::xenos::Register::SHADER_CONSTANT_000_X)+4*17];
   for(bool flush:{false,true}) {
     c17=0; check(shared(code,7,flush),"shared zero / inactive");
     c17=0x80000000; check(shared(code,7,flush),"shared negative zero / inactive");
@@ -113,5 +115,5 @@ int main() {
   }
   c17=0;
   std::cout<<checks<<" checks, "<<failures<<" failures\n";
-  return failures ? 1 : 0;
+  REQUIRE(failures == 0);
 }

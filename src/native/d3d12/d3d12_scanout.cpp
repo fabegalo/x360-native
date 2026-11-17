@@ -1,17 +1,18 @@
+#include "../quality/settings.h"
 #include "d3d12_scanout.h"
 #include "scanout_source.h"
-#include <rex/ui/d3d12/d3d12_presenter.h>
+#include <gpu/xenos/host/d3d12/d3d12_presenter.h>
 #include <rex/chrono/frame_layout.h>
 #include <d3dcompiler.h>
-#include <rex/cvar.h>
+
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
-REXCVAR_DECLARE(uint32_t, native_gpu_timeout_ms);
+
 namespace x360n::native {
-std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider) {
-  return std::make_unique<D3D12Scanout>(static_cast<rex::ui::d3d12::D3D12Provider&>(provider));
+std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::gpu::GraphicsProvider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch) {
+  return std::make_unique<D3D12Scanout>(static_cast<rex::gpu::d3d12::D3D12Provider&>(provider), settings, watch);
 }
 namespace {
 void Check(HRESULT hr, const char* operation) {
@@ -26,7 +27,7 @@ D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES befor
   return b;
 }
 }
-D3D12Scanout::D3D12Scanout(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider) {
+D3D12Scanout::D3D12Scanout(rex::gpu::d3d12::D3D12Provider& provider, const rex::gpu::XenosSettings& settings, rex::IPhysicalWriteWatch& watch) : provider_(provider), settings_(settings), watch_(watch) {
   auto* device = provider_.GetDevice();
   D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, 0};
   D3D12_ROOT_PARAMETER parameters[5]{};
@@ -74,7 +75,7 @@ void D3D12Scanout::Wait(uint64_t serial) {
   if (completed == UINT64_MAX) throw std::runtime_error("Native: D3D12 device removed");
   if (completed >= serial) return;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence notification");
-  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  const DWORD limit = std::max<DWORD>(1000, GetNativeSettings().gpu_timeout_ms.Get());
   if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
     throw std::runtime_error("Native: scanout GPU fence exceeded " + std::to_string(limit) + " ms");
   Check(provider_.GetDevice()->GetDeviceRemovedReason(), "device status");
@@ -86,25 +87,25 @@ void D3D12Scanout::InitializeShaderStorage(const std::filesystem::path& root, ui
 }
 D3D12Render& D3D12Scanout::Render() {
   if (!render_) {
-    render_ = std::make_unique<D3D12Render>(provider_);
+    render_ = std::make_unique<D3D12Render>(provider_, settings_, watch_);
     render_->SetPipelineDirectory(pipeline_directory_);
   }
   return *render_;
 }
-rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
+rex::gpu::Shader* D3D12Scanout::LoadShader(rex::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
   return Render().shaders.Load(type, data, count);
 }
 SampleCounts D3D12Scanout::ReadSampleCounts(bool counting_after) {
   return Render().ReadSampleCounts(counting_after);
 }
-void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
-    rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+void D3D12Scanout::Draw(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory, rex::gpu::Shader* vs, rex::gpu::Shader* ps,
+    rex::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   Render().Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
 }
 void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   Render().SetSampleCounts(counts, visibility_only);
 }
-void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
+void D3D12Scanout::Resolve(const rex::xenos::RegisterFile& regs, rex::IPhysicalMemory& memory) {
   Render().Resolve(regs, memory);
 }
 D3D12_GPU_VIRTUAL_ADDRESS D3D12Scanout::FinishGuestFrame(const ScanoutTexture& input_texture, ScanoutTexture& t) {
@@ -134,7 +135,7 @@ BackendCounters D3D12Scanout::Counters() {
   c.gpu_busy_ns = c.gpu_timed ? uint64_t(double(p.gpu_ticks) * 1e9 / double(p.gpu_frequency)) : 0;
   return c;
 }
-void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& input_texture,
+void D3D12Scanout::Present(rex::gpu::Presenter& presenter, const ScanoutTexture& input_texture,
                          const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                          const void* overlay_pixels, ScanoutPostEffect post_effect) {
   ScanoutTexture t = input_texture;
@@ -170,10 +171,10 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   if (overlay) std::memcpy(static_cast<uint8_t*>(mapped) + overlay_offset, overlay_pixels, overlay->surface.bytes);
   slot.upload->Unmap(0, nullptr);
   if (!presenter.RefreshGuestOutput(t.width, t.height, aspect_x, aspect_y,
-      [&](rex::ui::Presenter::GuestOutputRefreshContext& context) {
-    using Presenter = rex::ui::d3d12::D3D12Presenter;
+      [&](rex::gpu::Presenter::GuestOutputRefreshContext& context) {
+    using Presenter = rex::gpu::d3d12::D3D12Presenter;
     context.SetIs8bpc(!t.rgb10);
-    auto* output = static_cast<Presenter::D3D12GuestOutputRefreshContext&>(context).resource_uav_capable();
+    auto* output = static_cast<Presenter::D3D12GuestOutputRefreshContext&>(context).GetResourceUAVCapable();
     Check(slot.allocator->Reset(), "reset allocator");
     Check(slot.list->Reset(slot.allocator.Get(), pipeline_.Get()), "reset list");
     auto cpu = descriptors_->GetCPUDescriptorHandleForHeapStart();

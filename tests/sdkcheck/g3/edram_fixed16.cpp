@@ -1,24 +1,26 @@
 // patch 0185: EDRAM k_16_16[_16_16] is s5.10 fixed point (Xenia Canary 42c2b88).
 // CPU-only: translate a real pixel shader with ROV (DXBC) and FSI (SPIR-V) and
 // check the constants of the emitted EDRAM pack/unpack, plus the PSI clamp.
-#include <rex/graphics/format/ucode.h>
-#include <rex/graphics/pipeline/render_target/cache.h>
-#include <rex/graphics/pipeline/shader/dxbc_translator.h>
-#include <rex/graphics/pipeline/shader/spirv_translator.h>
-#include <rex/string/buffer.h>
+#include <rex/xenos/ucode.h>
+#include <gpu/xenos/pipeline/render_target/cache.h>
+#include <gpu/xenos/pipeline/shader/dxbc_translator.h>
+#include <gpu/xenos/pipeline/shader/spirv_translator.h>
+#include <rex/string/text.h>
 
 #include <bit>
 #include <cstring>
 #include <iostream>
 #include <vector>
 
-using namespace rex::graphics;
+using namespace rex::gpu;
+namespace xenos=rex::xenos;
+namespace ucode=rex::xenos::ucode;
 
 namespace {
 
 // One color export of r0 (oC0 = max(r0, r0)).
 std::vector<uint32_t> ColorPixelMicrocode() {
-  using namespace rex::graphics::ucode;
+  using namespace rex::xenos::ucode;
   const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
                          (uint64_t(ControlFlowOpcode::kAlloc) << 44);
   const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
@@ -53,7 +55,7 @@ int main() {
                       xenos::ColorRenderTargetFormat::k_16_16_16_16}) {
     float rgb_low, alpha_low, rgb_high, alpha_high;
     uint32_t keep_low, keep_high;
-    RenderTargetCache::GetPSIColorFormatInfo(format, 0b1111, rgb_low, alpha_low, rgb_high,
+    RenderTargetCache::GetPSIColorClampsAndKeepMasks(format, 0b1111, rgb_low, alpha_low, rgb_high,
                                              alpha_high, keep_low, keep_high);
     check(rgb_low == -32.0f && alpha_low == -32.0f, "PSI fixed16 low clamp is -32");
     check(rgb_high == 32767.0f / 1024.0f && alpha_high == 32767.0f / 1024.0f,
@@ -65,7 +67,7 @@ int main() {
                       xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT}) {
     float rgb_low, alpha_low, rgb_high, alpha_high;
     uint32_t keep_low, keep_high;
-    RenderTargetCache::GetPSIColorFormatInfo(format, 15, rgb_low, alpha_low, rgb_high,
+    RenderTargetCache::GetPSIColorClampsAndKeepMasks(format, 15, rgb_low, alpha_low, rgb_high,
                                             alpha_high, keep_low, keep_high);
     check(rgb_low == -131008.0f && alpha_low == -131008.0f &&
           rgb_high == 131008.0f && alpha_high == 131008.0f,
@@ -74,14 +76,16 @@ int main() {
   {
     Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
     rex::string::StringBuffer disassembly;
-    shader.AnalyzeUcode(disassembly);
-    check(shader.writes_color_targets() == 1, "DXBC microcode writes color 0");
-    DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, true);
+    shader.AnalyzeUcode(disassembly, {});
+    check(shader.GetWritesColorTargets() == 1, "DXBC microcode writes color 0");
+    struct Settings final : XenosSettings {} ;
+  const Settings settings;
+  DXBCShaderTranslator translator(settings, DXBCOptions{}, rex::gpu::GraphicsProvider::GPUVendorID::kNvidia, false, true);
     auto& translation =
         *shader.GetOrCreateTranslation(translator.GetDefaultPixelShaderModification(1));
-    check(translator.TranslateAnalyzedShader(translation) && translation.is_valid(),
+    check(translator.TranslateAnalyzedShader(translation) && translation.IsValid(),
           "DXBC ROV translation");
-    const auto& binary = translation.translated_binary();
+    const auto& binary = translation.GetTranslatedBinary();
     check(HasFloat(binary, 131008.0f) && HasFloat(binary, -131008.0f) &&
           !HasFloat(binary, 65504.0f), "DXBC ROV extended FP16 packing range");
     check(!HasFloat(binary, 32767.0f / 32.0f), "DXBC ROV pack has no 32767/32 scale");
@@ -92,14 +96,14 @@ int main() {
   for (unsigned scale : {1u, 2u}) {
     Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
     rex::string::StringBuffer disassembly;
-    shader.AnalyzeUcode(disassembly);
-    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, true,
+    shader.AnalyzeUcode(disassembly, {});
+    SPIRVShaderTranslator translator(SPIRVShaderTranslator::Features(true), true, true, true,
                                      scale, scale);
     auto& translation =
         *shader.GetOrCreateTranslation(translator.GetDefaultPixelShaderModification(1));
-    check(translator.TranslateAnalyzedShader(translation) && translation.is_valid(),
+    check(translator.TranslateAnalyzedShader(translation) && translation.IsValid(),
           "SPIR-V FSI translation");
-    const auto& binary = translation.translated_binary();
+    const auto& binary = translation.GetTranslatedBinary();
     check(HasFloat(binary, 131008.0f) && HasFloat(binary, -131008.0f) &&
           !HasFloat(binary, 65504.0f), "SPIR-V FSI extended FP16 packing range");
     check(!HasFloat(binary, 32767.0f / 32.0f), "SPIR-V FSI pack has no 32767/32 scale");

@@ -1,3 +1,4 @@
+#include "../quality/settings.h"
 #include "d3d12_render.h"
 #include "d3d12_hybrid.h"
 #include "d3d12_tessellation.h"
@@ -5,23 +6,26 @@
 #include "../shaders/point_shader.h"
 #include "../textures/texture_load.h"
 #include "../commands/primitive_indices.h"
-#include <rex/graphics/pipeline/render_target/cache.h>
-#include <rex/logging.h>
-#include <rex/graphics/pipeline/texture/util.h>
+#include <gpu/xenos/pipeline/render_target/cache.h>
+#include <rex/logging/log_category.h>
+#include <rex/xenos/texture.h>
 #include <cmath>
 #include <bit>
 #include <d3dcompiler.h>
-#include <rex/graphics/flags.h>
+#include <gpu/xenos/xenos_settings.h>
 #include <fstream>
 #include <stdexcept>
 #include "../../supervisor/fs_io.h"
-REXCVAR_DEFINE_STRING(native_draw_dump, "", "GPU/Native", "Diagnostic draw snapshot directory");
-REXCVAR_DEFINE_STRING(native_draw_dump_ps, "", "GPU/Native", "Diagnostic pixel shader hash to snapshot");
-REXCVAR_DEFINE_STRING(native_pso_dump, "", "GPU/Native", "Diagnostic directory for the latest graphics PSO inputs");
+
+
+
 namespace x360n::native {
-using namespace rex::graphics;
-using namespace rex::graphics::xenos;
-using T = DxbcShaderTranslator;
+namespace draw_util = rex::gpu::draw_state;
+using namespace rex::gpu;
+using rex::xenos::RegisterFile;
+namespace xenos = rex::xenos;
+using namespace rex::xenos;
+using T = DXBCShaderTranslator;
 namespace {
 void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::string("Native draw: ") + what); }
 uint64_t CpuNs(bool process) {
@@ -40,7 +44,7 @@ const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators,
 }
 
 D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC pd,
-    uint64_t vs_hash, uint64_t ps_hash, rex::graphics::ShaderModificationKey vm, rex::graphics::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa,
+    uint64_t vs_hash, uint64_t ps_hash, rex::gpu::ShaderModificationKey vm, rex::gpu::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa,
     unsigned planes, uint32_t mask, size_t id) {
   // Runs on a pipeline worker (or inline with native_pipeline_threads=0).
   // Uses only immutable renderer state, the thread-safe device and atomics.
@@ -71,11 +75,11 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
   if (FAILED(hr)) {
     REXLOG_ERROR("Native PSO HRESULT={:08X} VS={:016X} PS={:016X} primitive={} MSAA={} clip={} interpolators={:X}",
         uint32_t(hr), vs_hash, ps_hash, primitive, msaa, planes, mask);
-    if (!REXCVAR_GET(dump_shaders).empty()) {
+    if (!settings_.dump_shaders.Get().empty()) {
       const char* names[]{"failed-vs", "failed-ps", "failed-gs"};
       D3D12_SHADER_BYTECODE stages[]{pd.VS, pd.PS, pd.GS};
       for (unsigned i = 0; i < 3; ++i) if (stages[i].BytecodeLength) {
-        auto path = std::filesystem::path(REXCVAR_GET(dump_shaders)) / names[i];
+        auto path = std::filesystem::path(settings_.dump_shaders.Get()) / names[i];
         x360n::io::ofstream binary(path.string() + ".dxbc", std::ios::binary);
         binary.write(static_cast<const char*>(stages[i].pShaderBytecode), stages[i].BytecodeLength);
         Ptr<ID3DBlob> disassembly;
@@ -90,7 +94,7 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
   return pipeline;
 }
 
-void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
+void D3D12Render::Draw(const RegisterFile& r, rex::IPhysicalMemory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   SubmitEarly();
   ++recorded_work_;
@@ -103,13 +107,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     phase_start = now;
   };
   Require(vertex, "missing vertex shader");
-  auto& vs = *static_cast<DxbcShader*>(vertex);
-  auto* ps = static_cast<DxbcShader*>(pixel);
+  auto& vs = *static_cast<DXBCShader*>(vertex);
+  auto* ps = static_cast<DXBCShader*>(pixel);
   static bool draw_dumped = false;
-  static const auto dump_dir = REXCVAR_GET(native_draw_dump);
-  static const uint64_t dump_hash = REXCVAR_GET(native_draw_dump_ps).empty() ? 0 :
-      std::stoull(REXCVAR_GET(native_draw_dump_ps), nullptr, 16);
-  if (!dump_dir.empty() && !draw_dumped && ps && ps->ucode_data_hash() == dump_hash) {
+  static const auto dump_dir = GetNativeSettings().draw_dump.Get();
+  static const uint64_t dump_hash = GetNativeSettings().draw_dump_ps.Get().empty() ? 0 :
+      std::stoull(GetNativeSettings().draw_dump_ps.Get(), nullptr, 16);
+  if (!dump_dir.empty() && !draw_dumped && ps && ps->GetUcodeDataHash() == dump_hash) {
     Flush(kFlushDrain);
     const auto dir = std::filesystem::path(dump_dir);
     x360n::io::create_directories(dir);
@@ -117,35 +121,37 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       x360n::io::ofstream(dir / name, std::ios::binary).write(static_cast<const char*>(p), n);
     };
     save("registers.bin", r.values, sizeof(r.values));
-    save("vs.bin", vs.ucode_dwords(), vs.ucode_dword_count() * 4);
-    save("ps.bin", ps->ucode_dwords(), ps->ucode_dword_count() * 4);
+    save("vs.bin", vs.GetUcodeDwords(), vs.GetUcodeDwordCount() * 4);
+    save("ps.bin", ps->GetUcodeDwords(), ps->GetUcodeDwordCount() * 4);
     x360n::io::ofstream(dir / "draw.txt") << uint32_t(primitive) << ' ' << count << ' ' << bool(indices);
     if (indices) save("indices.bin", indices, sizeof(*indices));
     auto range = [&](uint32_t address, uint32_t bytes) {
       if (address && bytes && uint64_t(address) + bytes <= 0x20000000)
-        save("memory-" + std::to_string(address) + ".bin", memory.TranslatePhysical(address), bytes);
+        save("memory-" + std::to_string(address) + ".bin", memory.GetReadOnlyPhysicalSpan({address, bytes}).value().data(), bytes);
     };
     if (indices) range(indices->guest_base, indices->length);
-    for (const auto& b : vs.vertex_bindings()) {
-      auto f = r.GetVertexFetch(b.fetch_constant);
+    for (uint32_t fetch_constant = 0; fetch_constant < 96; ++fetch_constant) {
+    if (!(vs.GetConstantRegisterMap().vertex_fetch_bitmap[fetch_constant / 32] &
+          (uint32_t(1) << (fetch_constant % 32)))) continue;
+      auto f = r.GetVertexFetch(fetch_constant);
       f.address &= 0x07FFFFFF;
       if (f.type == FetchConstantType::kVertex) range(f.address << 2, f.size << 2);
     }
     for (unsigned i = 0; i < 32; ++i) {
       auto f = r.GetTextureFetch(i);
-      if (!TextureFetchSampled(f)) continue;
+      if (!TextureFetchSampled(f, settings_.allow_invalid_fetch_constants.Get())) continue;
       uint32_t w, h, d, base, mip, lo, hi;
-      texture_util::GetSubresourcesFromFetchConstant(f, &w, &h, &d, &base, &mip, &lo, &hi);
+      rex::xenos::GetSubresourcesFromFetchConstant(f, &w, &h, &d, &base, &mip, &lo, &hi);
       uint32_t guest_pitch = f.pitch;
-      if (f.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(w, h, guest_pitch, hi);
-      auto layout = texture_util::GetGuestTextureLayout(f.dimension, guest_pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
+      if (f.dimension == DataDimension::k1D) rex::xenos::RemapWide1DTexture(w, h, guest_pitch, hi);
+      auto layout = rex::xenos::GetGuestTextureLayout(f.dimension, guest_pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
       range(base << 12, layout.base.level_data_extent_bytes);
       if (hi) range(mip << 12, layout.mips_total_extent_bytes);
     }
     draw_dumped = true;
     REXLOG_INFO("Native isolated draw captured to {}", dir.string());
   }
-  if (r.Get<reg::RB_MODECONTROL>().edram_mode == EdramMode::kDepthOnly) ps = nullptr;
+  if (r.Get<reg::RB_MODECONTROL>().edram_mode == EDRAMMode::kDepthOnly) ps = nullptr;
   const bool polygon = draw_util::IsPrimitivePolygonal(r);
   const auto face_mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
   if (polygon && face_mode.poly_mode == PolygonModeEnable::kDualMode &&
@@ -155,10 +161,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     // only the first executes guest vertex memory exports.
     auto pass = std::make_unique<RegisterFile>(r);
     auto mode = face_mode; mode.cull_back = 1; mode.polymode_back_ptype = mode.polymode_front_ptype;
-    (*pass)[reg::PA_SU_SC_MODE_CNTL::register_index] = mode.value;
+    (*pass)[reg::PA_SU_SC_MODE_CNTL::kRegisterIndex] = mode.value;
     Draw(*pass, memory, vertex, pixel, primitive, count, indices, purpose);
     mode = face_mode; mode.cull_front = 1; mode.polymode_front_ptype = mode.polymode_back_ptype;
-    (*pass)[reg::PA_SU_SC_MODE_CNTL::register_index] = mode.value;
+    (*pass)[reg::PA_SU_SC_MODE_CNTL::kRegisterIndex] = mode.value;
     const auto second_purpose = purpose == DrawPurpose::kGuest || purpose == DrawPurpose::kGuestWithoutVertexExports
         ? DrawPurpose::kGuestWithoutVertexExports : DrawPurpose::kVisibility;
     Draw(*pass, memory, vertex, pixel, primitive, count, indices, second_purpose);
@@ -169,13 +175,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       : PolygonType::kTriangles;
 
   const bool rasterization = draw_util::IsRasterizationPotentiallyDone(r, polygon);
-  if (!count || (!rasterization && !(purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.memexport_eM_written()))) return;
+  if (!count || (!rasterization && !(purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.GetMemExportEMWritten()))) return;
   if (!rasterization) ps = nullptr;
-  const bool vertex_export = purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.memexport_eM_written();
-  const bool memexport = vertex_export || (ps && ps->memexport_eM_written());
+  const bool vertex_export = purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.GetMemExportEMWritten();
+  const bool memexport = vertex_export || (ps && ps->GetMemExportEMWritten());
   std::vector<MemExportRange> memexport_ranges;
   if (memexport) {
-    for (auto* shader : {&vs, ps}) if (shader && shader->memexport_eM_written() && (shader != &vs || vertex_export)) {
+    for (auto* shader : {&vs, ps}) if (shader && shader->GetMemExportEMWritten() && (shader != &vs || vertex_export)) {
       auto [entry, inserted] = memexport_addresses_known_.try_emplace(shader, false);
       if (inserted) entry->second = MemExportAddressesKnown(*shader);
       AddMemExportRanges(r, *shader, entry->second, memexport_ranges);
@@ -183,8 +189,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     MergeMemExportRanges(memexport_ranges);
   }
   const auto tess = GetTessellation(r, primitive);
-  const auto msaa = rasterization ? r.Get<reg::RB_SURFACE_INFO>().msaa_samples : MsaaSamples::k1X;
-  Require(msaa <= MsaaSamples::k4X, "invalid MSAA sample count");
+  const auto msaa = rasterization ? r.Get<reg::RB_SURFACE_INFO>().msaa_samples : MSAASamples::k1X;
+  Require(msaa <= MSAASamples::k4X, "invalid MSAA sample count");
   const bool point = rasterization && primitive == PrimitiveType::kPointList;
   const bool line = rasterization && IsLinePrimitive(primitive);
   const bool convert = rasterization && !tess && NeedsPrimitiveConversion(primitive);
@@ -211,10 +217,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       (index_bytes == 4 || indices->endianness == Endian::kNone || indices->endianness == Endian::k8in16);
   std::optional<HybridColorKey> hybrid_key;
   if (hybrid_color_ && ps && !memexport && !tess && !visibility_only_ &&
-      fill == PolygonType::kTriangles && r.Get<reg::RB_MODECONTROL>().edram_mode == EdramMode::kColorDepth &&
+      fill == PolygonType::kTriangles && r.Get<reg::RB_MODECONTROL>().edram_mode == EDRAMMode::kColorDepth &&
       (purpose == DrawPurpose::kGuest || purpose == DrawPurpose::kGuestWithoutVertexExports) &&
       (primitive == PrimitiveType::kTriangleList || primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip))
-    hybrid_key = hybrid_color_->Classify(r, draw_util::GetNormalizedColorMask(r, ps->writes_color_targets()));
+    hybrid_key = hybrid_color_->Classify(r, draw_util::GetNormalizedColorMask(r, ps->GetWritesColorTargets()));
   if (!hybrid_key) EndHybridColor();
   if (rasterization && !tess && primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
       primitive != PrimitiveType::kRectangleList && !convert && !line && !point && primitive != PrimitiveType::k2DTriStrip)
@@ -223,11 +229,11 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (view_count_ > 60000 || sampler_count_ > 1700 || transient_.size() > 5000) Flush(kFlushCapacity);
   auto program = r.Get<reg::SQ_PROGRAM_CNTL>();
   uint32_t param = kMaxInterpolators;
-  auto mask = ps ? vs.writes_interpolators() & ps->GetInterpolatorInputMask(program, r.Get<reg::SQ_CONTEXT_MISC>(), param) : 0;
+  auto mask = ps ? vs.GetWritesInterpolators() & ps->GetInterpolatorInputMask(program, r.Get<reg::SQ_CONTEXT_MISC>(), param) : 0;
   T::Modification vm(shaders.translator.GetDefaultVertexShaderModification(vs.GetDynamicAddressableRegisterCount(program.vs_num_reg), tess ? tess.host : Shader::HostVertexShaderType::kVertex));
   T::Modification pm(shaders.translator.GetDefaultPixelShaderModification(ps ? ps->GetDynamicAddressableRegisterCount(program.ps_num_reg) : 0));
   if (vertex_export && !memexport_addresses_known_.at(&vs)) vm.value |= T::Modification::kMemExportDynamicAddress;
-  if (ps && ps->memexport_eM_written() && !memexport_addresses_known_.at(ps)) pm.value |= T::Modification::kMemExportDynamicAddress;
+  if (ps && ps->GetMemExportEMWritten() && !memexport_addresses_known_.at(ps)) pm.value |= T::Modification::kMemExportDynamicAddress;
   if ((purpose == DrawPurpose::kVisibility || purpose == DrawPurpose::kGuestWithoutVertexExports)) vm.value |= T::Modification::kMemExportDisabled;
   pm.pixel.rov_sample_counts = sample_counting_;
   if(striped_counts_ && sample_counting_ && !visibility_only_) pm.value |= T::Modification::kNativeStripedSampleCounts;
@@ -239,12 +245,12 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   unsigned planes = !rasterization || clip.clip_disable ? 0 : clip.ucp_ena;
   vm.vertex.user_clip_plane_count = std::popcount(planes);
   vm.vertex.user_clip_plane_cull = planes && clip.ucp_cull_only_ena;
-  vm.vertex.vertex_kill_and = (vs.writes_point_size_edge_flag_kill_vertex() & 4) && !clip.vtx_kill_or;
-  if (point || fill == PolygonType::kPoints) vm.vertex.output_point_size = (vs.writes_point_size_edge_flag_kill_vertex() & 1) != 0;
+  vm.vertex.vertex_kill_and = (vs.GetWritesPointSizeEdgeFlagKillVertex() & 4) && !clip.vtx_kill_or;
+  if (point || fill == PolygonType::kPoints) vm.vertex.output_point_size = (vs.GetWritesPointSizeEdgeFlagKillVertex() & 1) != 0;
   if (point) {
     vm.vertex.point_ps_ucp_mode = clip.ps_ucp_mode;
-    vm.vertex.output_point_size = (vs.writes_point_size_edge_flag_kill_vertex() & 1) != 0;
-    vm.vertex.vertex_kill_and = (vs.writes_point_size_edge_flag_kill_vertex() & 4) && !clip.vtx_kill_or;
+    vm.vertex.output_point_size = (vs.GetWritesPointSizeEdgeFlagKillVertex() & 1) != 0;
+    vm.vertex.vertex_kill_and = (vs.GetWritesPointSizeEdgeFlagKillVertex() & 4) && !clip.vtx_kill_or;
     pm.pixel.param_gen_point = param < kMaxInterpolators;
   }
   if (param < kMaxInterpolators) { pm.pixel.param_gen_enable = 1; pm.pixel.param_gen_interpolator = param; }
@@ -253,8 +259,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   {
   Timer shader_timer(stats_enabled_, shader_ns_);
   auto* vt = shaders.Translate(vs, vm.value);
-  pd.VS = {vt->translated_binary().data(), vt->translated_binary().size()};
-  if (ps) { auto* pt = shaders.Translate(*ps, pm.value); pd.PS = {pt->translated_binary().data(), pt->translated_binary().size()}; }
+  pd.VS = {vt->GetTranslatedBinary().data(), vt->GetTranslatedBinary().size()};
+  if (ps) { auto* pt = shaders.Translate(*ps, pm.value); pd.PS = {pt->GetTranslatedBinary().data(), pt->GetTranslatedBinary().size()}; }
   else if (rasterization) { auto& depth_shader = depth_shaders_[visibility_only_ ? 2 : sample_counting_]; if (depth_shader.empty()) depth_shader = shaders.translator.CreateDepthOnlyPixelShader(sample_counting_, visibility_only_, striped_counts_); pd.PS = {depth_shader.data(), depth_shader.size()}; }
   if (point || (rasterization && primitive == PrimitiveType::kRectangleList)) {
     GeometryShaderKey key;
@@ -284,7 +290,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (hybrid_key) {
     pd.NumRenderTargets = 1; pd.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     pd.SampleDesc.Count = hybrid_key->msaa ? 4 : 1;
-    pd.BlendState.RenderTarget[0].RenderTargetWriteMask = uint8_t(draw_util::GetNormalizedColorMask(r, ps->writes_color_targets()) & 15);
+    pd.BlendState.RenderTarget[0].RenderTargetWriteMask = uint8_t(draw_util::GetNormalizedColorMask(r, ps->GetWritesColorTargets()) & 15);
   }
   pd.PrimitiveTopologyType = tess ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH : !rasterization || point ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT : line ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   auto mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
@@ -295,7 +301,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   pd.RasterizerState.CullMode = !rasterization || !polygon ? D3D12_CULL_MODE_NONE : mode.cull_front ? D3D12_CULL_MODE_FRONT : mode.cull_back ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
   pd.RasterizerState.FrontCounterClockwise = !mode.face;
   pd.RasterizerState.DepthClipEnable = !clip.clip_disable;
-  pd.RasterizerState.ForcedSampleCount = hybrid_key ? 0 : msaa == MsaaSamples::k1X ? 1 : 4;
+  pd.RasterizerState.ForcedSampleCount = hybrid_key ? 0 : msaa == MSAASamples::k1X ? 1 : 4;
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
   PipelineKey key;
   std::memcpy(key.bytes.data(), &pd, sizeof(pd));
@@ -305,7 +311,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   }
   auto& pipeline = *last_pipeline_;
   if (!pipeline.valid()) {
-    static const auto pso_dump = REXCVAR_GET(native_pso_dump);
+    static const auto pso_dump = GetNativeSettings().pso_dump.Get();
     if (!pso_dump.empty()) {
       const auto dir = std::filesystem::path(pso_dump);
       x360n::io::create_directories(dir);
@@ -327,7 +333,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     // (D3D12Commands), so the render thread keeps recording while drivers
     // compile, and pipelines of one submission compile concurrently.
     pipeline = pipeline_workers_->Submit(std::function<Ptr<ID3D12PipelineState>()>(
-        [this, pd, vs_hash = vs.ucode_data_hash(), ps_hash = ps ? ps->ucode_data_hash() : 0, vm = vm.value, pm = pm.value,
+        [this, pd, vs_hash = vs.GetUcodeDataHash(), ps_hash = ps ? ps->GetUcodeDataHash() : 0, vm = vm.value, pm = pm.value,
          primitive = uint32_t(primitive), msaa = uint32_t(msaa), planes, mask, id = pipelines_.size()] {
           return CreatePipeline(pd, vs_hash, ps_hash, vm, pm, primitive, msaa, planes, mask, id);
         }));
@@ -342,13 +348,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, false))) continue;
+        if (!TextureViewActive(f, t.dimension, t.is_signed, settings_.allow_invalid_fetch_constants.Get()) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, false))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
-        texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
+        rex::xenos::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         uint32_t guest_pitch = f.pitch;
-        if (f.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(wm, hm, guest_pitch, hi);
+        if (f.dimension == DataDimension::k1D) rex::xenos::RemapWide1DTexture(wm, hm, guest_pitch, hi);
         // Same extents BindTextures reads (all levels, conservatively).
-        auto layout = texture_util::GetGuestTextureLayout(f.dimension, guest_pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, hi);
+        auto layout = rex::xenos::GetGuestTextureLayout(f.dimension, guest_pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, hi);
         if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3u) & ~3u, kReadCpuTexture);
         if (mip && hi) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3u) & ~3u, kReadCpuTexture);
       }
@@ -362,8 +368,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   auto& mirror = Mirror(memory);
   if (gpu_indices) mirror.RequestRange(indices->guest_base, count * index_bytes);
   for (const auto& range : memexport_ranges) mirror.RequestRange(range.address, range.length);
-  for (const auto& b : vs.vertex_bindings()) {
-    auto f = r.GetVertexFetch(b.fetch_constant);
+  for (uint32_t fetch_constant = 0; fetch_constant < 96; ++fetch_constant) {
+    if (!(vs.GetConstantRegisterMap().vertex_fetch_bitmap[fetch_constant / 32] &
+          (uint32_t(1) << (fetch_constant % 32)))) continue;
+    auto f = r.GetVertexFetch(fetch_constant);
     f.address &= 0x07FFFFFF;
     if (f.type == FetchConstantType::kInvalidVertex) {
       // D3D marks unset streams invalid; guest shaders may reference them
@@ -372,13 +380,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       // decides; nothing exists to upload for this constant.
       if (invalid_vertex_fetches_++ < 8)
         REXLOG_WARN("Native: draw references invalid vertex fetch {} ({:08X} {:08X}), VS {:016X}; executed as programmed",
-            b.fetch_constant, f.dword_0, f.dword_1, vs.ucode_data_hash());
+            fetch_constant, f.dword_0, f.dword_1, vs.GetUcodeDataHash());
       continue;
     }
     if (f.type != FetchConstantType::kVertex) {
       char text[160];
       std::snprintf(text, sizeof(text), "Native draw: invalid vertex fetch type %u (constant %u dwords %08X %08X, VS %016llX)",
-          uint32_t(f.type), b.fetch_constant, f.dword_0, f.dword_1, (unsigned long long)vs.ucode_data_hash());
+          uint32_t(f.type), fetch_constant, f.dword_0, f.dword_1, (unsigned long long)vs.GetUcodeDataHash());
       throw std::runtime_error(text);
     }
     // Uploads only pages the CPU wrote since they were last valid.
@@ -395,7 +403,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     if (stats_enabled_) normalized_indices_ += count;
     std::vector<uint32_t> expanded;
     if (indices) {
-      expanded = ExpandIndices({memory.TranslatePhysical<const uint8_t*>(indices->guest_base), indices->length},
+      expanded = ExpandIndices({reinterpret_cast<const uint8_t*>(memory.GetReadOnlyPhysicalSpan({indices->guest_base, indices->length}).value().data()), indices->length},
           count, indices->format, indices->endianness);
     } else {
       expanded.reserve(count);
@@ -437,8 +445,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   cmd_.SetGraphicsRootSignature(pd.pRootSignature); cmd_.SetPipelineState(pipeline, &pipeline);
   cmd_.SetGraphicsRootDescriptorTable(5, MemoryTable(memexport));
   auto depth = draw_util::GetNormalizedDepthControl(r);
-  draw_util::ViewportInfo viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};
-  if (rasterization) draw_util::GetHostViewportInfo(r, scale_x_, scale_y_, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->writes_depth(), viewport);
+  draw_util::HostViewport viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};
+  if (rasterization) draw_util::GetHostViewport(settings_, r, scale_x_, scale_y_, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->IsDepthWritten(), viewport);
   D3D12_VIEWPORT vp{float(viewport.xy_offset[0]), float(viewport.xy_offset[1]), float(viewport.xy_extent[0]), float(viewport.xy_extent[1]), viewport.z_min, viewport.z_max};
   cmd_.RSSetViewports(1, &vp);
   draw_util::Scissor sc{{0, 0}, {0, 0}}; if (rasterization) draw_util::GetScissor(r, sc);
@@ -447,31 +455,31 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   cmd_.RSSetScissorRects(1, &rect);
   T::SystemConstants c{};
   c.textures_resolution_scaled = textures_resolution_scaled_;
-  c.tessellation_factor_range[0] = r.Get<float>(XE_GPU_REG_VGT_HOS_MIN_TESS_LEVEL) + 1.0f;
-  c.tessellation_factor_range[1] = r.Get<float>(XE_GPU_REG_VGT_HOS_MAX_TESS_LEVEL) + 1.0f;
+  c.tessellation_factor_range[0] = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::VGT_HOS_MIN_TESS_LEVEL)) + 1.0f;
+  c.tessellation_factor_range[1] = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::VGT_HOS_MAX_TESS_LEVEL)) + 1.0f;
   if (point || fill == PolygonType::kPoints) {
     SetPointConstants(r, viewport, c);
     c.point_screen_diameter_to_ndc_radius[0] *= float(scale_x_);
     c.point_screen_diameter_to_ndc_radius[1] *= float(scale_y_);
   }
   for (unsigned i = 0, packed = 0; i < 6; ++i) if (planes & (1u << i)) {
-    std::memcpy(c.user_clip_planes[packed++], &r[XE_GPU_REG_PA_CL_UCP_0_X + i * 4], 16);
+    std::memcpy(c.user_clip_planes[packed++], &r[static_cast<uint32_t>(rex::xenos::Register::PA_CL_UCP_0_X) + i * 4], 16);
   }
   for (unsigned i = 0; i < 32; ++i) {
     const auto fetch = r.GetTextureFetch(i);
-    const auto signs = texture_util::SwizzleSigns(fetch);
+    const auto signs = rex::xenos::SwizzleSigns(fetch);
     c.texture_swizzled_signs[i / 4] |= uint32_t(signs) << ((i % 4) * 8);
-    c.texture_integer_scale_bits[i] = TextureFetchSampled(fetch) ?
-        texture_util::GetTextureIntegerScaleBits(fetch, signs) : 0;
+    c.texture_integer_scale_bits[i] = TextureFetchSampled(fetch, settings_.allow_invalid_fetch_constants.Get()) ?
+        rex::xenos::GetTextureIntegerScaleBits(fetch, signs) : 0;
   }
   auto vte = r.Get<reg::PA_CL_VTE_CNTL>(); auto color = r.Get<reg::RB_COLORCONTROL>();
-  c.flags = (vte.vtx_xy_fmt ? T::kSysFlag_XYDividedByW : 0) | (vte.vtx_z_fmt ? T::kSysFlag_ZDividedByW : 0) |
-      (vte.vtx_w0_fmt ? T::kSysFlag_WNotReciprocal : 0) | (polygon ? T::kSysFlag_PrimitivePolygonal : 0) |
-      (memexport ? T::kSysFlag_SharedMemoryIsUAV : 0) |
-      (draw_util::IsPrimitiveLine(r) ? T::kSysFlag_PrimitiveLine : 0);
+  c.flags = (vte.vtx_xy_fmt ? T::kSysFlagXYDividedByW : 0) | (vte.vtx_z_fmt ? T::kSysFlagZDividedByW : 0) |
+      (vte.vtx_w0_fmt ? T::kSysFlagWNotReciprocal : 0) | (polygon ? T::kSysFlagPrimitivePolygonal : 0) |
+      (memexport ? T::kSysFlagSharedMemoryIsUAV : 0) |
+      (draw_util::IsPrimitiveLine(r) ? T::kSysFlagPrimitiveLine : 0);
   auto alpha = color.alpha_test_enable ? color.alpha_func : CompareFunction::kAlways;
-  c.flags |= uint32_t(alpha) << T::kSysFlag_AlphaPassIfLess_Shift;
-  c.alpha_test_reference = r.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
+  c.flags |= uint32_t(alpha) << T::kSysFlagAlphaPassIfLessShift;
+  c.alpha_test_reference = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::RB_ALPHA_REF));
   c.alpha_to_mask = color.alpha_to_mask_enable ? (color.value >> 24) | 256 : 0;
   c.vertex_index_endian = gpu_indices ? indices->endianness : Endian::kNone;
   c.vertex_index_offset = r.Get<reg::VGT_INDX_OFFSET>().indx_offset;
@@ -479,53 +487,53 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   c.vertex_index_max = r.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
   std::memcpy(c.ndc_scale, viewport.ndc_scale, sizeof(c.ndc_scale));
   std::memcpy(c.ndc_offset, viewport.ndc_offset, sizeof(c.ndc_offset));
-  c.sample_count_log2[0] = msaa >= MsaaSamples::k4X;
-  c.sample_count_log2[1] = msaa >= MsaaSamples::k2X;
+  c.sample_count_log2[0] = msaa >= MSAASamples::k4X;
+  c.sample_count_log2[1] = msaa >= MSAASamples::k2X;
   c.edram_32bpp_tile_pitch_dwords_scaled = (((r.Get<reg::RB_SURFACE_INFO>().surface_pitch << c.sample_count_log2[0]) + 79) / 80) * 1280 * scale_x_ * scale_y_;
-  const auto color_mask = draw_util::GetNormalizedColorMask(r, ps ? ps->writes_color_targets() : 0);
+  const auto color_mask = draw_util::GetNormalizedColorMask(r, ps ? ps->GetWritesColorTargets() : 0);
   for (unsigned i = 0; i < 4; ++i) {
-    auto info = r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]);
+    auto info = r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::kRTRegisterIndices[i]);
     c.color_exp_bias[i] = std::ldexp(1.0f, info.color_exp_bias);
     c.edram_rt_base_dwords_scaled[i] = (info.color_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
     c.edram_rt_format_flags[i] = RenderTargetCache::AddPSIColorFormatFlags(info.color_format);
-    RenderTargetCache::GetPSIColorFormatInfo(info.color_format, (color_mask >> (i * 4)) & 15,
+    GetNativeColorClampsAndKeepMasks(info.color_format, (color_mask >> (i * 4)) & 15,
         c.edram_rt_clamp[i][0], c.edram_rt_clamp[i][1], c.edram_rt_clamp[i][2], c.edram_rt_clamp[i][3], c.edram_rt_keep_mask[i][0], c.edram_rt_keep_mask[i][1]);
-    c.edram_rt_blend_factors_ops[i] = r[reg::RB_BLENDCONTROL::rt_register_indices[i]] & 0x1fff1fff;
-    c.edram_blend_constant[i] = r.Get<float>(XE_GPU_REG_RB_BLEND_RED + i);
-    if (info.color_format == ColorRenderTargetFormat::k_8_8_8_8_GAMMA) c.flags |= T::kSysFlag_ConvertColor0ToGamma << i;
+    c.edram_rt_blend_factors_ops[i] = r[reg::RB_BLENDCONTROL::kRTRegisterIndices[i]] & 0x1fff1fff;
+    c.edram_blend_constant[i] = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::RB_BLEND_RED) + i);
+    if (info.color_format == ColorRenderTargetFormat::k_8_8_8_8_GAMMA) c.flags |= T::kSysFlagConvertColor0ToGamma << i;
   }
   auto di = r.Get<reg::RB_DEPTH_INFO>(); c.edram_depth_base_dwords_scaled = (di.depth_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
-  if (di.depth_format == DepthRenderTargetFormat::kD24FS8) c.flags |= T::kSysFlag_DepthFloat24;
+  if (di.depth_format == DepthRenderTargetFormat::kD24FS8) c.flags |= T::kSysFlagDepthFloat24;
   // As in the pinned ROV path: depth/stencil aliasing a written color target
   // is disabled rather than corrupting that target.
   bool depth_stencil = depth.z_enable || depth.stencil_enable;
   for (unsigned i = 0; i < 4 && depth_stencil; ++i)
-    if (((di.depth_base ^ r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_base) & (edram_tile_count_ - 1)) == 0 &&
+    if (((di.depth_base ^ r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::kRTRegisterIndices[i]).color_base) & (edram_tile_count_ - 1)) == 0 &&
         (c.edram_rt_keep_mask[i][0] != UINT32_MAX || c.edram_rt_keep_mask[i][1] != UINT32_MAX)) depth_stencil = false;
   // Front offset applies to non-polygons only with POLY_OFFSET_PARA_ENABLE.
   const bool para = !polygon && mode.poly_offset_para_enable;
   if ((polygon && mode.poly_offset_front_enable) || para) {
-    c.edram_poly_offset_front_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
-    c.edram_poly_offset_front_offset = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET);
+    c.edram_poly_offset_front_scale = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::PA_SU_POLY_OFFSET_FRONT_SCALE)) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
+    c.edram_poly_offset_front_offset = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::PA_SU_POLY_OFFSET_FRONT_OFFSET));
   }
   if (polygon && mode.poly_offset_back_enable) {
-    c.edram_poly_offset_back_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
-    c.edram_poly_offset_back_offset = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET);
+    c.edram_poly_offset_back_scale = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::PA_SU_POLY_OFFSET_BACK_SCALE)) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
+    c.edram_poly_offset_back_offset = r.Get<float>(static_cast<uint32_t>(rex::xenos::Register::PA_SU_POLY_OFFSET_BACK_OFFSET));
   } else if (para) {
     c.edram_poly_offset_back_scale = c.edram_poly_offset_front_scale;
     c.edram_poly_offset_back_offset = c.edram_poly_offset_front_offset;
   }
   if (depth_stencil) {
-    c.flags |= T::kSysFlag_ROVDepthStencil;
-    c.flags |= uint32_t(depth.z_enable ? depth.zfunc : CompareFunction::kAlways) << T::kSysFlag_ROVDepthPassIfLess_Shift;
-    if (depth.z_enable && depth.z_write_enable) c.flags |= T::kSysFlag_ROVDepthWrite;
-    if (depth.stencil_enable) c.flags |= T::kSysFlag_ROVStencilTest;
+    c.flags |= T::kSysFlagROVDepthStencil;
+    c.flags |= uint32_t(depth.z_enable ? depth.zfunc : CompareFunction::kAlways) << T::kSysFlagROVDepthPassIfLessShift;
+    if (depth.z_enable && depth.z_write_enable) c.flags |= T::kSysFlagROVDepthWrite;
+    if (depth.stencil_enable) c.flags |= T::kSysFlagROVStencilTest;
     // The translator applies this hint only to shaders safe for early writes.
     if (alpha == CompareFunction::kAlways && !color.alpha_to_mask_enable)
-      c.flags |= T::kSysFlag_ROVDepthStencilEarlyWrite;
+      c.flags |= T::kSysFlagROVDepthStencilEarlyWrite;
     for (unsigned side = 0; side < 2; ++side) {
       const bool back = side && polygon && depth.backface_enable;
-      auto stencil = r.Get<reg::RB_STENCILREFMASK>(back ? XE_GPU_REG_RB_STENCILREFMASK_BF : XE_GPU_REG_RB_STENCILREFMASK);
+      auto stencil = r.Get<reg::RB_STENCILREFMASK>(back ? static_cast<uint32_t>(rex::xenos::Register::RB_STENCILREFMASK_BF) : static_cast<uint32_t>(rex::xenos::Register::RB_STENCILREFMASK));
       c.edram_stencil[side][0] = stencil.stencilref; c.edram_stencil[side][1] = stencil.stencilmask;
       c.edram_stencil[side][2] = stencil.stencilwritemask;
       c.edram_stencil[side][3] = (depth.value >> (back ? 20 : 8)) & 4095;
@@ -538,7 +546,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // as the pinned ROV path does when EDRAM ownership changes. Non-ROV writes
   // (resolve clears) place their own barrier before and after.
   EdramRovLayout layout{c.sample_count_log2[0], c.sample_count_log2[1], c.edram_32bpp_tile_pitch_dwords_scaled,
-      c.edram_depth_base_dwords_scaled, uint32_t(depth_stencil), c.flags & T::kSysFlag_DepthFloat24};
+      c.edram_depth_base_dwords_scaled, uint32_t(depth_stencil), c.flags & T::kSysFlagDepthFloat24};
   for (unsigned i = 0; i < 4; ++i) {
     layout[6 + i * 4] = c.edram_rt_base_dwords_scaled[i]; layout[7 + i * 4] = c.edram_rt_format_flags[i];
     layout[8 + i * 4] = c.edram_rt_keep_mask[i][0]; layout[9 + i * 4] = c.edram_rt_keep_mask[i][1];
@@ -551,15 +559,15 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   cmd_.SetGraphicsRootConstantBufferView(0, DrawConstants(0, &c, sizeof(c)));
   auto floats = [&](Shader& shader, unsigned start, unsigned root) {
     uint32_t packed[1024];
-    const auto bytes = GatherFloatConstants(packed, shader.constant_register_map().float_bitmap, &r[start]);
+    const auto bytes = GatherFloatConstants(packed, shader.GetConstantRegisterMap().float_bitmap, &r[start]);
     cmd_.SetGraphicsRootConstantBufferView(root, DrawConstants(root, packed, bytes));
   };
   const uint32_t vs_constants = FloatConstantBase(r, true), ps_constants = FloatConstantBase(r, false);
   Require(vs_constants + 256 <= 512 && (!ps || ps_constants + 256 <= 512), "float constant bank outside register file");
-  floats(vs, XE_GPU_REG_SHADER_CONSTANT_000_X + vs_constants * 4, 1);
-  if (ps) floats(*ps, XE_GPU_REG_SHADER_CONSTANT_000_X + ps_constants * 4, 2);
-  cmd_.SetGraphicsRootConstantBufferView(3, DrawConstants(3, &r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
-  cmd_.SetGraphicsRootConstantBufferView(4, DrawConstants(4, &r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
+  floats(vs, static_cast<uint32_t>(rex::xenos::Register::SHADER_CONSTANT_000_X) + vs_constants * 4, 1);
+  if (ps) floats(*ps, static_cast<uint32_t>(rex::xenos::Register::SHADER_CONSTANT_000_X) + ps_constants * 4, 2);
+  cmd_.SetGraphicsRootConstantBufferView(3, DrawConstants(3, &r[static_cast<uint32_t>(rex::xenos::Register::SHADER_CONSTANT_BOOL_000_031)], 40 * 4));
+  cmd_.SetGraphicsRootConstantBufferView(4, DrawConstants(4, &r[static_cast<uint32_t>(rex::xenos::Register::SHADER_CONSTANT_FETCH_00_0)], 192 * 4));
   SetTextureTables(pixel_tables, 6); SetTextureTables(vertex_tables, 8);
   cmd_.SetGraphicsRootDescriptorTable(7, Gpu(0, true));
   cmd_.SetGraphicsRootDescriptorTable(9, Gpu(0));

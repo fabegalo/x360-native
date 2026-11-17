@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstring>
-#include <rex/system/xmemory.h>
+#include <rex/kernel/heap.h>
 
 namespace dash17559 {
 
@@ -14,12 +14,12 @@ class ExperimentalRegion {
   static constexpr uint32_t kSize = 0x10000;
   enum class Result { Disabled, Mapped, AlreadyMapped, Overlap, AllocationFailed };
 
-  Result Map(rex::memory::Memory& memory, bool enabled) {
-    using namespace rex::memory;
+  Result Map(rex::kernel::GuestAddressSpace& memory, bool enabled) {
+    using namespace rex::kernel;
     if (!enabled) return Result::Disabled;
     if (mapped_) return Result::AlreadyMapped;
     auto* heap = memory.LookupHeap(kBase);
-    HeapAllocationInfo info{};
+    HeapAllocation info{};
     if (!heap || !heap->QueryRegionInfo(kBase, &info)) return Result::AllocationFailed;
     if (info.state || info.region_size < kSize) return Result::Overlap;
     // Reserve separately: the SDK's reserve|commit path permits existing pages.

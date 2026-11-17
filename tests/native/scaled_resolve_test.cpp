@@ -1,3 +1,7 @@
+#include <rex/kernel/heap.h>
+#include "kernel/kernel_fixture.h"
+#include "kernel/title_context.h"
+#include "kernel/title_state.h"
 #include "../../src/native/memory/scaled_resolve.h"
 #include "../../src/native/memory/physical_write.h"
 #include "../../src/native/shaders/scaled_memory.h"
@@ -7,7 +11,7 @@
 
 using namespace x360n::native;
 
-TEST_CASE("Native scaled replication dispatch stays within GPU limits", "[native-memory]") {
+TEST_CASE("Native scaled replication dispatch stays within GPU limits", "[sdk][native-memory]") {
   for (uint32_t sx = 1; sx <= 4; ++sx)
     for (uint32_t sy = 1; sy <= 4; ++sy) {
       const uint32_t area = sx * sy;
@@ -23,7 +27,7 @@ TEST_CASE("Native scaled replication dispatch stays within GPU limits", "[native
     }
 }
 
-TEST_CASE("Native scaled resolve mapping: the replication inverse matches the pinned layout", "[native-memory]") {
+TEST_CASE("Native scaled resolve mapping: the replication inverse matches the pinned layout", "[sdk][native-memory]") {
   for (auto [sx, sy] : {std::pair{2u, 2u}, std::pair{3u, 3u}, std::pair{3u, 2u}, std::pair{1u, 2u}})
     for (unsigned pixel_log2 = 0; pixel_log2 <= 4; ++pixel_log2) {
       const unsigned area = sx * sy;
@@ -41,13 +45,14 @@ TEST_CASE("Native scaled resolve mapping: the replication inverse matches the pi
     }
 }
 
-TEST_CASE("Native scaled resolve pages: stale runs, current pages and retirement", "[native-memory]") {
-  rex::memory::Memory memory;
-  REQUIRE(memory.Initialize());
-  const uint32_t allocated = memory.SystemHeapAlloc(4 * 4096, 4096, rex::memory::kSystemHeapPhysical);
+TEST_CASE("Native scaled resolve pages: stale runs, current pages and retirement", "[sdk][native-memory]") {
+  rex::test::KernelFixture fixture;
+  auto& memory = *rex::kernel::StateOf(fixture.GetRuntime()).GetAddressSpace();
+  rex::kernel::TitleContext context(fixture.GetRuntime());
+  const uint32_t allocated = memory.SystemHeapAlloc(4 * 4096, 4096, rex::kernel::kSystemHeapPhysical);
   REQUIRE(allocated);
   const uint32_t base = memory.GetPhysicalAddress(allocated);
-  GuestMemoryMirror mirror(memory, [](uint32_t, uint32_t) {});
+  GuestMemoryMirror mirror(context, context, [](uint32_t, uint32_t) {});
   ScaledResolveCache cache(2, 2);
   cache.Attach(mirror);
   using Runs = std::vector<std::pair<uint32_t, uint32_t>>;
@@ -70,7 +75,7 @@ TEST_CASE("Native scaled resolve pages: stale runs, current pages and retirement
   // A CPU write to the page retires its subpixels.
   mirror.RequestRange(base + 4096, 4096);
   *memory.TranslatePhysical<uint32_t*>(base + 4096) = 0x12345678;
-  NotifyPhysicalWrite(memory, base + 4096, 4);
+  NotifyPhysicalWrite(context, base + 4096, 4);
   CHECK_FALSE(cache.Overlaps(base + 4096, 4096));
   CHECK(cache.Stale(base + 4096, 4096) == Runs{{base + 4096, 4096}});
   // Current again, then a non-scaled GPU write (memexport) retires it too.

@@ -1,16 +1,18 @@
 // patch 0183: guest texture addressing from Xenia Canary (344fca7, ace153cb8,
 // 4a863a0e1). Synthetic fetch constants only; no GPU.
 #include <iostream>
-#include <rex/graphics/pipeline/texture/util.h>
+#include <catch2/catch_test_macros.hpp>
+#include <rex/xenos/texture.h>
 
-using namespace rex::graphics;
+namespace xenos = rex::xenos;
+namespace texture_util = rex::xenos;
 
 namespace {
 
-xenos::xe_gpu_texture_fetch_t Fetch2D(uint32_t width, uint32_t height, bool packed,
+xenos::TextureFetch Fetch2D(uint32_t width, uint32_t height, bool packed,
                                       uint32_t base_page, uint32_t mip_page,
                                       uint32_t mip_min, uint32_t mip_max) {
-  xenos::xe_gpu_texture_fetch_t fetch = {};
+  xenos::TextureFetch fetch = {};
   fetch.type = xenos::FetchConstantType::kTexture;
   fetch.format = xenos::TextureFormat::k_8_8_8_8;
   fetch.tiled = 1;
@@ -30,7 +32,7 @@ struct Pages {
   uint32_t base, mip, min, max;
 };
 
-Pages Resolve(const xenos::xe_gpu_texture_fetch_t& fetch) {
+Pages Resolve(const xenos::TextureFetch& fetch) {
   Pages p;
   texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, &p.base,
                                                  &p.mip, &p.min, &p.max);
@@ -39,10 +41,12 @@ Pages Resolve(const xenos::xe_gpu_texture_fetch_t& fetch) {
 
 }  // namespace
 
-int main() {
+TEST_CASE("Guest texture layouts preserve tails, conversion metadata and wide 1D backing", "[sdk][gpu][shader-fetch][texture-layout]") {
   int failures = 0, checks = 0;
   auto check = [&](bool ok, const char* name) {
     ++checks;
+    INFO(name);
+    CHECK(ok);
     if (!ok) {
       ++failures;
       std::cerr << "FAIL " << name << '\n';
@@ -138,5 +142,5 @@ int main() {
   check(wide.base.level_data_extent_bytes == 8192 * 3 * 4,
         "wide 1D guest layout includes every materialized row");
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
-  return failures ? 1 : 0;
+  CHECK(failures == 0);
 }
