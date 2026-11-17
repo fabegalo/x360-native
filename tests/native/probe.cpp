@@ -520,6 +520,8 @@ int wmain(int argc, wchar_t** argv) {
         : replay_flag == L"--draw-interleaved" ? ReplayMode::kInterleaved
         : replay_flag == L"--draw-system-resolve" ? ReplayMode::kSystemResolve : ReplayMode::kSingle;
     const bool draw_replay = replay_flag == L"--draw-replay" || replay_mode != ReplayMode::kSingle;
+    if (draw_replay && plugin == "native")
+      options.emplace_back("--app.cache_root=" + rex::string::PathToUTF8(output / "pipeline-cache"));
     RegistryGate registry_gate;
     if (plugin == "native" && draw_replay) setting("native_stats", "true");
     if (stress) setting("gpu.d3d12.debug", "true");
@@ -616,7 +618,6 @@ int wmain(int argc, wchar_t** argv) {
       std::cout << "PASS predicated-out invalid vertex fetch\n"; return 0;
     }
     if (draw_replay) {
-      if (plugin == "native") gpu->GetCommandProcessor()->InitializeShaderStorage(output / "pipeline-cache", 0, true);
       std::optional<QueueTimestamps> queue_timestamps;
       if (replay_mode == ReplayMode::kTiming && backend == "d3d12")
         queue_timestamps.emplace(*static_cast<rex::gpu::d3d12::D3D12Provider*>(

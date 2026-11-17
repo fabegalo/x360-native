@@ -424,6 +424,8 @@ X360N_PROBE_MAIN {
     std::vector<std::string> options{
         "--app.user_root=" + rex::string::PathToUTF8(output / "user"),
         "--log.file_name=" + rex::string::PathToUTF8(std::filesystem::absolute(output / "runtime.log"))};
+    if (pipeline_cache)
+      options.emplace_back("--app.cache_root=" + rex::string::PathToUTF8(output / "pipeline-cache"));
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       Require(assignment.find('=') != std::string::npos, "invalid setting assignment");
@@ -444,18 +446,18 @@ X360N_PROBE_MAIN {
     if (!loaded) throw std::runtime_error(loaded.error().GetDescription());
     auto* memory = dynamic_cast<rex::kernel::GuestAddressSpace*>(&runtime.GetGuestHeap());
     Require(memory != nullptr, "frame probe requires the canonical address space");
-    const auto attached = graphics.AttachTitle(rex::TitleInfo{}, runtime.GetPhysicalMemory(),
+    if (pipeline_cache)
+      Require(xenos && extra_draws >= 32, "--pipeline-cache requires --xenos and at least 32 extra draws");
+    const auto storage_start = std::chrono::steady_clock::now();
+    rex::TitleInfo title;
+    if (pipeline_cache) title.title_id=0x0000F00D;
+    const auto attached = graphics.AttachTitle(title, runtime.GetPhysicalMemory(),
         runtime.GetPhysicalWriteWatch(), runtime.GetGuestInterrupts());
     if (!attached) throw std::runtime_error(attached.error().GetDescription());
     rex::ScopeGuard detach([&] { graphics.DetachTitle(); });
     if (pipeline_cache) {
-      Require(xenos && extra_draws >= 32, "--pipeline-cache requires --xenos and at least 32 extra draws");
-      const auto start = std::chrono::steady_clock::now();
-      auto& driver = *static_cast<rex::gpu::XenosGraphicsDriverBase*>(gpu);
-      Require(driver.GetCommandProcessor() != nullptr, "pipeline command processor unavailable");
-      driver.GetCommandProcessor()->InitializeShaderStorage(output / "pipeline-cache", 0x0000F00D, true);
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - start).count() << '\n';
+          std::chrono::steady_clock::now() - storage_start).count() << '\n';
     }
     Run(*gpu, *memory, frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64, depth_alias);
     detach.Reset();

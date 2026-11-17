@@ -18,7 +18,10 @@ tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' 
   receipt="$dest/$id/.x360n-sha256"
   if [ -f "$receipt" ] && [ "$(cat "$receipt")" = "$sha" ]; then
     if [ "$id" != llvm ] || { [ -f "$dest/llvm/include/c++/v1/format" ] &&
-         [ -f "$dest/llvm/include/c++/v1/print" ] && find "$dest/llvm/lib" -name 'libc++.a' | grep -q .; }; then
+         [ -f "$dest/llvm/include/c++/v1/print" ] &&
+         find "$dest/llvm/lib" -name 'libc++.a' | grep -q . &&
+         find "$dest/llvm/lib" -name 'libc++abi.a' | grep -q . &&
+         find "$dest/llvm/lib" -name 'libunwind.a' | grep -q .; }; then
       echo "$id $version: cached"; continue
     fi
   fi
@@ -35,7 +38,8 @@ tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' 
       xz -dc "$archive" | tar -x -C "$dest/.work/x" --wildcards --no-anchored -f - \
         'bin/clang' 'bin/clang++' 'bin/clang-[0-9]*' 'bin/lld' 'bin/ld.lld' 'bin/llvm-ar' 'bin/llvm-ranlib' \
         'bin/llvm-nm' 'bin/llvm-readobj' 'bin/llvm-readelf' 'bin/llvm-objcopy' 'bin/llvm-strip' 'lib/clang/*' \
-        'include/c++/*' 'include/*/c++/*' 'lib/libc++*' 'lib/*/libc++*' || true ;;
+        'include/c++/*' 'include/*/c++/*' 'lib/libc++*' 'lib/*/libc++*' \
+        'lib/libunwind*' 'lib/*/libunwind*' || true ;;
     *) tar -xzf "$archive" -C "$dest/.work/x" ;;
   esac
   if [ "$root" = . ]; then mv "$dest/.work/x" "$dest/$id"; else mv "$dest/.work/x/$root" "$dest/$id"; fi
@@ -45,6 +49,10 @@ tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' 
           [ -f "$dest/llvm/include/c++/v1/format" ] && [ -f "$dest/llvm/include/c++/v1/print" ] ||
             { echo 'Pinned LLVM C++23 runtime headers missing' >&2; exit 4; }
           find "$dest/llvm/lib" -name 'libc++.a' | grep -q . || { echo 'Pinned static libc++ missing' >&2; exit 4; }
+          find "$dest/llvm/lib" -name 'libc++abi.a' | grep -q . || { echo 'Pinned static libc++abi missing' >&2; exit 4; }
+          find "$dest/llvm/lib" -name 'libunwind.a' | grep -q . || { echo 'Pinned static LLVM unwind support missing' >&2; exit 4; }
+          builtins=$("$dest/llvm/bin/clang++" -rtlib=compiler-rt -print-libgcc-file-name)
+          [ -f "$builtins" ] || { echo 'Pinned compiler-rt builtins missing' >&2; exit 4; }
           "$dest/llvm/bin/clang++" --version | head -n 1 | grep -q " $version" || { echo "LLVM version differs from the lock" >&2; exit 4; } ;;
     vulkan-headers) [ -f "$dest/vulkan-headers/include/vulkan/vulkan_core.h" ] || { echo 'Pinned Vulkan headers missing' >&2; exit 4; } ;;
     cmake) "$dest/cmake/bin/cmake" --version | head -n 1 | grep -q " $version$" || { echo "CMake version differs from the lock" >&2; exit 4; } ;;

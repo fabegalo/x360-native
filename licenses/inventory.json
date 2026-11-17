@@ -784,7 +784,7 @@
       "original": "Ubuntu gcc-12-base 12.3.0-1ubuntu1~22.04.3 /usr/share/doc/gcc-12-base/copyright",
       "license_file": "licenses/gcc-runtime.txt",
       "scope": "binary-linux",
-      "integration": "Linux packages: static libgcc unwind support (-static-libgcc), compiled by the pinned Clang. C++23 templates and the C++ runtime come from the separately identified libc++ and libc++abi.",
+      "integration": "GNU startup objects supplied by the pinned Linux sysroot; compiler-rt and libunwind supply the selected LLVM compiler support and C++ unwinding.",
       "obligations": "GCC Runtime Library Exception 3.1 permits distributing the resulting binaries under the project terms; preserve this notice.",
       "license_sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
     },
@@ -1611,6 +1611,30 @@
       "original": "https://github.com/catid/fp61/blob/master/fp61.h",
       "license_file": "licenses/fp61.txt",
       "license_sha256": "afe6101a827b2595aa38d948678736c7e7fb45e86cb5e5745d273397188c6fa0"
+    },
+    {
+      "id": "compiler-rt",
+      "origin": "https://github.com/llvm/llvm-project/tree/llvmorg-22.1.8/compiler-rt",
+      "revision": "22.1.8",
+      "spdx": "Apache-2.0 WITH LLVM-exception",
+      "original": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/compiler-rt/LICENSE.TXT",
+      "license_file": "licenses/compiler-rt.txt",
+      "scope": "binary (Linux)",
+      "integration": "Static compiler support and C++ exception unwinding from the existing pinned LLVM archive; used with the matching libc++ and libc++abi.",
+      "obligations": "Preserve complete upstream license, LLVM exceptions and legacy notices.",
+      "license_sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d"
+    },
+    {
+      "id": "libunwind",
+      "origin": "https://github.com/llvm/llvm-project/tree/llvmorg-22.1.8/libunwind",
+      "revision": "22.1.8",
+      "spdx": "Apache-2.0 WITH LLVM-exception",
+      "original": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/libunwind/LICENSE.TXT",
+      "license_file": "licenses/libunwind.txt",
+      "scope": "binary (Linux)",
+      "integration": "Static compiler support and C++ exception unwinding from the existing pinned LLVM archive; used with the matching libc++ and libc++abi.",
+      "obligations": "Preserve complete upstream license, LLVM exceptions and legacy notices.",
+      "license_sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
     }
   ],
   "header_attributions_sha256": "5c01d55d94e5109fedadc9518c8c26657aff01771b740614de727b4d3d61e45a",
@@ -3379,7 +3403,9 @@
         "glibc",
         "libcxx",
         "libcxxabi",
-        "fp61"
+        "fp61",
+        "compiler-rt",
+        "libunwind"
       ],
       "thirdparty_translation_units": [
         "thirdparty/excrypt/src/excrypt_aes.c",
@@ -6615,7 +6641,9 @@
         "glibc",
         "libcxx",
         "libcxxabi",
-        "fp61"
+        "fp61",
+        "compiler-rt",
+        "libunwind"
       ],
       "thirdparty_translation_units": [
         "thirdparty/excrypt/src/excrypt_aes.c",

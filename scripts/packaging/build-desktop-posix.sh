@@ -64,7 +64,8 @@ linux-x64 | linux-arm64)
   export PKG_CONFIG_SYSROOT_DIR="$sysroot"
   export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/$triplet/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib/pkgconfig"
   # The C++ runtime is linked statically, like the static CRT on Windows; glibc stays the system's.
-  links="-fuse-ld=lld -stdlib=libc++ -static-libstdc++ -static-libgcc"
+  # Clang's static-libgcc option also selects static libunwind with this runtime.
+  links="-fuse-ld=lld -stdlib=libc++ -rtlib=compiler-rt -unwindlib=libunwind -static-libstdc++ -static-libgcc"
   set -- "-DCMAKE_SYSROOT=$sysroot" "-DCMAKE_AR=$llvm/bin/llvm-ar" "-DCMAKE_RANLIB=$llvm/bin/llvm-ranlib" \
     '-DCMAKE_CXX_STANDARD_LIBRARIES=-Wl,-Bstatic -lc++abi -Wl,-Bdynamic' \
     "-DPKG_CONFIG_EXECUTABLE=$pkgconfig" "-DWAYLAND_SCANNER=$scanner"
