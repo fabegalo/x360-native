@@ -100,6 +100,28 @@ save/load, progression, input, audio and return-to-dashboard need their own evid
 Sanitize usernames, paths, account IDs and secrets in logs. Share screenshots only
 when you have permission; do not attach dumps containing proprietary data.
 
+### Testing the Linux ARM64 package on an original Nintendo Switch
+
+Switchroot Linux on Tegra X1 is a candidate for hardware testing. Boot an
+existing [Switchroot Linux installation](https://wiki.switchroot.org/wiki/linux)
+from Hekate and use its X11 or Wayland desktop. The published Linux ARM64
+package runs as a Linux application. Compatibility on this device is unverified.
+
+1. Record the Switch model, distribution, package tag and archive SHA-256.
+   In a terminal, collect `uname -m`, `getconf GNU_LIBC_VERSION` and
+   `getconf PAGESIZE`. The v1.34.6 package specifies ARMv8-A and glibc 2.35
+   or newer. If available, `vulkaninfo --summary` identifies the selected GPU
+   and driver. Report a software renderer explicitly.
+2. Extract the entire archive, run `./app/x360n --help`, then open
+   `./x360-native` in that desktop session. Record CLI startup, launcher
+   display and controller input separately. These checks need no Xbox files.
+3. With locally supplied originals, record preparation, then test dashboard
+   17559 on Xenos/Vulkan. Record the first rendered screen, navigation and
+   audio. If those work, launch one prepared game from My Games and return to
+   the dashboard. Include the title revision and the first failing stage or
+   error in the compatibility report. If preparation is killed, record any
+   out-of-memory message and available memory and swap.
+
 ## ReXGlue, patches and title changes
 
 Check behavior against the pinned SDK source, not an assumed API or an old wiki.
