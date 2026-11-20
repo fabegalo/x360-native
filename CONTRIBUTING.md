@@ -100,6 +100,31 @@ save/load, progression, input, audio and return-to-dashboard need their own evid
 Sanitize usernames, paths, account IDs and secrets in logs. Share screenshots only
 when you have permission; do not attach dumps containing proprietary data.
 
+### Proposed handheld target: dedicated Xbox 360 runtime on Nintendo Switch
+
+The requested experience on an original Nintendo Switch (Tegra X1) is to select
+an entry in Hekate and go directly to the Xbox 360 dashboard. From My Games the
+user launches a prepared title, then returns to the dashboard with the same
+profile and saves. This is a proposed host port; its runtime and driver design
+are open for maintainer review.
+
+A port would need a Switch boot target and hardware services for display, input,
+audio and storage. It would also need a way to prepare modules for that host ABI
+and run the dashboard and game using the existing shared console state. The
+current desktop supervisor launches host processes. How the dedicated runtime
+handles that transition is a separate design decision.
+
+For a hardware report, identify the target build, Switch model, and furthest
+observed step:
+
+1. Select the Hekate entry. Have a self-authored test program read a known SD
+   file and draw a visible change in response to a controller button.
+2. Launch a small prepared test title and return, preserving a test value across
+   the transition. Record display, audio, input and storage results separately.
+3. With locally supplied originals, identify dashboard 17559 and the title
+   revision. Demonstrate a visible dashboard, launch the game from My Games,
+   return, and verify that local profile and save data remain accessible.
+
 ## ReXGlue, patches and title changes
 
 Check behavior against the pinned SDK source, not an assumed API or an old wiki.
