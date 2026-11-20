@@ -100,27 +100,30 @@ save/load, progression, input, audio and return-to-dashboard need their own evid
 Sanitize usernames, paths, account IDs and secrets in logs. Share screenshots only
 when you have permission; do not attach dumps containing proprietary data.
 
-### Testing the Linux ARM64 package on an original Nintendo Switch
+### Proposed handheld target: dedicated Xbox 360 runtime on Nintendo Switch
 
-Switchroot Linux on Tegra X1 is a candidate for hardware testing. Boot an
-existing [Switchroot Linux installation](https://wiki.switchroot.org/wiki/linux)
-from Hekate and use its X11 or Wayland desktop. The published Linux ARM64
-package runs as a Linux application. Compatibility on this device is unverified.
+The requested experience on an original Nintendo Switch (Tegra X1) is to select
+an entry in Hekate and go directly to the Xbox 360 dashboard. From My Games the
+user launches a prepared title, then returns to the dashboard with the same
+profile and saves. This is a proposed host port; its runtime and driver design
+are open for maintainer review.
 
-1. Record the Switch model, distribution, package tag and archive SHA-256.
-   In a terminal, collect `uname -m`, `getconf GNU_LIBC_VERSION` and
-   `getconf PAGESIZE`. The v1.34.6 package specifies ARMv8-A and glibc 2.35
-   or newer. If available, `vulkaninfo --summary` identifies the selected GPU
-   and driver. Report a software renderer explicitly.
-2. Extract the entire archive, run `./app/x360n --help`, then open
-   `./x360-native` in that desktop session. Record CLI startup, launcher
-   display and controller input separately. These checks need no Xbox files.
-3. With locally supplied originals, record preparation, then test dashboard
-   17559 on Xenos/Vulkan. Record the first rendered screen, navigation and
-   audio. If those work, launch one prepared game from My Games and return to
-   the dashboard. Include the title revision and the first failing stage or
-   error in the compatibility report. If preparation is killed, record any
-   out-of-memory message and available memory and swap.
+A port would need a Switch boot target and hardware services for display, input,
+audio and storage. It would also need a way to prepare modules for that host ABI
+and run the dashboard and game using the existing shared console state. The
+current desktop supervisor launches host processes. How the dedicated runtime
+handles that transition is a separate design decision.
+
+For a hardware report, identify the target build, Switch model, and furthest
+observed step:
+
+1. Select the Hekate entry. Have a self-authored test program read a known SD
+   file and draw a visible change in response to a controller button.
+2. Launch a small prepared test title and return, preserving a test value across
+   the transition. Record display, audio, input and storage results separately.
+3. With locally supplied originals, identify dashboard 17559 and the title
+   revision. Demonstrate a visible dashboard, launch the game from My Games,
+   return, and verify that local profile and save data remain accessible.
 
 ## ReXGlue, patches and title changes
 
